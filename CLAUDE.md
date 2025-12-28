@@ -7,13 +7,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm install          # Install dependencies
 npm run build        # Compile TypeScript to ./dist
-npm start            # Start the server
+npm start            # Start the server in stdio mode (default)
+npm run start:http   # Start the server in HTTP mode on port 3000
 npm run watch        # Development build with file watching
 npm run debug        # Debug with MCP inspector
 npm test             # Run tests
 npm run test:watch   # Run tests with file watching
 npm run test:coverage # Run tests with coverage report
 ```
+
+## Running the Server
+
+### Stdio Mode (Local/Default)
+The default mode runs the server using stdio transport for local MCP clients:
+```bash
+npm start
+# or
+node dist/index.js
+```
+
+### HTTP Mode (Remote Hosting)
+Run as an HTTP server with SSE (Server-Sent Events) transport:
+```bash
+# Default port 3000
+npm run start:http
+
+# Custom port
+node dist/index.js --http --port 8080
+```
+
+When running in HTTP mode, the following endpoints are available:
+- `POST /sse` - MCP SSE endpoint for client connections
+- `GET /health` - Health check endpoint
+- `POST /message` - Message endpoint (handled by SSE transport)
 
 ## Git Best Practices
 

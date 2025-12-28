@@ -64,7 +64,45 @@ npm install
 # Build the project
 npm run build
 
+# Run locally with stdio (default)
+npm start
+
+# Run as HTTP server (for remote hosting)
+npm run start:http
+
+# Run as HTTP server on custom port
+node dist/index.js --http --port 8080
 ```
+
+## Deployment Modes
+
+### Local Mode (Stdio)
+The default mode uses stdio transport for local MCP clients like Claude Desktop:
+```bash
+npm start
+```
+
+### HTTP Server Mode
+Run as an HTTP server with SSE (Server-Sent Events) transport for remote hosting:
+```bash
+# Default port 3000
+npm run start:http
+
+# Custom port
+node dist/index.js --http --port 8080
+```
+
+When running in HTTP mode, the server exposes:
+- `POST /sse` - MCP SSE endpoint for client connections
+- `GET /health` - Health check endpoint (returns `{"status": "ok", "version": "0.1.2"}`)
+- `POST /message` - Message endpoint (handled by SSE transport)
+
+Example health check:
+```bash
+curl http://localhost:3000/health
+```
+
+
 
 ## Project Structure
 
