@@ -102,7 +102,41 @@ Example health check:
 curl http://localhost:3000/health
 ```
 
+### Docker Deployment
+Run the server in a Docker container with HTTP mode:
 
+```bash
+# Build the Docker image
+docker build -t ynab-mcp-server .
+
+# Run the container
+docker run -d \
+  -p 3000:3000 \
+  -e YNAB_API_TOKEN=your_token_here \
+  -e YNAB_BUDGET_ID=your_budget_id \
+  --name ynab-mcp \
+  ynab-mcp-server
+
+# Check health
+curl http://localhost:3000/health
+
+# View logs
+docker logs ynab-mcp
+
+# Stop and remove
+docker stop ynab-mcp
+docker rm ynab-mcp
+```
+
+Custom port:
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e YNAB_API_TOKEN=your_token_here \
+  --name ynab-mcp \
+  ynab-mcp-server \
+  node dist/index.js --http --port 8080
+```
 
 ## Project Structure
 

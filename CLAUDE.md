@@ -41,6 +41,20 @@ When running in HTTP mode, the following endpoints are available:
 - `GET /health` - Health check endpoint
 - `POST /message` - Message endpoint (handled by SSE transport)
 
+### Docker Mode
+Run as a Docker container (runs HTTP mode by default):
+```bash
+# Build and run
+docker build -t ynab-mcp-server .
+docker run -d -p 3000:3000 -e YNAB_API_TOKEN=your_token --name ynab-mcp ynab-mcp-server
+
+# Health check
+curl http://localhost:3000/health
+
+# View logs
+docker logs ynab-mcp
+```
+
 ## Git Best Practices
 
 ALWAYS use conventional commits format (Refer to https://www.conventionalcommits.org/en/v1.0.0/) when creating git commit messages.
