@@ -102,6 +102,16 @@ Example health check:
 curl http://localhost:3000/health
 ```
 
+#### Connecting MCP Clients to HTTP Server
+
+The HTTP/SSE mode is designed for MCP clients that support remote server connections. Clients connect to the SSE endpoint:
+
+```
+POST http://localhost:3000/sse
+```
+
+> **Note:** Claude Desktop currently only supports local stdio-based MCP servers (spawned via `command`). Use the [Local Development](#local-development) configuration for Claude Desktop. HTTP mode is intended for other MCP clients, web applications, or remote hosting scenarios.
+
 ### Docker Deployment
 Run the server in a Docker container with HTTP mode (runs on port 80 by default):
 
@@ -270,35 +280,65 @@ npx -y @smithery/cli install @calebl/ynab-mcp-server --client claude
 
 ### Local Development
 
-Add this configuration to your Claude Desktop config file:
+To set up the MCP server locally with Claude Desktop:
 
-**MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+**1. Clone and build the project:**
+```bash
+git clone https://github.com/calebl/ynab-mcp-server.git
+cd ynab-mcp-server
+npm install
+npm run build
+```
+
+**2. Get your YNAB Personal Access Token:**
+- Go to https://app.ynab.com/settings/developer
+- Create a new Personal Access Token
+- Copy the token (you'll only see it once)
+
+**3. Add the server to Claude Desktop:**
+
+Open your Claude Desktop config file:
+- **MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+
+Add the following configuration (replace the placeholders with your values):
 
 ```json
 {
   "mcpServers": {
     "ynab-mcp-server": {
       "command": "node",
-      "args":["/absolute/path/to/ynab-mcp-server/dist/index.js"]
+      "args": ["/absolute/path/to/ynab-mcp-server/dist/index.js"],
+      "env": {
+        "YNAB_API_TOKEN": "your_ynab_personal_access_token"
+      }
     }
   }
 }
 ```
 
-### After Publishing
+**4. Restart Claude Desktop** to load the new MCP server.
+
+**5. Verify the connection** by asking Claude: "List my YNAB budgets"
+
+> **Tip:** You can optionally add `"YNAB_BUDGET_ID": "your_default_budget_id"` to the `env` object to set a default budget, so you don't have to specify it with each request.
+
+### After Publishing (via npx)
 
 Add this configuration to your Claude Desktop config file:
 
-**MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+- **MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
     "ynab-mcp-server": {
       "command": "npx",
-      "args": ["ynab-mcp-server"]
+      "args": ["-y", "ynab-mcp-server"],
+      "env": {
+        "YNAB_API_TOKEN": "your_ynab_personal_access_token"
+      }
     }
   }
 }
