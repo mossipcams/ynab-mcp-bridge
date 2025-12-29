@@ -42,17 +42,20 @@ When running in HTTP mode, the following endpoints are available:
 - `POST /message` - Message endpoint (handled by SSE transport)
 
 ### Docker Mode
-Run as a Docker container (runs HTTP mode by default):
+Run as a Docker container (runs HTTP mode on port 80 by default):
 ```bash
 # Build and run
 docker build -t ynab-mcp-server .
-docker run -d -p 3000:3000 -e YNAB_API_TOKEN=your_token --name ynab-mcp ynab-mcp-server
+docker run -d -p 80:80 -e YNAB_API_TOKEN=your_token --name ynab-mcp ynab-mcp-server
 
 # Health check
-curl http://localhost:3000/health
+curl http://localhost/health
 
 # View logs
 docker logs ynab-mcp
+
+# Map to different host port
+docker run -d -p 3000:80 -e YNAB_API_TOKEN=your_token --name ynab-mcp ynab-mcp-server
 ```
 
 ## Git Best Practices

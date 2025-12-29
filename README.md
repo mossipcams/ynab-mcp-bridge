@@ -103,22 +103,22 @@ curl http://localhost:3000/health
 ```
 
 ### Docker Deployment
-Run the server in a Docker container with HTTP mode:
+Run the server in a Docker container with HTTP mode (runs on port 80 by default):
 
 ```bash
-# Build the Docker image
+# Build the Docker image (builds for linux/amd64)
 docker build -t ynab-mcp-server .
 
-# Run the container
+# Run the container on port 80
 docker run -d \
-  -p 3000:3000 \
+  -p 80:80 \
   -e YNAB_API_TOKEN=your_token_here \
   -e YNAB_BUDGET_ID=your_budget_id \
   --name ynab-mcp \
   ynab-mcp-server
 
 # Check health
-curl http://localhost:3000/health
+curl http://localhost/health
 
 # View logs
 docker logs ynab-mcp
@@ -128,7 +128,19 @@ docker stop ynab-mcp
 docker rm ynab-mcp
 ```
 
-Custom port:
+Map to different host port (e.g., 3000):
+```bash
+docker run -d \
+  -p 3000:80 \
+  -e YNAB_API_TOKEN=your_token_here \
+  --name ynab-mcp \
+  ynab-mcp-server
+
+# Access on port 3000
+curl http://localhost:3000/health
+```
+
+Custom container port:
 ```bash
 docker run -d \
   -p 8080:8080 \
@@ -136,6 +148,16 @@ docker run -d \
   --name ynab-mcp \
   ynab-mcp-server \
   node dist/index.js --http --port 8080
+```
+
+**Multi-platform builds:**
+The Dockerfile is configured for linux/amd64 by default. To build for other platforms:
+```bash
+# Build for multiple platforms using buildx
+docker buildx build --platform linux/amd64,linux/arm64 -t ynab-mcp-server .
+
+# Build for specific platform
+docker buildx build --platform linux/arm64 -t ynab-mcp-server .
 ```
 
 ## Project Structure
