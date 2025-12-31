@@ -4,6 +4,7 @@
   "description": "ynab-mcp-server MCP server",
   "author": "Caleb LeNoir <caleb.lenoir@hey.com>",
   "type": "module",
+  "module": "./dist/index.js",
   "bin": {
     "ynab-mcp-server": "./dist/index.js"
   },
@@ -34,10 +35,11 @@
     "cors": "^2.8.5",
     "express": "^5.2.1",
     "ynab": "^2.9.0",
-    "zod": "^3.23.8"
+    "zod": "^4"
   },
   "devDependencies": {
     "@modelcontextprotocol/inspector": "^0.16.5",
+    "@smithery/sdk": "^3.0.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^20.11.24",
