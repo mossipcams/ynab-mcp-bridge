@@ -20,6 +20,7 @@ import * as ListAccountsTool from "./tools/ListAccountsTool.js";
 import * as ListScheduledTransactionsTool from "./tools/ListScheduledTransactionsTool.js";
 import * as ImportTransactionsTool from "./tools/ImportTransactionsTool.js";
 import * as ListMonthsTool from "./tools/ListMonthsTool.js";
+import * as TransactionApprovalUITool from "./tools/TransactionApprovalUITool.js";
 
 const server = new McpServer({
   name: "ynab-mcp-server",
@@ -125,6 +126,12 @@ server.registerTool(ListMonthsTool.name, {
   description: ListMonthsTool.description,
   inputSchema: ListMonthsTool.inputSchema,
 }, async (input) => ListMonthsTool.execute(input, api));
+
+server.registerTool(TransactionApprovalUITool.name, {
+  title: "Transaction Approval UI",
+  description: TransactionApprovalUITool.description,
+  inputSchema: TransactionApprovalUITool.inputSchema,
+}, async (input) => TransactionApprovalUITool.execute(input, api));
 
 // Start the server
 async function main() {
