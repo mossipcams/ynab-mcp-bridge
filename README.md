@@ -3,7 +3,12 @@
 # ynab-mcp-server
 [![smithery badge](https://smithery.ai/badge/@calebl/ynab-mcp-server)](https://smithery.ai/server/@calebl/ynab-mcp-server)
 
-A Model Context Protocol (MCP) server built with mcp-framework. This MCP provides tools
+A Model Context Protocol (MCP) server for YNAB. It now supports both:
+
+* `stdio` mode for local tooling and debugging
+* authless `Streamable HTTP` mode for remote deployments such as an isolated Proxmox LXC
+
+This MCP provides tools
 for interacting with your YNAB budgets setup at https://ynab.com
 
 <a href="https://glama.ai/mcp/servers/@calebl/ynab-mcp-server">
@@ -20,6 +25,10 @@ use with the YNAB api.
 Specify env variables:
 * YNAB_API_TOKEN (required)
 * YNAB_BUDGET_ID (optional)
+* MCP_TRANSPORT (optional: `stdio` or `http`, default `stdio`)
+* MCP_HOST (optional, HTTP mode only, default `0.0.0.0`)
+* MCP_PORT (optional, HTTP mode only, default `3000`)
+* MCP_PATH (optional, HTTP mode only, default `/mcp`)
 
 ## Goal
 The goal of the project is to be able to interact with my YNAB budget via an AI conversation.
@@ -64,6 +73,68 @@ npm install
 # Build the project
 npm run build
 
+# Run locally over stdio
+npm run start:stdio
+
+# Run as an authless Streamable HTTP server
+npm run start:http
+```
+
+## Runtime Modes
+
+### stdio
+
+This preserves the original local process model:
+
+```bash
+node dist/index.js --transport stdio
+```
+
+### Streamable HTTP
+
+This is the remote-friendly mode for an isolated host or container:
+
+```bash
+node dist/index.js --transport http --host 0.0.0.0 --port 3000 --path /mcp
+```
+
+Equivalent environment-variable configuration:
+
+```bash
+MCP_TRANSPORT=http
+MCP_HOST=0.0.0.0
+MCP_PORT=3000
+MCP_PATH=/mcp
+node dist/index.js
+```
+
+Notes:
+
+* HTTP mode is stateless
+* HTTP mode is authless by design
+* the YNAB credential still stays server-side in `YNAB_API_TOKEN`
+
+## Proxmox LXC Deployment
+
+For an isolated Proxmox LXC, the intended setup is:
+
+1. Copy the repo into the container and install dependencies.
+2. Set `YNAB_API_TOKEN` and optionally `YNAB_BUDGET_ID`.
+3. Start the server in HTTP mode:
+
+```bash
+MCP_TRANSPORT=http \
+MCP_HOST=0.0.0.0 \
+MCP_PORT=3000 \
+MCP_PATH=/mcp \
+YNAB_API_TOKEN=your-token \
+node dist/index.js
+```
+
+The remote MCP endpoint will then be:
+
+```text
+http://<lxc-ip>:3000/mcp
 ```
 
 ## Project Structure
@@ -174,7 +245,7 @@ To install YNAB Budget Assistant for Claude Desktop automatically via [Smithery]
 npx -y @smithery/cli install @calebl/ynab-mcp-server --client claude
 ```
 
-### Local Development
+### Local Development Over stdio
 
 Add this configuration to your Claude Desktop config file:
 
@@ -186,7 +257,7 @@ Add this configuration to your Claude Desktop config file:
   "mcpServers": {
     "ynab-mcp-server": {
       "command": "node",
-      "args":["/absolute/path/to/ynab-mcp-server/dist/index.js"]
+      "args":["/absolute/path/to/ynab-mcp-server/dist/index.js", "--transport", "stdio"]
     }
   }
 }
@@ -204,11 +275,21 @@ Add this configuration to your Claude Desktop config file:
   "mcpServers": {
     "ynab-mcp-server": {
       "command": "npx",
-      "args": ["ynab-mcp-server"]
+      "args": ["ynab-mcp-server", "--transport", "stdio"]
     }
   }
 }
 ```
+
+### Remote HTTP Deployment
+
+If you are running this server on an isolated machine such as a Proxmox LXC, use HTTP mode and point your MCP-capable client at:
+
+```text
+http://<lxc-ip>:3000/mcp
+```
+
+This server does not require HTTP authorization headers in that mode.
 
 ### Other MCP Clients
 Check https://modelcontextprotocol.io/clients for other available clients.
