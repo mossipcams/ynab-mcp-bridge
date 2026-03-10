@@ -1,6 +1,23 @@
 import { createServer as createNodeServer } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer } from "./server.js";
+const CORS_HEADERS = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "OPTIONS, POST",
+    "access-control-allow-headers": "content-type, mcp-session-id, mcp-protocol-version, authorization",
+    "access-control-expose-headers": "Mcp-Session-Id",
+};
+function applyCorsHeaders(res) {
+    for (const [name, value] of Object.entries(CORS_HEADERS)) {
+        res.setHeader(name, value);
+    }
+}
+function getRequestPath(req) {
+    if (!req.url) {
+        return "/";
+    }
+    return new URL(req.url, "http://127.0.0.1").pathname;
+}
 async function readJsonBody(req) {
     const chunks = [];
     for await (const chunk of req) {
@@ -13,6 +30,7 @@ async function readJsonBody(req) {
 }
 function writeJson(res, statusCode, body) {
     res.statusCode = statusCode;
+    applyCorsHeaders(res);
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify(body));
 }
@@ -21,10 +39,16 @@ export async function startHttpServer(options = {}) {
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
     const server = createNodeServer(async (req, res) => {
-        if (req.url !== path) {
+        if (getRequestPath(req) !== path) {
             writeJson(res, 404, {
                 error: "Not found",
             });
+            return;
+        }
+        if (req.method === "OPTIONS") {
+            applyCorsHeaders(res);
+            res.statusCode = 204;
+            res.end();
             return;
         }
         if (req.method !== "POST") {
@@ -44,6 +68,7 @@ export async function startHttpServer(options = {}) {
         });
         try {
             const parsedBody = await readJsonBody(req);
+            applyCorsHeaders(res);
             await mcpServer.connect(transport);
             await transport.handleRequest(req, res, parsedBody);
         }

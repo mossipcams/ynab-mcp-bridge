@@ -112,6 +112,7 @@ Notes:
 
 * HTTP mode is stateless
 * HTTP mode is authless by design
+* HTTP mode now includes browser-friendly CORS headers and `OPTIONS` preflight handling
 * the YNAB credential still stays server-side in `YNAB_API_TOKEN`
 
 ## Proxmox LXC Deployment
@@ -135,6 +136,21 @@ The remote MCP endpoint will then be:
 
 ```text
 http://<lxc-ip>:3000/mcp
+```
+
+If you put the server behind Cloudflare Tunnel, point `cloudflared` at the local app port instead of the `/mcp` path:
+
+```yaml
+ingress:
+  - hostname: ynab.example.com
+    service: http://127.0.0.1:3000
+  - service: http_status:404
+```
+
+Your public MCP URL is then:
+
+```text
+https://ynab.example.com/mcp
 ```
 
 ## Project Structure
@@ -286,10 +302,15 @@ Add this configuration to your Claude Desktop config file:
 If you are running this server on an isolated machine such as a Proxmox LXC, use HTTP mode and point your MCP-capable client at:
 
 ```text
-http://<lxc-ip>:3000/mcp
+https://your-public-hostname/mcp
 ```
 
-This server does not require HTTP authorization headers in that mode.
+Notes:
+
+* this server does not require HTTP authorization headers in that mode
+* remote browser-based clients should use HTTPS
+* a plain `GET /mcp` returning `405 Method Not Allowed` is expected
+* when using Cloudflare Tunnel, tunnel to `http://127.0.0.1:3000` and give the client the public `/mcp` URL
 
 ### Other MCP Clients
 Check https://modelcontextprotocol.io/clients for other available clients.
