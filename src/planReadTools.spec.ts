@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as GetPlanDetailsTool from "./tools/GetPlanDetailsTool.js";
 import * as GetPlanMonthTool from "./tools/GetPlanMonthTool.js";
 import * as GetPlanSettingsTool from "./tools/GetPlanSettingsTool.js";
+import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
 import * as ListPlansTool from "./tools/ListPlansTool.js";
 
 function parseResponseText(result: Awaited<ReturnType<typeof ListPlansTool.execute>>) {
@@ -128,6 +129,51 @@ describe("plan read tools", () => {
         activity: 30000,
         to_be_budgeted: 60000,
       },
+    });
+  });
+
+  it("lists plan month summaries", async () => {
+    const api = {
+      months: {
+        getPlanMonths: vi.fn().mockResolvedValue({
+          data: {
+            months: [
+              {
+                month: "2026-03-01",
+                income: 100000,
+                budgeted: 40000,
+                activity: 30000,
+                to_be_budgeted: 60000,
+                deleted: false,
+              },
+              {
+                month: "2026-02-01",
+                income: 90000,
+                budgeted: 35000,
+                activity: 28000,
+                to_be_budgeted: 55000,
+                deleted: true,
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await ListPlanMonthsTool.execute({ planId: "plan-1" }, api as any);
+
+    expect(api.months.getPlanMonths).toHaveBeenCalledWith("plan-1");
+    expect(parseResponseText(result)).toEqual({
+      months: [
+        {
+          month: "2026-03-01",
+          income: 100000,
+          budgeted: 40000,
+          activity: 30000,
+          to_be_budgeted: 60000,
+        },
+      ],
+      month_count: 1,
     });
   });
 });
