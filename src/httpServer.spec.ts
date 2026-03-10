@@ -32,6 +32,7 @@ describe("startHttpServer", () => {
     const result = await client.listTools();
 
     expect(result.tools.map((tool) => tool.name)).toContain("ynab_list_plans");
+    expect(result.tools.map((tool) => tool.name)).toContain("ynab_get_mcp_version");
 
     await transport.close();
   });

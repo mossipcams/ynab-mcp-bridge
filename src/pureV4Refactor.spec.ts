@@ -10,6 +10,7 @@ describe("pure v4 refactor", () => {
     expect(readdirSync(toolsDir).sort()).toEqual([
       "GetAccountTool.ts",
       "GetCategoryTool.ts",
+      "GetMcpVersionTool.ts",
       "GetMoneyMovementGroupsByMonthTool.ts",
       "GetMoneyMovementsByMonthTool.ts",
       "GetMonthCategoryTool.ts",

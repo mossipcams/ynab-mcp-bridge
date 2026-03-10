@@ -1,0 +1,8 @@
+{
+  "packages": {
+    ".": {
+      "package-name": "ynab-mcp-bridge",
+      "release-type": "node"
+    }
+  }
+}

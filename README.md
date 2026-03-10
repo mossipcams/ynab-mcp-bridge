@@ -26,6 +26,7 @@ The server exposes a read-only plan-based toolset:
 * `ynab_get_plan`
 * `ynab_get_plan_settings`
 * `ynab_get_plan_month`
+* `ynab_get_mcp_version`
 * `ynab_list_categories`
 * `ynab_get_category`
 * `ynab_get_month_category`

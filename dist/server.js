@@ -1,7 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { getPackageInfo } from "./packageInfo.js";
 import { createYnabApi as createSdkYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
 import * as GetCategoryTool from "./tools/GetCategoryTool.js";
+import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
 import * as GetMoneyMovementGroupsByMonthTool from "./tools/GetMoneyMovementGroupsByMonthTool.js";
 import * as GetMoneyMovementsByMonthTool from "./tools/GetMoneyMovementsByMonthTool.js";
 import * as GetMonthCategoryTool from "./tools/GetMonthCategoryTool.js";
@@ -12,11 +14,13 @@ import * as GetPlanSettingsTool from "./tools/GetPlanSettingsTool.js";
 import * as GetTransactionsByMonthTool from "./tools/GetTransactionsByMonthTool.js";
 import * as ListPlanCategoriesTool from "./tools/ListPlanCategoriesTool.js";
 import * as ListPlansTool from "./tools/ListPlansTool.js";
+const packageInfo = getPackageInfo();
 export const SERVER_INFO = {
-    name: "ynab-mcp-bridge",
-    version: "0.1.2",
+    name: packageInfo.name,
+    version: packageInfo.version,
 };
 const toolRegistrations = [
+    { title: "Get MCP Version", module: GetMcpVersionTool },
     { title: "List Plans", module: ListPlansTool },
     { title: "Get Plan", module: GetPlanDetailsTool },
     { title: "Get Plan Settings", module: GetPlanSettingsTool },
