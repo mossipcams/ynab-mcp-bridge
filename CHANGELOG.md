@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.2.0...ynab-mcp-bridge-v0.3.0) (2026-03-10)
+
+
+### Features
+
+* release expanded read-only YNAB tools ([#5](https://github.com/mossipcams/ynab-mcp-bridge/issues/5)) ([4c5136a](https://github.com/mossipcams/ynab-mcp-bridge/commit/4c5136abdeadd3092e3292dba270da918cc20e56))
+
+
+### Bug Fixes
+
+* enforce releasable PR titles for release automation ([a008efa](https://github.com/mossipcams/ynab-mcp-bridge/commit/a008efae5a6273116edbba7afd5844de6e68379b))
+
 ## [0.2.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.1.2...ynab-mcp-bridge-v0.2.0) (2026-03-10)
 
 
