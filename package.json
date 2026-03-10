@@ -11,7 +11,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && chmod +x dist/index.js",
+    "build": "rm -rf dist && tsc && chmod +x dist/index.js",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "start": "node dist/index.js",
@@ -27,7 +27,7 @@
     "@types/axios": "^0.14.4",
     "axios": "^1.8.4",
     "commander": "^14.0.1",
-    "ynab": "^2.9.0",
+    "ynab": "^4.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

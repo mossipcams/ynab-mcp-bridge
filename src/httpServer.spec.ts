@@ -31,7 +31,7 @@ describe("startHttpServer", () => {
 
     const result = await client.listTools();
 
-    expect(result.tools.map((tool) => tool.name)).toContain("ynab_list_budgets");
+    expect(result.tools.map((tool) => tool.name)).toContain("ynab_list_plans");
 
     await transport.close();
   });
