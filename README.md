@@ -36,6 +36,10 @@ The server exposes a read-only plan-based toolset:
 * `ynab_get_money_movements_by_month`
 * `ynab_get_money_movement_groups_by_month`
 
+## Rate Limiting
+
+YNAB documents a limit of 200 requests per rolling hour per access token. The bridge now applies a shared per-token sliding-window limiter in the YNAB client layer and retries `429 Too Many Requests` responses conservatively.
+
 ## Quick Start
 
 ```bash
