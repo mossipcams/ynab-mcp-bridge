@@ -12,6 +12,24 @@ describe("release-please automation", () => {
     expect(workflow).toContain("manifest-file: .release-please-manifest.json");
   });
 
+  it("defines a PR title validation workflow for releasable conventional commits", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/validate-pr-title.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(workflow).toContain("pull_request_target");
+    expect(workflow).toContain("PR title must use a releasable Conventional Commit title");
+    expect(workflow).toContain("feat|fix|deps|revert");
+  });
+
+  it("documents squash merge and releasable PR titles for release automation", () => {
+    const instructions = readFileSync(new URL("../CLAUDE.md", import.meta.url), "utf8");
+
+    expect(instructions).toContain("Use squash merge");
+    expect(instructions).toContain("The PR title must be a releasable Conventional Commit");
+  });
+
   it("tracks the current package version in the release manifest", () => {
     const config = JSON.parse(
       readFileSync(new URL("../.release-please-config.json", import.meta.url), "utf8"),
