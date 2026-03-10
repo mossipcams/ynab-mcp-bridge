@@ -17,7 +17,7 @@ import * as ListScheduledTransactionsTool from "./tools/ListScheduledTransaction
 import * as UpdateCategoryBudgetTool from "./tools/UpdateCategoryBudgetTool.js";
 import * as UpdateTransactionTool from "./tools/UpdateTransactionTool.js";
 export const SERVER_INFO = {
-    name: "ynab-mcp-server",
+    name: "ynab-mcp-bridge",
     version: "0.1.2",
 };
 const toolRegistrations = [

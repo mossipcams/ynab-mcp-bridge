@@ -1,7 +1,7 @@
-[![MseeP.ai Security Assessment Badge](https://mseep.net/mseep-audited.png)](https://mseep.ai/app/calebl-ynab-mcp-server)
+[![MseeP.ai Security Assessment Badge](https://mseep.net/mseep-audited.png)](https://mseep.ai/app/mossipcams-ynab-mcp-bridge)
 
-# ynab-mcp-server
-[![smithery badge](https://smithery.ai/badge/@calebl/ynab-mcp-server)](https://smithery.ai/server/@calebl/ynab-mcp-server)
+# ynab-mcp-bridge
+[![smithery badge](https://smithery.ai/badge/@mossipcams/ynab-mcp-bridge)](https://smithery.ai/server/@mossipcams/ynab-mcp-bridge)
 
 A Model Context Protocol (MCP) server for YNAB. It now supports both:
 
@@ -11,8 +11,8 @@ A Model Context Protocol (MCP) server for YNAB. It now supports both:
 This MCP provides tools
 for interacting with your YNAB budgets setup at https://ynab.com
 
-<a href="https://glama.ai/mcp/servers/@calebl/ynab-mcp-server">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@calebl/ynab-mcp-server/badge" alt="YNAB Server MCP server" />
+<a href="https://glama.ai/mcp/servers/@mossipcams/ynab-mcp-bridge">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@mossipcams/ynab-mcp-bridge/badge" alt="YNAB Bridge MCP server" />
 </a>
 
 In order to have an AI interact with this tool, you will need to get your Personal Access Token
@@ -140,7 +140,7 @@ http://<lxc-ip>:3000/mcp
 ## Project Structure
 
 ```
-ynab-mcp-server/
+ynab-mcp-bridge/
 ├── src/
 │   ├── tools/        # MCP Tools
 │   └── index.ts      # Server entry point
@@ -219,7 +219,7 @@ export default MyTool;
    ```bash
    npm run build
    npm link
-   ynab-mcp-server  # Test your CLI locally
+   ynab-mcp-bridge  # Test your CLI locally
    ```
 
 3. Login to npm (create account if necessary):
@@ -239,10 +239,10 @@ After publishing, users can add it to their claude desktop client (read below) o
 
 ### Installing via Smithery
 
-To install YNAB Budget Assistant for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@calebl/ynab-mcp-server):
+To install YNAB Budget Assistant for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@mossipcams/ynab-mcp-bridge):
 
 ```bash
-npx -y @smithery/cli install @calebl/ynab-mcp-server --client claude
+npx -y @smithery/cli install @mossipcams/ynab-mcp-bridge --client claude
 ```
 
 ### Local Development Over stdio
@@ -255,9 +255,9 @@ Add this configuration to your Claude Desktop config file:
 ```json
 {
   "mcpServers": {
-    "ynab-mcp-server": {
+    "ynab-mcp-bridge": {
       "command": "node",
-      "args":["/absolute/path/to/ynab-mcp-server/dist/index.js", "--transport", "stdio"]
+      "args":["/absolute/path/to/ynab-mcp-bridge/dist/index.js", "--transport", "stdio"]
     }
   }
 }
@@ -273,9 +273,9 @@ Add this configuration to your Claude Desktop config file:
 ```json
 {
   "mcpServers": {
-    "ynab-mcp-server": {
+    "ynab-mcp-bridge": {
       "command": "npx",
-      "args": ["ynab-mcp-server", "--transport", "stdio"]
+      "args": ["ynab-mcp-bridge", "--transport", "stdio"]
     }
   }
 }

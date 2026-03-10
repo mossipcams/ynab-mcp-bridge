@@ -1,11 +1,11 @@
 {
-  "name": "ynab-mcp-server",
+  "name": "ynab-mcp-bridge",
   "version": "0.1.2",
-  "description": "ynab-mcp-server MCP server",
+  "description": "ynab-mcp-bridge MCP server",
   "author": "Caleb LeNoir <caleb.lenoir@hey.com>",
   "type": "module",
   "bin": {
-    "ynab-mcp-server": "./dist/index.js"
+    "ynab-mcp-bridge": "./dist/index.js"
   },
   "files": [
     "dist"
