@@ -18,6 +18,9 @@ npm run test:coverage # Run tests with coverage report
 ## Git Best Practices
 
 ALWAYS use conventional commits format (Refer to https://www.conventionalcommits.org/en/v1.0.0/) when creating git commit messages.
+Use squash merge for PRs that should trigger release automation so the commit that lands on `main` matches the PR title.
+The PR title must be a releasable Conventional Commit such as `feat: ...`, `fix: ...`, `deps: ...`, or `revert: ...`.
+Do not open PRs, create commits for, push to, or take any other action against Caleb's repo (`calebl/ynab-mcp-server`) unless the user explicitly asks for that target repo.
 
 ## Architecture Overview
 
