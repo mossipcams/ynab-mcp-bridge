@@ -382,7 +382,6 @@ describe("startHttpServer", () => {
       id: null,
     });
   });
-
   it("returns 404 for non-MCP paths", async () => {
     const httpServer = await startHttpServer({
       host: "127.0.0.1",

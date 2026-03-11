@@ -424,6 +424,18 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
       return;
     }
 
+    if (req.method === "GET") {
+      writeJson(res, 405, {
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Method not allowed.",
+        },
+        id: null,
+      });
+      return;
+    }
+
     try {
       await handleTransportRequest(req, res, sessions, createManagedSession);
     } catch (error) {
