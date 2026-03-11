@@ -227,6 +227,18 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
       return;
     }
 
+    if (req.method === "GET") {
+      writeJson(res, 405, {
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Method not allowed.",
+        },
+        id: null,
+      });
+      return;
+    }
+
     try {
       const parsedBody = req.method === "POST" ? await readJsonBody(req) : undefined;
       const sessionId = getSessionId(req);
