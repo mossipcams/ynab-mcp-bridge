@@ -289,6 +289,59 @@ describe("startHttpServer", () => {
     });
   });
 
+  it("allows a session-scoped GET stream after initialization", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "get-stream-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    const sessionId = initializeResponse.headers.get("mcp-session-id");
+
+    expect(initializeResponse.status).toBe(200);
+    expect(sessionId).toBeTruthy();
+
+    const streamResponse = await fetch(httpServer.url, {
+      headers: {
+        Accept: "text/event-stream",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "Mcp-Session-Id": sessionId ?? "",
+      },
+    });
+
+    expect(streamResponse.status).toBe(200);
+    expect(streamResponse.headers.get("content-type")).toContain("text/event-stream");
+    expect(streamResponse.headers.get("mcp-session-id")).toBe(sessionId);
+
+    await streamResponse.body?.cancel();
+  });
+
   it("keeps authless probing and MCP transport signals consistent for remote clients", async () => {
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
