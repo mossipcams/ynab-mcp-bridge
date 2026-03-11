@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { startHttpServer } from "./httpServer.js";
 
 describe("startHttpServer", () => {
@@ -288,6 +289,99 @@ describe("startHttpServer", () => {
     });
   });
 
+  it("keeps authless probing and MCP transport signals consistent for remote clients", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const probeResponse = await fetch(new URL("/.well-known/oauth-protected-resource/mcp", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(probeResponse.status).toBe(404);
+    await expect(probeResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
+
+    const getResponse = await fetch(httpServer.url, {
+      headers: {
+        Accept: "text/event-stream",
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(getResponse.status).toBe(405);
+    expect(getResponse.headers.get("allow")).toBe("POST, DELETE");
+    await expect(getResponse.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Method not allowed.",
+      },
+      id: null,
+    });
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "remote-contract-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(initializeResponse.status).toBe(200);
+    expect(initializeResponse.headers.get("mcp-session-id")).toBeTruthy();
+    expect(initializeResponse.headers.get("content-type")).toContain("text/event-stream");
+  });
+
+  it("returns the same explicit method contract for unsupported MCP endpoint methods", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "PUT",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, POST, DELETE");
+    await expect(response.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Method not allowed.",
+      },
+      id: null,
+    });
+  });
   it("returns 404 for non-MCP paths", async () => {
     const httpServer = await startHttpServer({
       host: "127.0.0.1",
@@ -337,6 +431,47 @@ describe("startHttpServer", () => {
 
     await firstClient.close();
     await secondClient.close();
+  });
+
+  it("uses the first advertised session id when repeated MCP session headers are present", async () => {
+    const httpServer = await startHttpServer({
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const client = new Client({
+      name: "ynab-mcp-bridge-session-header-test",
+      version: "1.0.0",
+    });
+    const transport = new StreamableHTTPClientTransport(new URL(httpServer.url));
+
+    await client.connect(transport);
+
+    const headers = new Headers({
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+      "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+    });
+    headers.append("Mcp-Session-Id", transport.sessionId ?? "");
+    headers.append("Mcp-Session-Id", "stale-session-id");
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 99,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    await expect(response.text()).resolves.toContain("\"name\":\"ynab_get_mcp_version\"");
+
+    await client.close();
   });
 
   it("returns a client error for malformed JSON without breaking later requests", async () => {
