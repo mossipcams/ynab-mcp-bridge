@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_money_movement_groups_by_month";
 export const description = "Gets money movement groups for a single plan month.";
 export const inputSchema = {
@@ -8,8 +8,7 @@ export const inputSchema = {
 };
 export async function execute(input, api) {
     try {
-        const planId = getPlanId(input.planId);
-        const response = await api.moneyMovements.getMoneyMovementGroupsByMonth(planId, input.month);
+        const response = await withResolvedPlan(input.planId, api, async (planId) => api.moneyMovements.getMoneyMovementGroupsByMonth(planId, input.month));
         return toTextResult({
             money_movement_groups: response.data.money_movement_groups,
             count: response.data.money_movement_groups.length,

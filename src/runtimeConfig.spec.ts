@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveRuntimeConfig } from "./runtimeConfig.js";
+import { assertBackendEnvironment, getBackendReadiness, resolveRuntimeConfig } from "./runtimeConfig.js";
 
 describe("resolveRuntimeConfig", () => {
   it("prefers explicit CLI flags for http mode", () => {
@@ -51,5 +51,29 @@ describe("resolveRuntimeConfig", () => {
     expect(() => resolveRuntimeConfig(["--port", "abc"], {})).toThrow(
       "Invalid port: abc",
     );
+  });
+
+  it("fails fast when YNAB_API_TOKEN is missing", () => {
+    expect(() => assertBackendEnvironment({})).toThrow("YNAB_API_TOKEN is required.");
+  });
+
+  it("reports whether plan resolution is configured or dynamic", () => {
+    expect(getBackendReadiness({ YNAB_API_TOKEN: "token-1", YNAB_PLAN_ID: "plan-1" })).toEqual({
+      checks: {
+        ynabApiToken: true,
+        ynabPlanIdConfigured: true,
+      },
+      planResolution: "configured",
+      status: "ok",
+    });
+
+    expect(getBackendReadiness({ YNAB_API_TOKEN: "token-1" })).toEqual({
+      checks: {
+        ynabApiToken: true,
+        ynabPlanIdConfigured: false,
+      },
+      planResolution: "dynamic",
+      status: "ok",
+    });
   });
 });

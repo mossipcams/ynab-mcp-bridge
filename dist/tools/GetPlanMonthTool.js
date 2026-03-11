@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_plan_month";
 export const description = "Gets a single plan month snapshot for budgeting analysis.";
 export const inputSchema = {
@@ -8,9 +8,8 @@ export const inputSchema = {
 };
 export async function execute(input, api) {
     try {
-        const planId = getPlanId(input.planId);
         const month = input.month || "current";
-        const response = await api.months.getPlanMonth(planId, month);
+        const response = await withResolvedPlan(input.planId, api, async (planId) => api.months.getPlanMonth(planId, month));
         return toTextResult({
             month: response.data.month,
         });

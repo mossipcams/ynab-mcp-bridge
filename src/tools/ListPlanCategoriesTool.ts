@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_list_categories";
 export const description = "Lists category groups and categories for a single YNAB plan.";
@@ -11,8 +11,7 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string }, api: ynab.API) {
   try {
-    const planId = getPlanId(input.planId);
-    const response = await api.categories.getCategories(planId);
+    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.categories.getCategories(planId));
 
     return toTextResult({
       category_groups: response.data.category_groups

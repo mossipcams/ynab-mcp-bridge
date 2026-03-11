@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_payee";
 export const description = "Gets a single payee by ID.";
@@ -12,8 +12,7 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string; payeeId: string }, api: ynab.API) {
   try {
-    const planId = getPlanId(input.planId);
-    const response = await api.payees.getPayeeById(planId, input.payeeId);
+    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.payees.getPayeeById(planId, input.payeeId));
     return toTextResult({
       payee: response.data.payee,
     });

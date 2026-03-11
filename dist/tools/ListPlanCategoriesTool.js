@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_list_categories";
 export const description = "Lists category groups and categories for a single YNAB plan.";
 export const inputSchema = {
@@ -7,8 +7,7 @@ export const inputSchema = {
 };
 export async function execute(input, api) {
     try {
-        const planId = getPlanId(input.planId);
-        const response = await api.categories.getCategories(planId);
+        const response = await withResolvedPlan(input.planId, api, async (planId) => api.categories.getCategories(planId));
         return toTextResult({
             category_groups: response.data.category_groups
                 .filter((group) => !group.deleted && !group.hidden)
