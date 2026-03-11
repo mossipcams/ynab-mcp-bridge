@@ -5,7 +5,6 @@ import type { AddressInfo } from "node:net";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
-import { getBackendReadiness } from "./runtimeConfig.js";
 import { createServer } from "./server.js";
 import { resetPlanResolutionState } from "./tools/planToolUtils.js";
 
@@ -84,7 +83,6 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const host = options.host ?? "0.0.0.0";
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
-  const healthPath = "/health";
   const sessions = new Map<string, ManagedSession>();
 
   function removeSession(sessionId: string | undefined) {
@@ -135,14 +133,6 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
 
   const server = createNodeServer(async (req, res) => {
     const requestPath = getRequestPath(req);
-
-    if (requestPath === healthPath && req.method === "GET") {
-      writeJson(res, 200, {
-        transport: "http",
-        ...getBackendReadiness(process.env),
-      });
-      return;
-    }
 
     if (requestPath !== path) {
       writeJson(res, 404, {
