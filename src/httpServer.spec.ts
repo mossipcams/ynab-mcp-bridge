@@ -110,7 +110,7 @@ describe("startHttpServer", () => {
     expect(response.headers.get("access-control-expose-headers")).toContain("Mcp-Session-Id");
   });
 
-  it("serves OAuth protected resource metadata for path-aware remote probing", async () => {
+  it("does not expose OAuth protected resource metadata for path-aware probing on an authless server", async () => {
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
@@ -126,14 +126,14 @@ describe("startHttpServer", () => {
       },
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(404);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     await expect(response.json()).resolves.toEqual({
-      resource: httpServer.url,
+      error: "Not found",
     });
   });
 
-  it("serves OAuth protected resource metadata at the root well-known endpoint", async () => {
+  it("does not expose OAuth protected resource metadata at the root well-known endpoint on an authless server", async () => {
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
@@ -149,14 +149,14 @@ describe("startHttpServer", () => {
       },
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(404);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     await expect(response.json()).resolves.toEqual({
-      resource: httpServer.url,
+      error: "Not found",
     });
   });
 
-  it("supports browser preflight requests for OAuth protected resource metadata", async () => {
+  it("still applies origin validation to path-aware probing URLs", async () => {
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
@@ -166,21 +166,19 @@ describe("startHttpServer", () => {
     cleanups.push(() => httpServer.close());
 
     const response = await fetch(new URL("/.well-known/oauth-protected-resource/mcp", httpServer.url), {
-      method: "OPTIONS",
       headers: {
-        Origin: "https://claude.ai",
-        "Access-Control-Request-Method": "GET",
-        "Access-Control-Request-Headers": "mcp-protocol-version",
+        Origin: "https://evil.example",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
       },
     });
 
-    expect(response.status).toBe(204);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
-    expect(response.headers.get("access-control-allow-methods")).toContain("GET");
-    expect(response.headers.get("access-control-allow-headers")).toContain("mcp-protocol-version");
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Forbidden origin",
+    });
   });
 
-  it("advertises the public MCP resource URL from forwarded headers", async () => {
+  it("ignores forwarded headers on probing URLs because authless servers do not advertise OAuth resource metadata", async () => {
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
       host: "0.0.0.0",
@@ -198,8 +196,9 @@ describe("startHttpServer", () => {
       },
     });
 
+    expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      resource: "https://bridge.example.com/mcp",
+      error: "Not found",
     });
   });
 
@@ -240,7 +239,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("rejects protected resource metadata probes from untrusted origins", async () => {
+  it("rejects authless probing URLs from untrusted origins before returning 404", async () => {
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",

@@ -27,14 +27,6 @@ function getFirstHeaderValue(value) {
     }
     return value?.[0]?.split(",")[0]?.trim();
 }
-function getProtectedResourceMetadataPaths(path) {
-    const basePath = "/.well-known/oauth-protected-resource";
-    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-    if (normalizedPath === "/") {
-        return new Set([basePath]);
-    }
-    return new Set([basePath, `${basePath}${normalizedPath}`]);
-}
 function parseHostName(host) {
     if (!host) {
         return undefined;
@@ -48,17 +40,6 @@ function parseHostName(host) {
 }
 function isLoopbackHostname(hostname) {
     return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
-}
-function getPublicBaseUrl(req) {
-    const forwardedProto = getFirstHeaderValue(req.headers["x-forwarded-proto"]);
-    const forwardedHost = getFirstHeaderValue(req.headers["x-forwarded-host"]);
-    const host = forwardedHost ?? getFirstHeaderValue(req.headers.host);
-    const socket = req.socket;
-    const protocol = forwardedProto ?? (socket.encrypted ? "https" : "http");
-    if (!host) {
-        return undefined;
-    }
-    return `${protocol}://${host}`;
 }
 function getRequestHostName(req) {
     const forwardedHost = getFirstHeaderValue(req.headers["x-forwarded-host"]);
@@ -85,12 +66,6 @@ function isOriginAllowed(req, allowedOrigins) {
     catch {
         return false;
     }
-}
-function getProtectedResourceMetadata(req, path, fallbackUrl) {
-    const baseUrl = getPublicBaseUrl(req) ?? new URL(fallbackUrl).origin;
-    return {
-        resource: new URL(path, `${baseUrl}/`).href,
-    };
 }
 async function readJsonBody(req) {
     const chunks = [];
@@ -121,7 +96,6 @@ export async function startHttpServer(options = {}) {
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
     const sessions = new Map();
-    const protectedResourceMetadataPaths = getProtectedResourceMetadataPaths(path);
     function removeSession(sessionId) {
         if (!sessionId) {
             return;
@@ -173,10 +147,6 @@ export async function startHttpServer(options = {}) {
             applyCorsHeaders(res);
             res.statusCode = 204;
             res.end();
-            return;
-        }
-        if (protectedResourceMetadataPaths.has(requestPath)) {
-            writeJson(res, 200, getProtectedResourceMetadata(req, path, `http://${host}:${port}${path}`));
             return;
         }
         if (requestPath !== path) {
