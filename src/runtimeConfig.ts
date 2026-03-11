@@ -8,8 +8,7 @@ export type RuntimeConfig = {
 };
 
 type EnvConfig = Record<string, string | undefined>;
-
-export type BackendReadiness = {
+type BackendReadiness = {
   checks: {
     ynabApiToken: boolean;
     ynabPlanIdConfigured: boolean;
@@ -32,7 +31,7 @@ function hasValue(value: string | undefined) {
   return Boolean(value?.trim());
 }
 
-export function getBackendReadiness(env: EnvConfig): BackendReadiness {
+function getBackendReadiness(env: EnvConfig): BackendReadiness {
   const ynabApiToken = hasValue(env.YNAB_API_TOKEN);
   const ynabPlanIdConfigured = hasValue(env.YNAB_PLAN_ID);
 

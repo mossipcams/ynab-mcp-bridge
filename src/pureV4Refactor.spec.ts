@@ -51,6 +51,7 @@ describe("pure v4 refactor", () => {
 
     expect(readme).toContain("YNAB_PLAN_ID");
     expect(readme).not.toContain("YNAB_BUDGET_ID");
+    expect(readme).not.toContain("GET /health");
   });
 
   it("documents that PRs should default to the fork instead of upstream", () => {

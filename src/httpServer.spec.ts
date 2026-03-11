@@ -107,7 +107,7 @@ describe("startHttpServer", () => {
     expect(response.headers.get("access-control-expose-headers")).toContain("Mcp-Session-Id");
   });
 
-  it("exposes a health endpoint with backend readiness details", async () => {
+  it("returns 404 for non-MCP paths", async () => {
     const httpServer = await startHttpServer({
       host: "127.0.0.1",
       port: 0,
@@ -116,16 +116,10 @@ describe("startHttpServer", () => {
 
     const response = await fetch(new URL("/health", httpServer.url));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(404);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     await expect(response.json()).resolves.toEqual({
-      checks: {
-        ynabApiToken: true,
-        ynabPlanIdConfigured: false,
-      },
-      planResolution: "dynamic",
-      status: "ok",
-      transport: "http",
+      error: "Not found",
     });
   });
 

@@ -2,7 +2,6 @@ import { createServer as createNodeServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { getBackendReadiness } from "./runtimeConfig.js";
 import { createServer } from "./server.js";
 import { resetPlanResolutionState } from "./tools/planToolUtils.js";
 const CORS_HEADERS = {
@@ -49,7 +48,6 @@ export async function startHttpServer(options = {}) {
     const host = options.host ?? "0.0.0.0";
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
-    const healthPath = "/health";
     const sessions = new Map();
     function removeSession(sessionId) {
         if (!sessionId) {
@@ -92,13 +90,6 @@ export async function startHttpServer(options = {}) {
     }
     const server = createNodeServer(async (req, res) => {
         const requestPath = getRequestPath(req);
-        if (requestPath === healthPath && req.method === "GET") {
-            writeJson(res, 200, {
-                transport: "http",
-                ...getBackendReadiness(process.env),
-            });
-            return;
-        }
         if (requestPath !== path) {
             writeJson(res, 404, {
                 error: "Not found",

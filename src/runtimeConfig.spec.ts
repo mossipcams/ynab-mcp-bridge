@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertBackendEnvironment, getBackendReadiness, resolveRuntimeConfig } from "./runtimeConfig.js";
+import { assertBackendEnvironment, resolveRuntimeConfig } from "./runtimeConfig.js";
 
 describe("resolveRuntimeConfig", () => {
   it("prefers explicit CLI flags for http mode", () => {
@@ -58,7 +58,7 @@ describe("resolveRuntimeConfig", () => {
   });
 
   it("reports whether plan resolution is configured or dynamic", () => {
-    expect(getBackendReadiness({ YNAB_API_TOKEN: "token-1", YNAB_PLAN_ID: "plan-1" })).toEqual({
+    expect(assertBackendEnvironment({ YNAB_API_TOKEN: "token-1", YNAB_PLAN_ID: "plan-1" })).toEqual({
       checks: {
         ynabApiToken: true,
         ynabPlanIdConfigured: true,
@@ -67,7 +67,7 @@ describe("resolveRuntimeConfig", () => {
       status: "ok",
     });
 
-    expect(getBackendReadiness({ YNAB_API_TOKEN: "token-1" })).toEqual({
+    expect(assertBackendEnvironment({ YNAB_API_TOKEN: "token-1" })).toEqual({
       checks: {
         ynabApiToken: true,
         ynabPlanIdConfigured: false,

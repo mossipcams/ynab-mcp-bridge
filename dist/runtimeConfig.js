@@ -8,7 +8,7 @@ function readFlag(args, name) {
 function hasValue(value) {
     return Boolean(value?.trim());
 }
-export function getBackendReadiness(env) {
+function getBackendReadiness(env) {
     const ynabApiToken = hasValue(env.YNAB_API_TOKEN);
     const ynabPlanIdConfigured = hasValue(env.YNAB_PLAN_ID);
     return {

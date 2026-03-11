@@ -6,7 +6,6 @@ It supports:
 
 * `stdio` transport for local clients and debugging
 * authless streamable HTTP for self-hosted deployments
-* `GET /health` readiness checks for HTTP deployments
 * HTTP session termination via `DELETE` for clean client resets
 
 ## Requirements
