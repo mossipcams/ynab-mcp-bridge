@@ -52,4 +52,13 @@ describe("pure v4 refactor", () => {
     expect(readme).toContain("YNAB_PLAN_ID");
     expect(readme).not.toContain("YNAB_BUDGET_ID");
   });
+
+  it("documents that PRs should default to the fork instead of upstream", () => {
+    const claudeMd = readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8");
+
+    expect(claudeMd).toContain("Default all PR creation to `mossipcams/ynab-mcp-bridge`.");
+    expect(claudeMd).toContain(
+      "Do not open PRs, create commits for, push to, or take any other action against Caleb's repo (`calebl/ynab-mcp-server`) unless the user explicitly asks for that target repo.",
+    );
+  });
 });
