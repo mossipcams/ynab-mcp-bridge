@@ -109,6 +109,12 @@ describe("startHttpServer", () => {
       details.path === "/mcp" &&
       typeof details.sessionId === "string"
     ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.method === "POST" &&
+      details.path === "/mcp" &&
+      details.jsonRpcMethod === "initialize" &&
+      details.cleanup === false
+    ))).toBeTruthy();
   });
 
   it("supports browser preflight requests", async () => {
@@ -737,6 +743,84 @@ describe("startHttpServer", () => {
 
     await firstClient.close();
     await secondClient.close();
+  });
+
+  it("logs the JSON-RPC method for a sessionless POST after session teardown", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "teardown-log-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    const sessionId = initializeResponse.headers.get("mcp-session-id");
+
+    expect(initializeResponse.status).toBe(200);
+    expect(sessionId).toBeTruthy();
+
+    const deleteResponse = await fetch(httpServer.url, {
+      method: "DELETE",
+      headers: {
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "Mcp-Session-Id": sessionId ?? "",
+      },
+    });
+
+    expect(deleteResponse.status).toBe(200);
+
+    const followUpResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(followUpResponse.status).toBe(400);
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.method === "POST" &&
+      details.path === "/mcp" &&
+      details.cleanup === true &&
+      details.jsonRpcMethod === "tools/list" &&
+      details.sessionId === undefined
+    ))).toBeTruthy();
   });
 
   it("rejects repeated MCP session headers using the SDK transport contract", async () => {
