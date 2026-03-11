@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_transactions_by_account";
 export const description = "Gets transactions for a single account.";
@@ -12,14 +12,13 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string; accountId: string }, api: ynab.API) {
   try {
-    const planId = getPlanId(input.planId);
-    const response = await api.transactions.getTransactionsByAccount(
+    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.transactions.getTransactionsByAccount(
       planId,
       input.accountId,
       undefined,
       undefined,
       undefined,
-    );
+    ));
 
     return toTextResult({
       transactions: response.data.transactions

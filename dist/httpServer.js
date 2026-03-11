@@ -1,9 +1,13 @@
 import { createServer as createNodeServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { getBackendReadiness } from "./runtimeConfig.js";
 import { createServer } from "./server.js";
+import { resetPlanResolutionState } from "./tools/planToolUtils.js";
 const CORS_HEADERS = {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "OPTIONS, POST",
+    "access-control-allow-methods": "OPTIONS, GET, POST, DELETE",
     "access-control-allow-headers": "content-type, mcp-session-id, mcp-protocol-version, authorization",
     "access-control-expose-headers": "Mcp-Session-Id",
 };
@@ -34,12 +38,68 @@ function writeJson(res, statusCode, body) {
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify(body));
 }
+function getSessionId(req) {
+    const sessionId = req.headers["mcp-session-id"];
+    if (typeof sessionId === "string") {
+        return sessionId;
+    }
+    return undefined;
+}
 export async function startHttpServer(options = {}) {
     const host = options.host ?? "0.0.0.0";
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
+    const healthPath = "/health";
+    const sessions = new Map();
+    function removeSession(sessionId) {
+        if (!sessionId) {
+            return;
+        }
+        sessions.delete(sessionId);
+        if (sessions.size === 0) {
+            resetPlanResolutionState();
+        }
+    }
+    async function createManagedSession() {
+        const mcpServer = createServer();
+        const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            onsessioninitialized: async (sessionId) => {
+                sessions.set(sessionId, {
+                    transport,
+                    close: async () => {
+                        await transport.close();
+                        await mcpServer.close();
+                    },
+                });
+            },
+            onsessionclosed: async (sessionId) => {
+                removeSession(sessionId);
+                await mcpServer.close();
+            },
+        });
+        transport.onclose = () => {
+            removeSession(transport.sessionId);
+        };
+        await mcpServer.connect(transport);
+        return {
+            transport,
+            close: async () => {
+                await transport.close();
+                await mcpServer.close();
+            },
+        };
+    }
     const server = createNodeServer(async (req, res) => {
-        if (getRequestPath(req) !== path) {
+        const requestPath = getRequestPath(req);
+        if (requestPath === healthPath && req.method === "GET") {
+            writeJson(res, 200, {
+                transport: "http",
+                ...getBackendReadiness(process.env),
+            });
+            return;
+        }
+        if (requestPath !== path) {
             writeJson(res, 404, {
                 error: "Not found",
             });
@@ -51,7 +111,7 @@ export async function startHttpServer(options = {}) {
             res.end();
             return;
         }
-        if (req.method !== "POST") {
+        if (!req.method || !["GET", "POST", "DELETE"].includes(req.method)) {
             writeJson(res, 405, {
                 jsonrpc: "2.0",
                 error: {
@@ -62,17 +122,41 @@ export async function startHttpServer(options = {}) {
             });
             return;
         }
-        const mcpServer = createServer();
-        const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: undefined,
-        });
         try {
-            const parsedBody = await readJsonBody(req);
+            const parsedBody = req.method === "POST" ? await readJsonBody(req) : undefined;
+            const sessionId = getSessionId(req);
+            let managedSession = sessionId ? sessions.get(sessionId) : undefined;
+            if (!managedSession) {
+                if (req.method === "POST" && isInitializeRequest(parsedBody)) {
+                    managedSession = await createManagedSession();
+                }
+                else {
+                    writeJson(res, 400, {
+                        jsonrpc: "2.0",
+                        error: {
+                            code: -32000,
+                            message: "Bad Request: No valid session ID provided",
+                        },
+                        id: null,
+                    });
+                    return;
+                }
+            }
             applyCorsHeaders(res);
-            await mcpServer.connect(transport);
-            await transport.handleRequest(req, res, parsedBody);
+            await managedSession.transport.handleRequest(req, res, parsedBody);
         }
         catch (error) {
+            if (error instanceof SyntaxError) {
+                writeJson(res, 400, {
+                    jsonrpc: "2.0",
+                    error: {
+                        code: -32700,
+                        message: "Parse error",
+                    },
+                    id: null,
+                });
+                return;
+            }
             console.error("Error handling MCP request:", error);
             if (!res.headersSent) {
                 writeJson(res, 500, {
@@ -84,12 +168,6 @@ export async function startHttpServer(options = {}) {
                     id: null,
                 });
             }
-        }
-        finally {
-            res.on("close", () => {
-                void transport.close();
-                void mcpServer.close();
-            });
         }
     });
     await new Promise((resolve, reject) => {
@@ -110,6 +188,9 @@ export async function startHttpServer(options = {}) {
         port: resolvedAddress.port,
         url: `http://${host}:${resolvedAddress.port}${path}`,
         close: async () => {
+            const sessionClosures = Array.from(sessions.values(), (session) => session.close());
+            sessions.clear();
+            resetPlanResolutionState();
             await new Promise((resolve, reject) => {
                 server.close((error) => {
                     if (error) {
@@ -119,6 +200,7 @@ export async function startHttpServer(options = {}) {
                     resolve();
                 });
             });
+            await Promise.allSettled(sessionClosures);
         },
     };
 }

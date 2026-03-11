@@ -6,6 +6,8 @@ It supports:
 
 * `stdio` transport for local clients and debugging
 * authless streamable HTTP for self-hosted deployments
+* `GET /health` readiness checks for HTTP deployments
+* HTTP session termination via `DELETE` for clean client resets
 
 ## Requirements
 
@@ -17,6 +19,8 @@ Set these environment variables before starting the server:
 * `MCP_HOST` optional, HTTP only, default `0.0.0.0`
 * `MCP_PORT` optional, HTTP only, default `3000`
 * `MCP_PATH` optional, HTTP only, default `/mcp`
+
+If `YNAB_PLAN_ID` is not set, the bridge automatically resolves YNAB's `default_plan` when one exists or the only available plan when there is exactly one. If a configured plan becomes stale, the bridge retries once with a fresh plan resolution.
 
 ## Available MCP Tools
 

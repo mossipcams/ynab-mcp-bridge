@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_scheduled_transaction";
 export const description = "Gets a single scheduled transaction by ID.";
@@ -15,11 +15,10 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
-    const planId = getPlanId(input.planId);
-    const response = await api.scheduledTransactions.getScheduledTransactionById(
+    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.scheduledTransactions.getScheduledTransactionById(
       planId,
       input.scheduledTransactionId,
-    );
+    ));
 
     return toTextResult({
       scheduled_transaction: {

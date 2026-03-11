@@ -1,17 +1,27 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startHttpServer } from "./httpServer.js";
 
 describe("startHttpServer", () => {
   const cleanups: Array<() => Promise<void>> = [];
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = {
+      ...originalEnv,
+      YNAB_API_TOKEN: "test-token",
+    };
+  });
 
   afterEach(async () => {
     while (cleanups.length > 0) {
       const cleanup = cleanups.pop();
       await cleanup?.();
     }
+
+    process.env = { ...originalEnv };
   });
 
   it("serves MCP over authless streamable HTTP", async () => {
@@ -56,6 +66,7 @@ describe("startHttpServer", () => {
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("access-control-allow-methods")).toContain("POST");
+    expect(response.headers.get("access-control-allow-methods")).toContain("DELETE");
     expect(response.headers.get("access-control-allow-headers")).toContain("content-type");
     expect(response.headers.get("access-control-allow-headers")).toContain("mcp-session-id");
     expect(response.headers.get("access-control-expose-headers")).toContain("Mcp-Session-Id");
@@ -94,5 +105,97 @@ describe("startHttpServer", () => {
     expect(response.ok).toBe(true);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("access-control-expose-headers")).toContain("Mcp-Session-Id");
+  });
+
+  it("exposes a health endpoint with backend readiness details", async () => {
+    const httpServer = await startHttpServer({
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/health", httpServer.url));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    await expect(response.json()).resolves.toEqual({
+      checks: {
+        ynabApiToken: true,
+        ynabPlanIdConfigured: false,
+      },
+      planResolution: "dynamic",
+      status: "ok",
+      transport: "http",
+    });
+  });
+
+  it("lets clients terminate a session and reconnect cleanly", async () => {
+    const httpServer = await startHttpServer({
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const firstClient = new Client({
+      name: "ynab-mcp-bridge-test-1",
+      version: "1.0.0",
+    });
+    const firstTransport = new StreamableHTTPClientTransport(new URL(httpServer.url));
+
+    await firstClient.connect(firstTransport);
+    const firstSessionId = firstTransport.sessionId;
+
+    expect(firstSessionId).toBeTruthy();
+
+    await firstTransport.terminateSession();
+
+    const secondClient = new Client({
+      name: "ynab-mcp-bridge-test-2",
+      version: "1.0.0",
+    });
+    const secondTransport = new StreamableHTTPClientTransport(new URL(httpServer.url));
+
+    await secondClient.connect(secondTransport);
+
+    expect(secondTransport.sessionId).toBeTruthy();
+    expect(secondTransport.sessionId).not.toBe(firstSessionId);
+
+    await firstClient.close();
+    await secondClient.close();
+  });
+
+  it("returns a client error for malformed JSON without breaking later requests", async () => {
+    const httpServer = await startHttpServer({
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const invalidResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: "{",
+    });
+
+    expect(invalidResponse.status).toBe(400);
+    expect(invalidResponse.headers.get("access-control-allow-origin")).toBe("*");
+
+    const client = new Client({
+      name: "ynab-mcp-bridge-test-recovery",
+      version: "1.0.0",
+    });
+    const transport = new StreamableHTTPClientTransport(new URL(httpServer.url));
+
+    await client.connect(transport);
+
+    const result = await client.listTools();
+
+    expect(result.tools.map((tool) => tool.name)).toContain("ynab_list_plans");
+
+    await client.close();
   });
 });

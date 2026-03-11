@@ -5,6 +5,7 @@ import * as GetPlanMonthTool from "./tools/GetPlanMonthTool.js";
 import * as GetPlanSettingsTool from "./tools/GetPlanSettingsTool.js";
 import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
 import * as ListPlansTool from "./tools/ListPlansTool.js";
+import { resetPlanResolutionState } from "./tools/planToolUtils.js";
 
 function parseResponseText(result: Awaited<ReturnType<typeof ListPlansTool.execute>>) {
   return JSON.parse(result.content[0].text);
@@ -15,6 +16,7 @@ describe("plan read tools", () => {
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    resetPlanResolutionState();
     vi.restoreAllMocks();
   });
 
@@ -95,6 +97,111 @@ describe("plan read tools", () => {
         date_format: { format: "MM/DD/YYYY" },
         currency_format: { iso_code: "USD" },
       },
+    });
+  });
+
+  it("gets plan settings using the YNAB default plan when no plan is configured", async () => {
+    process.env = { ...originalEnv };
+    const api = {
+      plans: {
+        getPlans: vi.fn().mockResolvedValue({
+          data: {
+            plans: [
+              { id: "plan-1", name: "Home" },
+              { id: "plan-2", name: "Work" },
+            ],
+            default_plan: { id: "plan-2", name: "Work" },
+          },
+        }),
+        getPlanSettingsById: vi.fn().mockResolvedValue({
+          data: {
+            settings: {
+              date_format: { format: "MM/DD/YYYY" },
+              currency_format: { iso_code: "USD" },
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetPlanSettingsTool.execute({}, api as any);
+
+    expect(api.plans.getPlans).toHaveBeenCalledOnce();
+    expect(api.plans.getPlanSettingsById).toHaveBeenCalledWith("plan-2");
+    expect(parseResponseText(result)).toEqual({
+      settings: {
+        date_format: { format: "MM/DD/YYYY" },
+        currency_format: { iso_code: "USD" },
+      },
+    });
+  });
+
+  it("recovers from a stale configured plan id by resolving a fresh default plan", async () => {
+    process.env = { ...originalEnv, YNAB_PLAN_ID: "plan-stale" };
+    const api = {
+      plans: {
+        getPlans: vi.fn().mockResolvedValue({
+          data: {
+            plans: [
+              { id: "plan-2", name: "Work" },
+            ],
+            default_plan: { id: "plan-2", name: "Work" },
+          },
+        }),
+        getPlanSettingsById: vi
+          .fn()
+          .mockRejectedValueOnce({
+            error: {
+              name: "not_found",
+              detail: "Plan not found",
+            },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              settings: {
+                date_format: { format: "MM/DD/YYYY" },
+                currency_format: { iso_code: "USD" },
+              },
+            },
+          }),
+      },
+    };
+
+    const result = await GetPlanSettingsTool.execute({}, api as any);
+
+    expect(api.plans.getPlanSettingsById).toHaveBeenNthCalledWith(1, "plan-stale");
+    expect(api.plans.getPlans).toHaveBeenCalledOnce();
+    expect(api.plans.getPlanSettingsById).toHaveBeenNthCalledWith(2, "plan-2");
+    expect(parseResponseText(result)).toEqual({
+      settings: {
+        date_format: { format: "MM/DD/YYYY" },
+        currency_format: { iso_code: "USD" },
+      },
+    });
+  });
+
+  it("does not override an explicit invalid plan id", async () => {
+    process.env = { ...originalEnv, YNAB_PLAN_ID: "plan-env" };
+    const api = {
+      plans: {
+        getPlans: vi.fn(),
+        getPlanSettingsById: vi.fn().mockRejectedValue({
+          error: {
+            name: "not_found",
+            detail: "Plan not found",
+          },
+        }),
+      },
+    };
+
+    const result = await GetPlanSettingsTool.execute({ planId: "plan-explicit" }, api as any);
+
+    expect(api.plans.getPlanSettingsById).toHaveBeenCalledOnce();
+    expect(api.plans.getPlanSettingsById).toHaveBeenCalledWith("plan-explicit");
+    expect(api.plans.getPlans).not.toHaveBeenCalled();
+    expect(parseResponseText(result)).toEqual({
+      success: false,
+      error: "Plan not found",
     });
   });
 

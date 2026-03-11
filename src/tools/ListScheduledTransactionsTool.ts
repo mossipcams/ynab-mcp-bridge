@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_list_scheduled_transactions";
 export const description = "Lists scheduled transactions for a single YNAB plan.";
@@ -11,8 +11,7 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string }, api: ynab.API) {
   try {
-    const planId = getPlanId(input.planId);
-    const response = await api.scheduledTransactions.getScheduledTransactions(planId, undefined);
+    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.scheduledTransactions.getScheduledTransactions(planId, undefined));
     const scheduledTransactions = response.data.scheduled_transactions
       .filter((transaction) => !transaction.deleted)
       .map((transaction) => ({

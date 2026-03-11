@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_money_movements_by_month";
 export const description = "Gets money movements for a single plan month.";
@@ -12,8 +12,7 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string; month: string }, api: ynab.API) {
   try {
-    const planId = getPlanId(input.planId);
-    const response = await api.moneyMovements.getMoneyMovementsByMonth(planId, input.month);
+    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.moneyMovements.getMoneyMovementsByMonth(planId, input.month));
     return toTextResult({
       money_movements: response.data.money_movements,
       count: response.data.money_movements.length,

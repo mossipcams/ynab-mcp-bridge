@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_list_transactions";
 export const description = "Gets all transactions for a single YNAB plan.";
 export const inputSchema = {
@@ -7,8 +7,7 @@ export const inputSchema = {
 };
 export async function execute(input, api) {
     try {
-        const planId = getPlanId(input.planId);
-        const response = await api.transactions.getTransactions(planId, undefined, undefined, undefined);
+        const response = await withResolvedPlan(input.planId, api, async (planId) => api.transactions.getTransactions(planId, undefined, undefined, undefined));
         return toTextResult({
             transactions: response.data.transactions
                 .filter((transaction) => !transaction.deleted)

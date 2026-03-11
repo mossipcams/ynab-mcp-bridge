@@ -9,6 +9,15 @@ export type RuntimeConfig = {
 
 type EnvConfig = Record<string, string | undefined>;
 
+export type BackendReadiness = {
+  checks: {
+    ynabApiToken: boolean;
+    ynabPlanIdConfigured: boolean;
+  };
+  planResolution: "configured" | "dynamic";
+  status: "ok" | "misconfigured";
+};
+
 function readFlag(args: string[], name: string) {
   const index = args.indexOf(name);
 
@@ -17,6 +26,34 @@ function readFlag(args: string[], name: string) {
   }
 
   return args[index + 1];
+}
+
+function hasValue(value: string | undefined) {
+  return Boolean(value?.trim());
+}
+
+export function getBackendReadiness(env: EnvConfig): BackendReadiness {
+  const ynabApiToken = hasValue(env.YNAB_API_TOKEN);
+  const ynabPlanIdConfigured = hasValue(env.YNAB_PLAN_ID);
+
+  return {
+    status: ynabApiToken ? "ok" : "misconfigured",
+    planResolution: ynabPlanIdConfigured ? "configured" : "dynamic",
+    checks: {
+      ynabApiToken,
+      ynabPlanIdConfigured,
+    },
+  };
+}
+
+export function assertBackendEnvironment(env: EnvConfig) {
+  const readiness = getBackendReadiness(env);
+
+  if (!readiness.checks.ynabApiToken) {
+    throw new Error("YNAB_API_TOKEN is required.");
+  }
+
+  return readiness;
 }
 
 export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeConfig {

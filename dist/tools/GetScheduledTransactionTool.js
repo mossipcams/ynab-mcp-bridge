@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_scheduled_transaction";
 export const description = "Gets a single scheduled transaction by ID.";
 export const inputSchema = {
@@ -8,8 +8,7 @@ export const inputSchema = {
 };
 export async function execute(input, api) {
     try {
-        const planId = getPlanId(input.planId);
-        const response = await api.scheduledTransactions.getScheduledTransactionById(planId, input.scheduledTransactionId);
+        const response = await withResolvedPlan(input.planId, api, async (planId) => api.scheduledTransactions.getScheduledTransactionById(planId, input.scheduledTransactionId));
         return toTextResult({
             scheduled_transaction: {
                 id: response.data.scheduled_transaction.id,

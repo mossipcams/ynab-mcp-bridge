@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { getPlanId, toErrorResult, toTextResult } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_transactions_by_month";
 export const description = "Gets transactions for a single plan month.";
@@ -12,14 +12,13 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string; month: string }, api: ynab.API) {
   try {
-    const planId = getPlanId(input.planId);
-    const response = await api.transactions.getTransactionsByMonth(
+    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.transactions.getTransactionsByMonth(
       planId,
       input.month,
       undefined,
       undefined,
       undefined,
-    );
+    ));
 
     return toTextResult({
       transactions: response.data.transactions
