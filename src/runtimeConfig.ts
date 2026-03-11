@@ -1,6 +1,7 @@
 export type RuntimeTransport = "http" | "stdio";
 
 export type RuntimeConfig = {
+  allowedOrigins: string[];
   host: string;
   path: string;
   port: number;
@@ -29,6 +30,19 @@ function readFlag(args: string[], name: string) {
 
 function hasValue(value: string | undefined) {
   return Boolean(value?.trim());
+}
+
+function readCsvFlag(args: string[], name: string) {
+  const value = readFlag(args, name);
+
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function getBackendReadiness(env: EnvConfig): BackendReadiness {
@@ -69,9 +83,16 @@ export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeCon
     throw new Error(`Invalid port: ${rawPort}`);
   }
 
+  const allowedOrigins = readCsvFlag(args, "--allowed-origins");
+  const envAllowedOrigins = env.MCP_ALLOWED_ORIGINS
+    ?.split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
   return {
+    allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : (envAllowedOrigins ?? []),
     transport: rawTransport,
-    host: readFlag(args, "--host") ?? env.MCP_HOST ?? "0.0.0.0",
+    host: readFlag(args, "--host") ?? env.MCP_HOST ?? "127.0.0.1",
     path: readFlag(args, "--path") ?? env.MCP_PATH ?? "/mcp",
     port,
   };
