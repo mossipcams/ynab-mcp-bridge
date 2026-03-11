@@ -38,7 +38,7 @@ export function assertBackendEnvironment(env) {
     return readiness;
 }
 export function resolveRuntimeConfig(args, env) {
-    const rawTransport = readFlag(args, "--transport") ?? env.MCP_TRANSPORT ?? "stdio";
+    const rawTransport = readFlag(args, "--transport") ?? env.MCP_TRANSPORT ?? "http";
     if (rawTransport !== "http" && rawTransport !== "stdio") {
         throw new Error(`Unsupported transport: ${rawTransport}`);
     }
