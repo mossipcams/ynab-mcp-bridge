@@ -45,13 +45,13 @@ describe("resolveRuntimeConfig", () => {
     });
   });
 
-  it("defaults to stdio when no transport is provided", () => {
+  it("defaults to http on port 3000 when no transport is provided", () => {
     expect(resolveRuntimeConfig([], {})).toEqual({
       allowedOrigins: [],
       host: "127.0.0.1",
       path: "/mcp",
       port: 3000,
-      transport: "stdio",
+      transport: "http",
     });
   });
 

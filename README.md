@@ -4,8 +4,8 @@
 
 It supports:
 
-* `stdio` transport for local clients and debugging
-* authless streamable HTTP for self-hosted deployments
+* authless streamable HTTP by default for self-hosted deployments
+* `stdio` transport when explicitly requested for local clients and debugging
 * HTTP session termination via `DELETE` for clean client resets
 
 ## Requirements
@@ -14,7 +14,7 @@ Set these environment variables before starting the server:
 
 * `YNAB_API_TOKEN` required
 * `YNAB_PLAN_ID` optional default plan for tools that accept `planId`
-* `MCP_TRANSPORT` optional, `stdio` or `http`, default `stdio`
+* `MCP_TRANSPORT` optional, `stdio` or `http`, default `http`
 * `MCP_HOST` optional, HTTP only, default `127.0.0.1`
 * `MCP_PORT` optional, HTTP only, default `3000`
 * `MCP_PATH` optional, HTTP only, default `/mcp`
@@ -68,10 +68,10 @@ YNAB documents a limit of 200 requests per rolling hour per access token. The br
 ```bash
 npm install
 npm run build
-npm run start:stdio
+npm start
 ```
 
-To start HTTP mode:
+To start HTTP mode explicitly:
 
 ```bash
 MCP_TRANSPORT=http npm run start:http
@@ -94,10 +94,16 @@ Start over stdio:
 node dist/index.js --transport stdio
 ```
 
-Start over HTTP:
+Start over HTTP explicitly:
 
 ```bash
 node dist/index.js --transport http --host 127.0.0.1 --port 3000 --path /mcp
+```
+
+Start with the default HTTP configuration:
+
+```bash
+node dist/index.js
 ```
 
 Allow specific browser origins over HTTP:

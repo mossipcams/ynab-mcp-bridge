@@ -14,12 +14,12 @@ COPY . .
 # Build the project
 RUN npm run build
 
-# Expose any port if required (not strictly necessary for stdio based MCP)
+# The default runtime now starts the authless HTTP server on port 3000.
 
 # Set environment variable placeholder (user should override these values in production)
 ENV YNAB_API_TOKEN=""
 # optional:
 # ENV YNAB_BUDGET_ID=""
 
-# Define the command to run your app using node
+# Define the command to run the default HTTP server
 CMD ["node", "dist/index.js"]
