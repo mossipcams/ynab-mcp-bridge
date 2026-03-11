@@ -4,11 +4,23 @@ import { assertBackendEnvironment, resolveRuntimeConfig } from "./runtimeConfig.
 describe("resolveRuntimeConfig", () => {
   it("prefers explicit CLI flags for http mode", () => {
     const config = resolveRuntimeConfig(
-      ["--transport", "http", "--host", "127.0.0.1", "--port", "8080", "--path", "/bridge"],
+      [
+        "--transport",
+        "http",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8080",
+        "--path",
+        "/bridge",
+        "--allowed-origins",
+        "https://claude.ai,https://chat.openai.com",
+      ],
       {},
     );
 
     expect(config).toEqual({
+      allowedOrigins: ["https://claude.ai", "https://chat.openai.com"],
       host: "127.0.0.1",
       path: "/bridge",
       port: 8080,
@@ -18,14 +30,15 @@ describe("resolveRuntimeConfig", () => {
 
   it("falls back to environment variables", () => {
     const config = resolveRuntimeConfig([], {
-      MCP_HOST: "0.0.0.0",
+      MCP_ALLOWED_ORIGINS: "https://claude.ai, https://chat.openai.com",
       MCP_PATH: "/mcp-http",
       MCP_PORT: "9000",
       MCP_TRANSPORT: "http",
     });
 
     expect(config).toEqual({
-      host: "0.0.0.0",
+      allowedOrigins: ["https://claude.ai", "https://chat.openai.com"],
+      host: "127.0.0.1",
       path: "/mcp-http",
       port: 9000,
       transport: "http",
@@ -34,7 +47,8 @@ describe("resolveRuntimeConfig", () => {
 
   it("defaults to stdio when no transport is provided", () => {
     expect(resolveRuntimeConfig([], {})).toEqual({
-      host: "0.0.0.0",
+      allowedOrigins: [],
+      host: "127.0.0.1",
       path: "/mcp",
       port: 3000,
       transport: "stdio",

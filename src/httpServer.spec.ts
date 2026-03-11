@@ -26,6 +26,7 @@ describe("startHttpServer", () => {
 
   it("serves MCP over authless streamable HTTP", async () => {
     const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
     });
@@ -49,6 +50,7 @@ describe("startHttpServer", () => {
 
   it("supports browser preflight requests", async () => {
     const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
     });
@@ -74,6 +76,7 @@ describe("startHttpServer", () => {
 
   it("adds CORS headers to MCP responses", async () => {
     const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
     });
@@ -105,6 +108,158 @@ describe("startHttpServer", () => {
     expect(response.ok).toBe(true);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("access-control-expose-headers")).toContain("Mcp-Session-Id");
+  });
+
+  it("serves OAuth protected resource metadata for path-aware remote probing", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/oauth-protected-resource/mcp", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    await expect(response.json()).resolves.toEqual({
+      resource: httpServer.url,
+    });
+  });
+
+  it("serves OAuth protected resource metadata at the root well-known endpoint", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/oauth-protected-resource", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    await expect(response.json()).resolves.toEqual({
+      resource: httpServer.url,
+    });
+  });
+
+  it("supports browser preflight requests for OAuth protected resource metadata", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/oauth-protected-resource/mcp", httpServer.url), {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://claude.ai",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "mcp-protocol-version",
+      },
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-methods")).toContain("GET");
+    expect(response.headers.get("access-control-allow-headers")).toContain("mcp-protocol-version");
+  });
+
+  it("advertises the public MCP resource URL from forwarded headers", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "0.0.0.0",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/oauth-protected-resource/mcp", httpServer.url), {
+      headers: {
+        "X-Forwarded-Host": "bridge.example.com",
+        "X-Forwarded-Proto": "https",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      resource: "https://bridge.example.com/mcp",
+    });
+  });
+
+  it("rejects requests from untrusted origins", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Origin: "https://evil.example",
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "browser-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Forbidden origin",
+    });
+  });
+
+  it("rejects protected resource metadata probes from untrusted origins", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/oauth-protected-resource/mcp", httpServer.url), {
+      headers: {
+        Origin: "https://evil.example",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Forbidden origin",
+    });
   });
 
   it("returns 404 for non-MCP paths", async () => {

@@ -7,6 +7,7 @@ It supports:
 * `stdio` transport for local clients and debugging
 * authless streamable HTTP for self-hosted deployments
 * HTTP session termination via `DELETE` for clean client resets
+* standards-based OAuth protected-resource metadata for remote client probing
 
 ## Requirements
 
@@ -15,9 +16,12 @@ Set these environment variables before starting the server:
 * `YNAB_API_TOKEN` required
 * `YNAB_PLAN_ID` optional default plan for tools that accept `planId`
 * `MCP_TRANSPORT` optional, `stdio` or `http`, default `stdio`
-* `MCP_HOST` optional, HTTP only, default `0.0.0.0`
+* `MCP_HOST` optional, HTTP only, default `127.0.0.1`
 * `MCP_PORT` optional, HTTP only, default `3000`
 * `MCP_PATH` optional, HTTP only, default `/mcp`
+* `MCP_ALLOWED_ORIGINS` optional comma-separated allowlist for browser-based HTTP clients like remote MCP hosts
+
+HTTP mode validates the `Origin` header when one is present. Loopback origins are allowed automatically for loopback hosts, but remote/browser deployments should set `MCP_ALLOWED_ORIGINS` explicitly, for example `https://claude.ai`.
 
 If `YNAB_PLAN_ID` is not set, the bridge automatically resolves YNAB's `default_plan` when one exists or the only available plan when there is exactly one. If a configured plan becomes stale, the bridge retries once with a fresh plan resolution.
 
@@ -73,6 +77,15 @@ To start HTTP mode:
 MCP_TRANSPORT=http npm run start:http
 ```
 
+To expose HTTP mode to a remote MCP client, bind an external host intentionally and allow the client origin explicitly:
+
+```bash
+MCP_TRANSPORT=http \
+MCP_HOST=0.0.0.0 \
+MCP_ALLOWED_ORIGINS=https://claude.ai \
+npm run start:http
+```
+
 ## CLI Usage
 
 Start over stdio:
@@ -84,7 +97,13 @@ node dist/index.js --transport stdio
 Start over HTTP:
 
 ```bash
-node dist/index.js --transport http --host 0.0.0.0 --port 3000 --path /mcp
+node dist/index.js --transport http --host 127.0.0.1 --port 3000 --path /mcp
+```
+
+Allow specific browser origins over HTTP:
+
+```bash
+node dist/index.js --transport http --host 0.0.0.0 --port 3000 --path /mcp --allowed-origins https://claude.ai,https://chat.openai.com
 ```
 
 ## Development

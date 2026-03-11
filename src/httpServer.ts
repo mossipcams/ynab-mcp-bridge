@@ -1,6 +1,7 @@
 import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
+import type { TLSSocket } from "node:tls";
 
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -9,6 +10,7 @@ import { createServer } from "./server.js";
 import { resetPlanResolutionState } from "./tools/planToolUtils.js";
 
 export type HttpServerOptions = {
+  allowedOrigins?: string[];
   host?: string;
   path?: string;
   port?: number;
@@ -41,6 +43,97 @@ function getRequestPath(req: IncomingMessage) {
   }
 
   return new URL(req.url, "http://127.0.0.1").pathname;
+}
+
+function getFirstHeaderValue(value: string | string[] | undefined) {
+  if (typeof value === "string") {
+    return value.split(",")[0]?.trim();
+  }
+
+  return value?.[0]?.split(",")[0]?.trim();
+}
+
+function getProtectedResourceMetadataPaths(path: string) {
+  const basePath = "/.well-known/oauth-protected-resource";
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (normalizedPath === "/") {
+    return new Set([basePath]);
+  }
+
+  return new Set([basePath, `${basePath}${normalizedPath}`]);
+}
+
+function parseHostName(host: string | undefined) {
+  if (!host) {
+    return undefined;
+  }
+
+  try {
+    return new URL(`http://${host}`).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+function isLoopbackHostname(hostname: string | undefined) {
+  return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
+}
+
+function getPublicBaseUrl(req: IncomingMessage) {
+  const forwardedProto = getFirstHeaderValue(req.headers["x-forwarded-proto"]);
+  const forwardedHost = getFirstHeaderValue(req.headers["x-forwarded-host"]);
+  const host = forwardedHost ?? getFirstHeaderValue(req.headers.host);
+  const socket = req.socket as TLSSocket;
+  const protocol = forwardedProto ?? (socket.encrypted ? "https" : "http");
+
+  if (!host) {
+    return undefined;
+  }
+
+  return `${protocol}://${host}`;
+}
+
+function getRequestHostName(req: IncomingMessage) {
+  const forwardedHost = getFirstHeaderValue(req.headers["x-forwarded-host"]);
+  const host = forwardedHost ?? getFirstHeaderValue(req.headers.host);
+
+  return parseHostName(host);
+}
+
+function normalizeOrigin(origin: string) {
+  return new URL(origin).origin;
+}
+
+function isOriginAllowed(req: IncomingMessage, allowedOrigins: Set<string>) {
+  const originHeader = getFirstHeaderValue(req.headers.origin);
+
+  if (!originHeader) {
+    return true;
+  }
+
+  try {
+    const normalizedOrigin = normalizeOrigin(originHeader);
+
+    if (allowedOrigins.has(normalizedOrigin)) {
+      return true;
+    }
+
+    const requestHostName = getRequestHostName(req);
+    const originHostName = new URL(normalizedOrigin).hostname;
+
+    return isLoopbackHostname(requestHostName) && isLoopbackHostname(originHostName);
+  } catch {
+    return false;
+  }
+}
+
+function getProtectedResourceMetadata(req: IncomingMessage, path: string, fallbackUrl: string) {
+  const baseUrl = getPublicBaseUrl(req) ?? new URL(fallbackUrl).origin;
+
+  return {
+    resource: new URL(path, `${baseUrl}/`).href,
+  };
 }
 
 async function readJsonBody(req: IncomingMessage) {
@@ -80,10 +173,12 @@ type ManagedSession = {
 };
 
 export async function startHttpServer(options: HttpServerOptions = {}): Promise<StartedHttpServer> {
-  const host = options.host ?? "0.0.0.0";
+  const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
+  const host = options.host ?? "127.0.0.1";
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
   const sessions = new Map<string, ManagedSession>();
+  const protectedResourceMetadataPaths = getProtectedResourceMetadataPaths(path);
 
   function removeSession(sessionId: string | undefined) {
     if (!sessionId) {
@@ -134,9 +229,9 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const server = createNodeServer(async (req, res) => {
     const requestPath = getRequestPath(req);
 
-    if (requestPath !== path) {
-      writeJson(res, 404, {
-        error: "Not found",
+    if (!isOriginAllowed(req, allowedOrigins)) {
+      writeJson(res, 403, {
+        error: "Forbidden origin",
       });
       return;
     }
@@ -145,6 +240,18 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
       applyCorsHeaders(res);
       res.statusCode = 204;
       res.end();
+      return;
+    }
+
+    if (protectedResourceMetadataPaths.has(requestPath)) {
+      writeJson(res, 200, getProtectedResourceMetadata(req, path, `http://${host}:${port}${path}`));
+      return;
+    }
+
+    if (requestPath !== path) {
+      writeJson(res, 404, {
+        error: "Not found",
+      });
       return;
     }
 

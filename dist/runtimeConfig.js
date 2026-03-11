@@ -8,6 +8,16 @@ function readFlag(args, name) {
 function hasValue(value) {
     return Boolean(value?.trim());
 }
+function readCsvFlag(args, name) {
+    const value = readFlag(args, name);
+    if (!value) {
+        return [];
+    }
+    return value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
 function getBackendReadiness(env) {
     const ynabApiToken = hasValue(env.YNAB_API_TOKEN);
     const ynabPlanIdConfigured = hasValue(env.YNAB_PLAN_ID);
@@ -37,9 +47,15 @@ export function resolveRuntimeConfig(args, env) {
     if (!Number.isInteger(port)) {
         throw new Error(`Invalid port: ${rawPort}`);
     }
+    const allowedOrigins = readCsvFlag(args, "--allowed-origins");
+    const envAllowedOrigins = env.MCP_ALLOWED_ORIGINS
+        ?.split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
     return {
+        allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : (envAllowedOrigins ?? []),
         transport: rawTransport,
-        host: readFlag(args, "--host") ?? env.MCP_HOST ?? "0.0.0.0",
+        host: readFlag(args, "--host") ?? env.MCP_HOST ?? "127.0.0.1",
         path: readFlag(args, "--path") ?? env.MCP_PATH ?? "/mcp",
         port,
     };
