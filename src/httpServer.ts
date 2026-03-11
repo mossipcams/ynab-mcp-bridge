@@ -40,17 +40,12 @@ type ManagedSession = {
 
 type SessionResolution =
   | {
+      cleanup?: () => Promise<void>;
       managedSession: ManagedSession;
       status: "ready";
     }
   | {
-      status: "invalid-session";
-    }
-  | {
       status: "method-not-allowed";
-    }
-  | {
-      status: "missing-session";
     };
 
 function applyCorsHeaders(res: ServerResponse) {
@@ -174,14 +169,6 @@ function writeForbiddenOrigin(res: ServerResponse) {
   });
 }
 
-function writeMissingSession(res: ServerResponse) {
-  writeJsonRpcError(res, 400, -32000, "Bad Request: No valid session ID provided");
-}
-
-function writeInvalidSession(res: ServerResponse) {
-  writeJsonRpcError(res, 404, -32001, "Session not found");
-}
-
 function writeParseError(res: ServerResponse) {
   writeJsonRpcError(res, 400, -32700, "Parse error");
 }
@@ -235,6 +222,10 @@ async function createManagedSession(
   } satisfies ManagedSession;
 }
 
+function getAnyManagedSession(sessions: Map<string, ManagedSession>) {
+  return sessions.values().next().value as ManagedSession | undefined;
+}
+
 async function resolveSession(
   req: IncomingMessage,
   parsedBody: unknown,
@@ -247,8 +238,21 @@ async function resolveSession(
     const managedSession = sessions.get(sessionId);
 
     if (!managedSession) {
+      const fallbackSession = getAnyManagedSession(sessions);
+
+      if (fallbackSession) {
+        return {
+          managedSession: fallbackSession,
+          status: "ready",
+        };
+      }
+
+      const ephemeralSession = await createSession();
+
       return {
-        status: "invalid-session",
+        cleanup: ephemeralSession.close,
+        managedSession: ephemeralSession,
+        status: "ready",
       };
     }
 
@@ -273,21 +277,28 @@ async function resolveSession(
     };
   }
 
+  const fallbackSession = getAnyManagedSession(sessions);
+
+  if (fallbackSession) {
+    return {
+      managedSession: fallbackSession,
+      status: "ready",
+    };
+  }
+
+  const ephemeralSession = await createSession();
+
   return {
-    status: "missing-session",
+    cleanup: ephemeralSession.close,
+    managedSession: ephemeralSession,
+    status: "ready",
   };
 }
 
-function writeSessionResolution(res: ServerResponse, resolution: Exclude<SessionResolution, { managedSession: ManagedSession; status: "ready" }>) {
+function writeSessionResolution(res: ServerResponse, resolution: Exclude<SessionResolution, { cleanup?: () => Promise<void>; managedSession: ManagedSession; status: "ready" }>) {
   switch (resolution.status) {
-    case "invalid-session":
-      writeInvalidSession(res);
-      return;
     case "method-not-allowed":
       writeMethodNotAllowed(res, AUTHLESS_MCP_ALLOWED_METHODS);
-      return;
-    case "missing-session":
-      writeMissingSession(res);
       return;
   }
 }
@@ -348,8 +359,12 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
         return;
       }
 
-      applyCorsHeaders(res);
-      await resolution.managedSession.transport.handleRequest(req, res, parsedBody);
+      try {
+        applyCorsHeaders(res);
+        await resolution.managedSession.transport.handleRequest(req, res, parsedBody);
+      } finally {
+        await resolution.cleanup?.();
+      }
     } catch (error) {
       if (error instanceof SyntaxError) {
         writeParseError(res);

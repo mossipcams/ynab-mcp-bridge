@@ -435,6 +435,68 @@ describe("startHttpServer", () => {
       id: null,
     });
   });
+
+  it("uses the SDK transport's missing-session response after initialization", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "missing-session-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(initializeResponse.status).toBe(200);
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Bad Request: Mcp-Session-Id header is required",
+      },
+      id: null,
+    });
+  });
+
   it("returns 404 for non-MCP paths", async () => {
     const httpServer = await startHttpServer({
       host: "127.0.0.1",

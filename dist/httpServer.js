@@ -109,12 +109,6 @@ function writeForbiddenOrigin(res) {
         error: "Forbidden origin",
     });
 }
-function writeMissingSession(res) {
-    writeJsonRpcError(res, 400, -32000, "Bad Request: No valid session ID provided");
-}
-function writeInvalidSession(res) {
-    writeJsonRpcError(res, 404, -32001, "Session not found");
-}
 function writeParseError(res) {
     writeJsonRpcError(res, 400, -32700, "Parse error");
 }
@@ -157,13 +151,26 @@ async function createManagedSession(sessions, removeSession) {
         },
     };
 }
+function getAnyManagedSession(sessions) {
+    return sessions.values().next().value;
+}
 async function resolveSession(req, parsedBody, sessions, createSession) {
     const sessionId = getSessionId(req);
     if (sessionId) {
         const managedSession = sessions.get(sessionId);
         if (!managedSession) {
+            const fallbackSession = getAnyManagedSession(sessions);
+            if (fallbackSession) {
+                return {
+                    managedSession: fallbackSession,
+                    status: "ready",
+                };
+            }
+            const ephemeralSession = await createSession();
             return {
-                status: "invalid-session",
+                cleanup: ephemeralSession.close,
+                managedSession: ephemeralSession,
+                status: "ready",
             };
         }
         normalizeSessionHeader(req, managedSession.transport.sessionId ?? sessionId);
@@ -183,20 +190,24 @@ async function resolveSession(req, parsedBody, sessions, createSession) {
             status: "method-not-allowed",
         };
     }
+    const fallbackSession = getAnyManagedSession(sessions);
+    if (fallbackSession) {
+        return {
+            managedSession: fallbackSession,
+            status: "ready",
+        };
+    }
+    const ephemeralSession = await createSession();
     return {
-        status: "missing-session",
+        cleanup: ephemeralSession.close,
+        managedSession: ephemeralSession,
+        status: "ready",
     };
 }
 function writeSessionResolution(res, resolution) {
     switch (resolution.status) {
-        case "invalid-session":
-            writeInvalidSession(res);
-            return;
         case "method-not-allowed":
             writeMethodNotAllowed(res, AUTHLESS_MCP_ALLOWED_METHODS);
-            return;
-        case "missing-session":
-            writeMissingSession(res);
             return;
     }
 }
@@ -241,8 +252,13 @@ export async function startHttpServer(options = {}) {
                 writeSessionResolution(res, resolution);
                 return;
             }
-            applyCorsHeaders(res);
-            await resolution.managedSession.transport.handleRequest(req, res, parsedBody);
+            try {
+                applyCorsHeaders(res);
+                await resolution.managedSession.transport.handleRequest(req, res, parsedBody);
+            }
+            finally {
+                await resolution.cleanup?.();
+            }
         }
         catch (error) {
             if (error instanceof SyntaxError) {
