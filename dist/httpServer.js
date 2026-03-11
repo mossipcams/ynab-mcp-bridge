@@ -115,6 +115,9 @@ function writeParseError(res) {
 function writeInternalServerError(res) {
     writeJsonRpcError(res, 500, -32603, "Internal server error");
 }
+function logHttpDebug(event, details) {
+    console.error("[http]", event, details);
+}
 function getSessionId(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (typeof sessionId !== "string") {
@@ -129,6 +132,15 @@ function getSessionId(req) {
     }
     return values[0];
 }
+function getRequestDebugDetails(req) {
+    return {
+        method: req.method ?? "UNKNOWN",
+        origin: getFirstHeaderValue(req.headers.origin),
+        path: getRequestPath(req),
+        protocolVersion: getFirstHeaderValue(req.headers["mcp-protocol-version"]),
+        sessionId: getSessionId(req),
+    };
+}
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (Array.isArray(sessionId)) {
@@ -142,11 +154,12 @@ function hasMultipleSessionHeaderValues(req) {
         .map((value) => value.trim())
         .filter(Boolean).length > 1;
 }
-async function createManagedSession(sessions, removeSession) {
+async function createManagedSession(sessions, removeSession, onSessionInitialized) {
     const mcpServer = createServer();
     const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: async (sessionId) => {
+            onSessionInitialized?.(sessionId);
             sessions.set(sessionId, {
                 transport,
                 close: async () => {
@@ -246,41 +259,72 @@ export async function startHttpServer(options = {}) {
     const port = options.port ?? 3000;
     const sessions = new Map();
     function removeSession(sessionId) {
-        if (!sessionId) {
+        if (!sessionId || !sessions.has(sessionId)) {
             return;
         }
+        logHttpDebug("session.closed", {
+            path,
+            sessionId,
+        });
         sessions.delete(sessionId);
         if (sessions.size === 0) {
             resetPlanResolutionState();
         }
     }
     const server = createNodeServer(async (req, res) => {
+        logHttpDebug("request.received", getRequestDebugDetails(req));
         if (!isOriginAllowed(req, allowedOrigins)) {
+            logHttpDebug("request.rejected", {
+                ...getRequestDebugDetails(req),
+                reason: "forbidden-origin",
+            });
             writeForbiddenOrigin(res);
             return;
         }
         if (req.method === "OPTIONS") {
+            logHttpDebug("request.preflight", getRequestDebugDetails(req));
             applyCorsHeaders(res);
             res.statusCode = 204;
             res.end();
             return;
         }
         if (getRequestPath(req) !== path) {
+            logHttpDebug("request.rejected", {
+                ...getRequestDebugDetails(req),
+                reason: "path-not-found",
+            });
             writeNotFound(res);
             return;
         }
         if (!req.method || !MCP_ROUTE_METHODS.includes(req.method)) {
+            logHttpDebug("request.rejected", {
+                ...getRequestDebugDetails(req),
+                reason: "unsupported-method",
+            });
             writeMethodNotAllowed(res, MCP_ROUTE_METHODS);
             return;
         }
         try {
             const parsedBody = req.method === "POST" ? await readJsonBody(req) : undefined;
-            const resolution = await resolveSession(req, parsedBody, sessions, async () => createManagedSession(sessions, removeSession));
+            const resolution = await resolveSession(req, parsedBody, sessions, async () => createManagedSession(sessions, removeSession, (sessionId) => {
+                logHttpDebug("session.initialized", {
+                    path,
+                    sessionId,
+                });
+            }));
             if (resolution.status !== "ready") {
+                logHttpDebug("session.rejected", {
+                    ...getRequestDebugDetails(req),
+                    reason: resolution.status,
+                });
                 writeSessionResolution(res, resolution);
                 return;
             }
             try {
+                logHttpDebug("transport.handoff", {
+                    ...getRequestDebugDetails(req),
+                    cleanup: Boolean(resolution.cleanup),
+                });
                 applyCorsHeaders(res);
                 await resolution.managedSession.transport.handleRequest(req, res, parsedBody);
             }
@@ -290,10 +334,14 @@ export async function startHttpServer(options = {}) {
         }
         catch (error) {
             if (error instanceof SyntaxError) {
+                logHttpDebug("request.parse_error", getRequestDebugDetails(req));
                 writeParseError(res);
                 return;
             }
-            console.error("Error handling MCP request:", error);
+            console.error("Error handling MCP request:", {
+                ...getRequestDebugDetails(req),
+                error,
+            });
             if (!res.headersSent) {
                 writeInternalServerError(res);
             }
