@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.9...ynab-mcp-bridge-v0.3.10) (2026-03-11)
+
+
+### Bug Fixes
+
+* log JSON-RPC methods in MCP HTTP handoff ([#25](https://github.com/mossipcams/ynab-mcp-bridge/issues/25)) ([960407b](https://github.com/mossipcams/ynab-mcp-bridge/commit/960407bbe2b66dfb219cc3f69be06bb4fcbb3976))
+
 ## [0.3.9](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.8...ynab-mcp-bridge-v0.3.9) (2026-03-11)
 
 
