@@ -33,8 +33,23 @@ const CORS_HEADERS = {
 const MCP_ROUTE_METHODS = ["GET", "POST", "DELETE"] as const;
 const AUTHLESS_MCP_ALLOWED_METHODS = ["POST", "DELETE"] as const;
 
-type MappedRequestPath = "mcp" | "not-found";
-type McpRouteMethod = (typeof MCP_ROUTE_METHODS)[number];
+type ManagedSession = {
+  close: () => Promise<void>;
+  transport: StreamableHTTPServerTransport;
+};
+
+type SessionResolution =
+  | {
+      cleanup?: () => Promise<void>;
+      managedSession: ManagedSession;
+      status: "ready";
+    }
+  | {
+      status: "invalid-session-header";
+    }
+  | {
+      status: "method-not-allowed";
+    };
 
 function applyCorsHeaders(res: ServerResponse) {
   for (const [name, value] of Object.entries(CORS_HEADERS)) {
@@ -129,11 +144,11 @@ function writeJson(res: ServerResponse, statusCode: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
-function writeJsonRpcError(res: ServerResponse, statusCode: number, message: string) {
+function writeJsonRpcError(res: ServerResponse, statusCode: number, code: number, message: string) {
   writeJson(res, statusCode, {
     jsonrpc: "2.0",
     error: {
-      code: -32000,
+      code,
       message,
     },
     id: null,
@@ -142,24 +157,7 @@ function writeJsonRpcError(res: ServerResponse, statusCode: number, message: str
 
 function writeMethodNotAllowed(res: ServerResponse, allowedMethods: readonly string[]) {
   res.setHeader("allow", allowedMethods.join(", "));
-  writeJsonRpcError(res, 405, "Method not allowed.");
-}
-
-function mapRequestPath(requestPath: string, mcpPath: string): MappedRequestPath {
-  return requestPath === mcpPath ? "mcp" : "not-found";
-}
-
-function isMcpRouteMethod(method: string | undefined): method is McpRouteMethod {
-  return Boolean(method && MCP_ROUTE_METHODS.includes(method as McpRouteMethod));
-}
-
-function handleMcpRouteMethod(res: ServerResponse, method: McpRouteMethod) {
-  if (method === "GET") {
-    writeMethodNotAllowed(res, AUTHLESS_MCP_ALLOWED_METHODS);
-    return false;
-  }
-
-  return true;
+  writeJsonRpcError(res, 405, -32000, "Method not allowed.");
 }
 
 function writeNotFound(res: ServerResponse) {
@@ -174,197 +172,174 @@ function writeForbiddenOrigin(res: ServerResponse) {
   });
 }
 
-function writeMissingSession(res: ServerResponse) {
-  writeJsonRpcError(res, 400, "Bad Request: No valid session ID provided");
-}
-
 function writeParseError(res: ServerResponse) {
-  writeJson(res, 400, {
-    jsonrpc: "2.0",
-    error: {
-      code: -32700,
-      message: "Parse error",
-    },
-    id: null,
-  });
+  writeJsonRpcError(res, 400, -32700, "Parse error");
 }
 
 function writeInternalServerError(res: ServerResponse) {
-  writeJson(res, 500, {
-    jsonrpc: "2.0",
-    error: {
-      code: -32603,
-      message: "Internal server error",
-    },
-    id: null,
-  });
-}
-
-async function resolveManagedSession(
-  req: IncomingMessage,
-  parsedBody: unknown,
-  sessions: Map<string, ManagedSession>,
-  createManagedSession: () => Promise<ManagedSession>,
-) {
-  const sessionId = getSessionId(req);
-  const managedSession = sessionId ? sessions.get(sessionId) : undefined;
-
-  if (managedSession) {
-    return managedSession;
-  }
-
-  if (req.method === "POST" && isInitializeRequest(parsedBody)) {
-    return createManagedSession();
-  }
-
-  return undefined;
-}
-
-async function readRequestBody(req: IncomingMessage) {
-  return req.method === "POST" ? readJsonBody(req) : undefined;
-}
-
-function writeUnsupportedMcpMethod(res: ServerResponse) {
-  writeMethodNotAllowed(res, MCP_ROUTE_METHODS);
-}
-
-function writeAuthlessMcpGetMethodNotAllowed(res: ServerResponse) {
-  writeMethodNotAllowed(res, AUTHLESS_MCP_ALLOWED_METHODS);
-}
-
-function handleMcpRoute(res: ServerResponse, method: string | undefined) {
-  if (!isMcpRouteMethod(method)) {
-    writeUnsupportedMcpMethod(res);
-    return false;
-  }
-
-  if (method === "GET") {
-    writeAuthlessMcpGetMethodNotAllowed(res);
-    return false;
-  }
-
-  return true;
-}
-
-function writeRouteResponse(res: ServerResponse, route: MappedRequestPath) {
-  if (route === "not-found") {
-    writeNotFound(res);
-    return false;
-  }
-
-  return true;
-}
-
-function writeOriginResponse(res: ServerResponse, isAllowed: boolean) {
-  if (!isAllowed) {
-    writeForbiddenOrigin(res);
-    return false;
-  }
-
-  return true;
-}
-
-function writePreflightResponse(req: IncomingMessage, res: ServerResponse) {
-  if (req.method !== "OPTIONS") {
-    return false;
-  }
-
-  applyCorsHeaders(res);
-  res.statusCode = 204;
-  res.end();
-  return true;
-}
-
-function isParseError(error: unknown): error is SyntaxError {
-  return error instanceof SyntaxError;
-}
-
-function logRequestError(error: unknown) {
-  console.error("Error handling MCP request:", error);
-}
-
-function writeUnhandledRequestError(res: ServerResponse) {
-  if (!res.headersSent) {
-    writeInternalServerError(res);
-  }
-}
-
-function writeSessionError(res: ServerResponse, managedSession: ManagedSession | undefined) {
-  if (!managedSession) {
-    writeMissingSession(res);
-    return false;
-  }
-
-  return true;
-}
-
-function getRouteMethod(req: IncomingMessage) {
-  return req.method;
-}
-
-function getMappedRoute(req: IncomingMessage, path: string) {
-  return mapRequestPath(getRequestPath(req), path);
-}
-
-function shouldHandleMcpRoute(req: IncomingMessage, res: ServerResponse, path: string, allowedOrigins: Set<string>) {
-  if (!writeOriginResponse(res, isOriginAllowed(req, allowedOrigins))) {
-    return false;
-  }
-
-  if (writePreflightResponse(req, res)) {
-    return false;
-  }
-
-  if (!writeRouteResponse(res, getMappedRoute(req, path))) {
-    return false;
-  }
-
-  return handleMcpRoute(res, getRouteMethod(req));
-}
-
-async function handleTransportRequest(
-  req: IncomingMessage,
-  res: ServerResponse,
-  sessions: Map<string, ManagedSession>,
-  createManagedSession: () => Promise<ManagedSession>,
-) {
-  const parsedBody = await readRequestBody(req);
-  const managedSession = await resolveManagedSession(req, parsedBody, sessions, createManagedSession);
-
-  if (!writeSessionError(res, managedSession)) {
-    return;
-  }
-
-  if (!managedSession) {
-    return;
-  }
-
-  if (req.method !== "POST" || !isInitializeRequest(parsedBody)) {
-    req.headers["mcp-session-id"] = managedSession.transport.sessionId;
-  }
-
-  applyCorsHeaders(res);
-  await managedSession.transport.handleRequest(req, res, parsedBody);
-}
-
-function handleRequestError(res: ServerResponse, error: unknown) {
-  if (isParseError(error)) {
-    writeParseError(res);
-    return;
-  }
-
-  logRequestError(error);
-  writeUnhandledRequestError(res);
+  writeJsonRpcError(res, 500, -32603, "Internal server error");
 }
 
 function getSessionId(req: IncomingMessage) {
-  return getFirstHeaderValue(req.headers["mcp-session-id"]);
+  const sessionId = req.headers["mcp-session-id"];
+
+  if (typeof sessionId !== "string") {
+    return undefined;
+  }
+
+  const values = sessionId
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (values.length !== 1) {
+    return undefined;
+  }
+
+  return values[0];
 }
 
-type ManagedSession = {
-  close: () => Promise<void>;
-  transport: StreamableHTTPServerTransport;
-};
+function hasMultipleSessionHeaderValues(req: IncomingMessage) {
+  const sessionId = req.headers["mcp-session-id"];
+
+  if (Array.isArray(sessionId)) {
+    return sessionId.length > 1 || sessionId.some((value) => value.includes(","));
+  }
+
+  if (typeof sessionId !== "string") {
+    return false;
+  }
+
+  return sessionId
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean).length > 1;
+}
+
+async function createManagedSession(
+  sessions: Map<string, ManagedSession>,
+  removeSession: (sessionId: string | undefined) => void,
+) {
+  const mcpServer = createServer();
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+    onsessioninitialized: async (sessionId) => {
+      sessions.set(sessionId, {
+        transport,
+        close: async () => {
+          await transport.close();
+          await mcpServer.close();
+        },
+      });
+    },
+    onsessionclosed: async (sessionId) => {
+      removeSession(sessionId);
+      await mcpServer.close();
+    },
+  });
+
+  transport.onclose = () => {
+    removeSession(transport.sessionId);
+  };
+
+  await mcpServer.connect(transport);
+
+  return {
+    transport,
+    close: async () => {
+      await transport.close();
+      await mcpServer.close();
+    },
+  } satisfies ManagedSession;
+}
+
+function getAnyManagedSession(sessions: Map<string, ManagedSession>) {
+  return sessions.values().next().value as ManagedSession | undefined;
+}
+
+async function resolveSession(
+  req: IncomingMessage,
+  parsedBody: unknown,
+  sessions: Map<string, ManagedSession>,
+  createSession: () => Promise<ManagedSession>,
+): Promise<SessionResolution> {
+  if (req.method === "POST" && isInitializeRequest(parsedBody)) {
+    return {
+      managedSession: await createSession(),
+      status: "ready",
+    };
+  }
+
+  if (hasMultipleSessionHeaderValues(req)) {
+    return {
+      status: "invalid-session-header",
+    };
+  }
+
+  const sessionId = getSessionId(req);
+
+  if (sessionId) {
+    const managedSession = sessions.get(sessionId);
+
+    if (!managedSession) {
+      const fallbackSession = getAnyManagedSession(sessions);
+
+      if (fallbackSession) {
+        return {
+          managedSession: fallbackSession,
+          status: "ready",
+        };
+      }
+
+      const ephemeralSession = await createSession();
+
+      return {
+        cleanup: ephemeralSession.close,
+        managedSession: ephemeralSession,
+        status: "ready",
+      };
+    }
+
+    return {
+      managedSession,
+      status: "ready",
+    };
+  }
+
+  const fallbackSession = getAnyManagedSession(sessions);
+
+  if (req.method === "GET" && !fallbackSession) {
+    return {
+      status: "method-not-allowed",
+    };
+  }
+
+  if (fallbackSession) {
+    return {
+      managedSession: fallbackSession,
+      status: "ready",
+    };
+  }
+
+  const ephemeralSession = await createSession();
+
+  return {
+    cleanup: ephemeralSession.close,
+    managedSession: ephemeralSession,
+    status: "ready",
+  };
+}
+
+function writeSessionResolution(res: ServerResponse, resolution: Exclude<SessionResolution, { cleanup?: () => Promise<void>; managedSession: ManagedSession; status: "ready" }>) {
+  switch (resolution.status) {
+    case "invalid-session-header":
+      writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single value");
+      return;
+    case "method-not-allowed":
+      writeMethodNotAllowed(res, AUTHLESS_MCP_ALLOWED_METHODS);
+      return;
+  }
+}
 
 export async function startHttpServer(options: HttpServerOptions = {}): Promise<StartedHttpServer> {
   const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
@@ -385,61 +360,60 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
     }
   }
 
-  async function createManagedSession() {
-    const mcpServer = createServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: async (sessionId) => {
-        sessions.set(sessionId, {
-          transport,
-          close: async () => {
-            await transport.close();
-            await mcpServer.close();
-          },
-        });
-      },
-      onsessionclosed: async (sessionId) => {
-        removeSession(sessionId);
-        await mcpServer.close();
-      },
-    });
-
-    transport.onclose = () => {
-      removeSession(transport.sessionId);
-    };
-
-    await mcpServer.connect(transport);
-
-    return {
-      transport,
-      close: async () => {
-        await transport.close();
-        await mcpServer.close();
-      },
-    } satisfies ManagedSession;
-  }
-
   const server = createNodeServer(async (req, res) => {
-    if (!shouldHandleMcpRoute(req, res, path, allowedOrigins)) {
+    if (!isOriginAllowed(req, allowedOrigins)) {
+      writeForbiddenOrigin(res);
       return;
     }
 
-    if (req.method === "GET") {
-      writeJson(res, 405, {
-        jsonrpc: "2.0",
-        error: {
-          code: -32000,
-          message: "Method not allowed.",
-        },
-        id: null,
-      });
+    if (req.method === "OPTIONS") {
+      applyCorsHeaders(res);
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    if (getRequestPath(req) !== path) {
+      writeNotFound(res);
+      return;
+    }
+
+    if (!req.method || !MCP_ROUTE_METHODS.includes(req.method as (typeof MCP_ROUTE_METHODS)[number])) {
+      writeMethodNotAllowed(res, MCP_ROUTE_METHODS);
       return;
     }
 
     try {
-      await handleTransportRequest(req, res, sessions, createManagedSession);
+      const parsedBody = req.method === "POST" ? await readJsonBody(req) : undefined;
+      const resolution = await resolveSession(
+        req,
+        parsedBody,
+        sessions,
+        async () => createManagedSession(sessions, removeSession),
+      );
+
+      if (resolution.status !== "ready") {
+        writeSessionResolution(res, resolution);
+        return;
+      }
+
+      try {
+        applyCorsHeaders(res);
+        await resolution.managedSession.transport.handleRequest(req, res, parsedBody);
+      } finally {
+        await resolution.cleanup?.();
+      }
     } catch (error) {
-      handleRequestError(res, error);
+      if (error instanceof SyntaxError) {
+        writeParseError(res);
+        return;
+      }
+
+      console.error("Error handling MCP request:", error);
+
+      if (!res.headersSent) {
+        writeInternalServerError(res);
+      }
     }
   });
 
