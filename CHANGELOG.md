@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.4...ynab-mcp-bridge-v0.3.5) (2026-03-11)
+
+
+### Bug Fixes
+
+* return 405 for authless GET streamable HTTP probes ([#14](https://github.com/mossipcams/ynab-mcp-bridge/issues/14)) ([0e25d6e](https://github.com/mossipcams/ynab-mcp-bridge/commit/0e25d6e64d0f9addc9f0c8230fdccbb8a3d61651))
+
 ## [0.3.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.3...ynab-mcp-bridge-v0.3.4) (2026-03-11)
 
 
