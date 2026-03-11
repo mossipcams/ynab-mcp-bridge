@@ -261,6 +261,33 @@ describe("startHttpServer", () => {
     });
   });
 
+  it("returns 405 for authless GET requests to the MCP endpoint", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      headers: {
+        Accept: "text/event-stream",
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    await expect(response.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Method not allowed.",
+      },
+      id: null,
+    });
+  });
+
   it("returns 404 for non-MCP paths", async () => {
     const httpServer = await startHttpServer({
       host: "127.0.0.1",
