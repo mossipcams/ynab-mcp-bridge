@@ -45,6 +45,9 @@ type SessionResolution =
       status: "ready";
     }
   | {
+      status: "invalid-session-header";
+    }
+  | {
       status: "method-not-allowed";
     };
 
@@ -178,11 +181,39 @@ function writeInternalServerError(res: ServerResponse) {
 }
 
 function getSessionId(req: IncomingMessage) {
-  return getFirstHeaderValue(req.headers["mcp-session-id"]);
+  const sessionId = req.headers["mcp-session-id"];
+
+  if (typeof sessionId !== "string") {
+    return undefined;
+  }
+
+  const values = sessionId
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (values.length !== 1) {
+    return undefined;
+  }
+
+  return values[0];
 }
 
-function normalizeSessionHeader(req: IncomingMessage, sessionId: string) {
-  req.headers["mcp-session-id"] = sessionId;
+function hasMultipleSessionHeaderValues(req: IncomingMessage) {
+  const sessionId = req.headers["mcp-session-id"];
+
+  if (Array.isArray(sessionId)) {
+    return sessionId.length > 1 || sessionId.some((value) => value.includes(","));
+  }
+
+  if (typeof sessionId !== "string") {
+    return false;
+  }
+
+  return sessionId
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean).length > 1;
 }
 
 async function createManagedSession(
@@ -232,6 +263,19 @@ async function resolveSession(
   sessions: Map<string, ManagedSession>,
   createSession: () => Promise<ManagedSession>,
 ): Promise<SessionResolution> {
+  if (req.method === "POST" && isInitializeRequest(parsedBody)) {
+    return {
+      managedSession: await createSession(),
+      status: "ready",
+    };
+  }
+
+  if (hasMultipleSessionHeaderValues(req)) {
+    return {
+      status: "invalid-session-header",
+    };
+  }
+
   const sessionId = getSessionId(req);
 
   if (sessionId) {
@@ -256,28 +300,19 @@ async function resolveSession(
       };
     }
 
-    normalizeSessionHeader(req, managedSession.transport.sessionId ?? sessionId);
-
     return {
       managedSession,
       status: "ready",
     };
   }
 
-  if (req.method === "POST" && isInitializeRequest(parsedBody)) {
-    return {
-      managedSession: await createSession(),
-      status: "ready",
-    };
-  }
+  const fallbackSession = getAnyManagedSession(sessions);
 
-  if (req.method === "GET") {
+  if (req.method === "GET" && !fallbackSession) {
     return {
       status: "method-not-allowed",
     };
   }
-
-  const fallbackSession = getAnyManagedSession(sessions);
 
   if (fallbackSession) {
     return {
@@ -297,6 +332,9 @@ async function resolveSession(
 
 function writeSessionResolution(res: ServerResponse, resolution: Exclude<SessionResolution, { cleanup?: () => Promise<void>; managedSession: ManagedSession; status: "ready" }>) {
   switch (resolution.status) {
+    case "invalid-session-header":
+      writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single value");
+      return;
     case "method-not-allowed":
       writeMethodNotAllowed(res, AUTHLESS_MCP_ALLOWED_METHODS);
       return;
