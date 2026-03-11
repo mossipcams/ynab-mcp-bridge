@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.1...ynab-mcp-bridge-v0.3.2) (2026-03-11)
+
+
+### Bug Fixes
+
+* remove standalone health endpoint ([#8](https://github.com/mossipcams/ynab-mcp-bridge/issues/8)) ([da45bc3](https://github.com/mossipcams/ynab-mcp-bridge/commit/da45bc33a9538c848fe79ae7e96b7c6676c57927))
+
 ## [0.3.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.0...ynab-mcp-bridge-v0.3.1) (2026-03-11)
 
 
