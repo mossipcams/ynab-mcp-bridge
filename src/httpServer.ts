@@ -53,6 +53,11 @@ type SessionResolution =
 
 type HttpDebugDetails = Record<string, unknown>;
 
+type JsonRpcRequestLike = {
+  id?: unknown;
+  method?: unknown;
+};
+
 function applyCorsHeaders(res: ServerResponse) {
   for (const [name, value] of Object.entries(CORS_HEADERS)) {
     res.setHeader(name, value);
@@ -213,6 +218,25 @@ function getRequestDebugDetails(req: IncomingMessage): HttpDebugDetails {
     protocolVersion: getFirstHeaderValue(req.headers["mcp-protocol-version"]),
     sessionId: getSessionId(req),
   };
+}
+
+function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
+  if (!parsedBody || typeof parsedBody !== "object") {
+    return {};
+  }
+
+  const request = parsedBody as JsonRpcRequestLike;
+  const details: HttpDebugDetails = {};
+
+  if (typeof request.method === "string") {
+    details.jsonRpcMethod = request.method;
+  }
+
+  if ("id" in request) {
+    details.jsonRpcId = request.id;
+  }
+
+  return details;
 }
 
 function hasMultipleSessionHeaderValues(req: IncomingMessage) {
@@ -446,6 +470,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
       try {
         logHttpDebug("transport.handoff", {
           ...getRequestDebugDetails(req),
+          ...getJsonRpcDebugDetails(parsedBody),
           cleanup: Boolean(resolution.cleanup),
         });
         applyCorsHeaders(res);
