@@ -141,6 +141,20 @@ function getRequestDebugDetails(req) {
         sessionId: getSessionId(req),
     };
 }
+function getJsonRpcDebugDetails(parsedBody) {
+    if (!parsedBody || typeof parsedBody !== "object") {
+        return {};
+    }
+    const request = parsedBody;
+    const details = {};
+    if (typeof request.method === "string") {
+        details.jsonRpcMethod = request.method;
+    }
+    if ("id" in request) {
+        details.jsonRpcId = request.id;
+    }
+    return details;
+}
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (Array.isArray(sessionId)) {
@@ -323,6 +337,7 @@ export async function startHttpServer(options = {}) {
             try {
                 logHttpDebug("transport.handoff", {
                     ...getRequestDebugDetails(req),
+                    ...getJsonRpcDebugDetails(parsedBody),
                     cleanup: Boolean(resolution.cleanup),
                 });
                 applyCorsHeaders(res);
