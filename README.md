@@ -4,9 +4,9 @@
 
 It supports:
 
-* authless streamable HTTP by default for self-hosted deployments
+* stateless authless streamable HTTP by default for self-hosted deployments
 * `stdio` transport when explicitly requested for local clients and debugging
-* HTTP session termination via `DELETE` for clean client resets
+* direct JSON responses for HTTP requests without durable MCP sessions
 
 ## Requirements
 
@@ -21,6 +21,7 @@ Set these environment variables before starting the server:
 * `MCP_ALLOWED_ORIGINS` optional comma-separated allowlist for browser-based HTTP clients like remote MCP hosts
 
 HTTP mode validates the `Origin` header when one is present. Loopback origins are allowed automatically for loopback hosts, but remote/browser deployments should set `MCP_ALLOWED_ORIGINS` explicitly, for example `https://claude.ai`.
+The default HTTP transport is stateless: clients should use `POST /mcp` requests directly and should not rely on returned `Mcp-Session-Id` headers, session-scoped `GET` streams, or `DELETE` session teardown.
 This server does not implement OAuth for MCP. Remote deployments stay authless and rely on network placement plus explicit origin allowlists.
 
 If `YNAB_PLAN_ID` is not set, the bridge automatically resolves YNAB's `default_plan` when one exists or the only available plan when there is exactly one. If a configured plan becomes stale, the bridge retries once with a fresh plan resolution.
@@ -85,6 +86,8 @@ MCP_HOST=0.0.0.0 \
 MCP_ALLOWED_ORIGINS=https://claude.ai \
 npm run start:http
 ```
+
+This stateless HTTP default is intended to be more tolerant of Claude Desktop's remote MCP lifecycle, where tool calls may arrive without a durable MCP session continuation.
 
 ## CLI Usage
 

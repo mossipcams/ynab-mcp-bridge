@@ -105,15 +105,12 @@ describe("startHttpServer", () => {
       details.path === "/mcp" &&
       details.origin === "https://claude.ai"
     ))).toBeTruthy();
-    expect(findLogCall(consoleErrorSpy, "session.initialized", (details) => (
-      details.path === "/mcp" &&
-      typeof details.sessionId === "string"
-    ))).toBeTruthy();
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
-      details.method === "POST" &&
       details.path === "/mcp" &&
+      details.method === "POST" &&
       details.jsonRpcMethod === "initialize" &&
-      details.cleanup === false
+      details.sessionId === undefined &&
+      details.cleanup === true
     ))).toBeTruthy();
   });
 
@@ -137,7 +134,6 @@ describe("startHttpServer", () => {
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("access-control-allow-methods")).toContain("POST");
-    expect(response.headers.get("access-control-allow-methods")).toContain("DELETE");
     expect(response.headers.get("access-control-allow-headers")).toContain("content-type");
     expect(response.headers.get("access-control-allow-headers")).toContain("mcp-session-id");
     expect(response.headers.get("access-control-expose-headers")).toContain("Mcp-Session-Id");
@@ -365,7 +361,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("allows a session-scoped GET stream after initialization", async () => {
+  it("returns 405 for GET requests even after initialization", async () => {
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
@@ -397,25 +393,95 @@ describe("startHttpServer", () => {
       }),
     });
 
-    const sessionId = initializeResponse.headers.get("mcp-session-id");
-
     expect(initializeResponse.status).toBe(200);
-    expect(sessionId).toBeTruthy();
+    expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
 
     const streamResponse = await fetch(httpServer.url, {
       headers: {
         Accept: "text/event-stream",
         Origin: "https://claude.ai",
         "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        "Mcp-Session-Id": sessionId ?? "",
       },
     });
 
-    expect(streamResponse.status).toBe(200);
-    expect(streamResponse.headers.get("content-type")).toContain("text/event-stream");
-    expect(streamResponse.headers.get("mcp-session-id")).toBe(sessionId);
+    expect(streamResponse.status).toBe(405);
+    expect(streamResponse.headers.get("allow")).toBe("POST");
+  });
 
-    await streamResponse.body?.cancel();
+  it("returns a JSON initialize response without creating an MCP session", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "json-init-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(response.headers.get("mcp-session-id")).toBeNull();
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: expect.any(Object),
+    });
+  });
+
+  it("handles sessionless tools/call requests without a prior MCP session", async () => {
+    const httpServer = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(response.headers.get("mcp-session-id")).toBeNull();
+    await expect(response.text()).resolves.toContain("\"content\"");
   });
 
   it("keeps authless probing and MCP transport signals consistent for remote clients", async () => {
@@ -446,7 +512,7 @@ describe("startHttpServer", () => {
     });
 
     expect(getResponse.status).toBe(405);
-    expect(getResponse.headers.get("allow")).toBe("POST, DELETE");
+    expect(getResponse.headers.get("allow")).toBe("POST");
     await expect(getResponse.json()).resolves.toEqual({
       jsonrpc: "2.0",
       error: {
@@ -480,8 +546,8 @@ describe("startHttpServer", () => {
     });
 
     expect(initializeResponse.status).toBe(200);
-    expect(initializeResponse.headers.get("mcp-session-id")).toBeTruthy();
-    expect(initializeResponse.headers.get("content-type")).toContain("text/event-stream");
+    expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
+    expect(initializeResponse.headers.get("content-type")).toContain("application/json");
   });
 
   it("returns the same explicit method contract for unsupported MCP endpoint methods", async () => {
@@ -501,7 +567,7 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(405);
-    expect(response.headers.get("allow")).toBe("GET, POST, DELETE");
+    expect(response.headers.get("allow")).toBe("POST");
     await expect(response.json()).resolves.toEqual({
       jsonrpc: "2.0",
       error: {
@@ -512,7 +578,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("uses the SDK transport's missing-session response after initialization", async () => {
+  it("accepts sessionless POST requests after initialization", async () => {
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
@@ -562,18 +628,11 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "Bad Request: Mcp-Session-Id header is required",
-      },
-      id: null,
-    });
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toContain("\"ynab_get_mcp_version\"");
   });
 
-  it("uses the SDK transport's missing-session GET response after initialization", async () => {
+  it("returns 405 for GET requests after initialization", async () => {
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
@@ -615,18 +674,18 @@ describe("startHttpServer", () => {
       },
     });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(405);
     await expect(response.json()).resolves.toEqual({
       jsonrpc: "2.0",
       error: {
         code: -32000,
-        message: "Bad Request: Mcp-Session-Id header is required",
+        message: "Method not allowed.",
       },
       id: null,
     });
   });
 
-  it("keeps the returned session alive when initialize includes a stale session header", async () => {
+  it("ignores stale session headers on initialize and later requests", async () => {
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
@@ -659,10 +718,8 @@ describe("startHttpServer", () => {
       }),
     });
 
-    const sessionId = initializeResponse.headers.get("mcp-session-id");
-
     expect(initializeResponse.status).toBe(200);
-    expect(sessionId).toBeTruthy();
+    expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -671,7 +728,7 @@ describe("startHttpServer", () => {
         "Content-Type": "application/json",
         Origin: "https://claude.ai",
         "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        "Mcp-Session-Id": sessionId ?? "",
+        "Mcp-Session-Id": "stale-session-id",
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -682,7 +739,7 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("mcp-session-id")).toBe(sessionId);
+    expect(response.headers.get("mcp-session-id")).toBeNull();
     await expect(response.text()).resolves.toContain("\"name\":\"ynab_get_mcp_version\"");
   });
 
@@ -710,7 +767,7 @@ describe("startHttpServer", () => {
     ))).toBeTruthy();
   });
 
-  it("lets clients terminate a session and reconnect cleanly", async () => {
+  it("lets clients reconnect cleanly without session teardown", async () => {
     const httpServer = await startHttpServer({
       host: "127.0.0.1",
       port: 0,
@@ -724,11 +781,7 @@ describe("startHttpServer", () => {
     const firstTransport = new StreamableHTTPClientTransport(new URL(httpServer.url));
 
     await firstClient.connect(firstTransport);
-    const firstSessionId = firstTransport.sessionId;
-
-    expect(firstSessionId).toBeTruthy();
-
-    await firstTransport.terminateSession();
+    expect(firstTransport.sessionId).toBeUndefined();
 
     const secondClient = new Client({
       name: "ynab-mcp-bridge-test-2",
@@ -738,14 +791,13 @@ describe("startHttpServer", () => {
 
     await secondClient.connect(secondTransport);
 
-    expect(secondTransport.sessionId).toBeTruthy();
-    expect(secondTransport.sessionId).not.toBe(firstSessionId);
+    expect(secondTransport.sessionId).toBeUndefined();
 
     await firstClient.close();
     await secondClient.close();
   });
 
-  it("logs the JSON-RPC method for a sessionless POST after session teardown", async () => {
+  it("logs the JSON-RPC method for a sessionless tools/call request", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
@@ -758,45 +810,6 @@ describe("startHttpServer", () => {
       await httpServer.close();
     });
 
-    const initializeResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: LATEST_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: {
-            name: "teardown-log-client",
-            version: "1.0.0",
-          },
-        },
-      }),
-    });
-
-    const sessionId = initializeResponse.headers.get("mcp-session-id");
-
-    expect(initializeResponse.status).toBe(200);
-    expect(sessionId).toBeTruthy();
-
-    const deleteResponse = await fetch(httpServer.url, {
-      method: "DELETE",
-      headers: {
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        "Mcp-Session-Id": sessionId ?? "",
-      },
-    });
-
-    expect(deleteResponse.status).toBe(200);
-
     const followUpResponse = await fetch(httpServer.url, {
       method: "POST",
       headers: {
@@ -807,18 +820,21 @@ describe("startHttpServer", () => {
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
-        id: 2,
-        method: "tools/list",
-        params: {},
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
       }),
     });
 
-    expect(followUpResponse.status).toBe(400);
+    expect(followUpResponse.status).toBe(200);
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
       details.method === "POST" &&
       details.path === "/mcp" &&
       details.cleanup === true &&
-      details.jsonRpcMethod === "tools/list" &&
+      details.jsonRpcMethod === "tools/call" &&
       details.sessionId === undefined
     ))).toBeTruthy();
   });
@@ -834,21 +850,13 @@ describe("startHttpServer", () => {
       await httpServer.close();
     });
 
-    const client = new Client({
-      name: "ynab-mcp-bridge-session-header-test",
-      version: "1.0.0",
-    });
-    const transport = new StreamableHTTPClientTransport(new URL(httpServer.url));
-
-    await client.connect(transport);
-
     const headers = new Headers({
       Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
       "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
     });
-    headers.append("Mcp-Session-Id", transport.sessionId ?? "");
-    headers.append("Mcp-Session-Id", "stale-session-id");
+    headers.append("Mcp-Session-Id", "session-one");
+    headers.append("Mcp-Session-Id", "session-two");
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -870,12 +878,10 @@ describe("startHttpServer", () => {
       },
       id: null,
     });
-    expect(findLogCall(consoleErrorSpy, "session.rejected", (details) => (
+    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
       details.reason === "invalid-session-header" &&
       details.path === "/mcp"
     ))).toBeTruthy();
-
-    await client.close();
   });
 
   it("returns a client error for malformed JSON without breaking later requests", async () => {
