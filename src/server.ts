@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as ynab from "ynab";
 
+import { readYnabConfig } from "./config.js";
 import { getPackageInfo } from "./packageInfo.js";
 import { createYnabApi as createSdkYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
@@ -52,7 +53,23 @@ type ToolRegistration = {
   module: ToolModule;
 };
 
-const toolRegistrations: ToolRegistration[] = [
+type ToolConfig = {
+  description: string;
+  inputSchema: any;
+  title: string;
+};
+
+type ToolHandler = (input: any) => Promise<any>;
+
+type ToolRegistrar = {
+  registerTool: (
+    name: string,
+    config: ToolConfig,
+    handler: ToolHandler,
+  ) => void;
+};
+
+export const toolRegistrations: ToolRegistration[] = [
   { title: "Get MCP Version", module: GetMcpVersionTool },
   { title: "Get User", module: GetUserTool },
   { title: "List Plans", module: ListPlansTool },
@@ -84,15 +101,15 @@ const toolRegistrations: ToolRegistration[] = [
   { title: "Get Money Movement Groups By Month", module: GetMoneyMovementGroupsByMonthTool },
 ];
 
-export function createYnabApi(token = process.env.YNAB_API_TOKEN || "") {
+export function createYnabApi(token = readYnabConfig(process.env).apiToken) {
   return createSdkYnabApi(token);
 }
 
-export function createServer(api = createYnabApi()) {
-  const server = new McpServer(SERVER_INFO);
+export function registerServerTools(registrar: ToolRegistrar, api: ynab.API) {
+  const registeredToolNames: string[] = [];
 
   for (const { title, module } of toolRegistrations) {
-    server.registerTool(
+    registrar.registerTool(
       module.name,
       {
         title,
@@ -101,7 +118,16 @@ export function createServer(api = createYnabApi()) {
       },
       async (input: any) => module.execute(input, api) as any,
     );
+    registeredToolNames.push(module.name);
   }
+
+  return registeredToolNames;
+}
+
+export function createServer(api = createYnabApi()) {
+  const server = new McpServer(SERVER_INFO);
+
+  registerServerTools(server, api);
 
   return server;
 }
