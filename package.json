@@ -2,7 +2,15 @@
   "name": "ynab-mcp-bridge",
   "version": "0.3.12",
   "description": "ynab-mcp-bridge MCP server",
-  "author": "Caleb LeNoir <caleb.lenoir@hey.com>",
+  "author": "Matt",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mossipcams/ynab-mcp-bridge.git"
+  },
+  "homepage": "https://github.com/mossipcams/ynab-mcp-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/mossipcams/ynab-mcp-bridge/issues"
+  },
   "type": "module",
   "bin": {
     "ynab-mcp-bridge": "./dist/index.js"

@@ -41,8 +41,8 @@ describe("config", () => {
 
   it("reads only YNAB settings from environment", () => {
     expect(readYnabConfig({
-      YNAB_API_TOKEN: "token-2",
-      YNAB_PLAN_ID: "plan-2",
+      YNAB_API_TOKEN: "  token-2  ",
+      YNAB_PLAN_ID: "  plan-2  ",
     })).toEqual({
       apiToken: "token-2",
       planId: "plan-2",
