@@ -2,6 +2,7 @@ export type RuntimeTransport = "http" | "stdio";
 
 export type RuntimeConfig = {
   allowedOrigins: string[];
+  allowedHosts: string[];
   host: string;
   path: string;
   port: number;
@@ -127,9 +128,14 @@ export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeCon
   const envAllowedOrigins = env.MCP_ALLOWED_ORIGINS
     ? parseCsv(env.MCP_ALLOWED_ORIGINS)
     : undefined;
+  const allowedHosts = readCsvFlag(args, "--allowed-hosts");
+  const envAllowedHosts = env.MCP_ALLOWED_HOSTS
+    ? parseCsv(env.MCP_ALLOWED_HOSTS)
+    : undefined;
 
   return {
     allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : (envAllowedOrigins ?? []),
+    allowedHosts: allowedHosts.length > 0 ? allowedHosts : (envAllowedHosts ?? []),
     transport: rawTransport,
     host: readFlag(args, "--host") ?? env.MCP_HOST ?? "127.0.0.1",
     path: readFlag(args, "--path") ?? env.MCP_PATH ?? "/mcp",

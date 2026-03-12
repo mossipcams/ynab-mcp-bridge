@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { assertYnabConfig } from "./config.js";
 import { getPackageInfo } from "./packageInfo.js";
-import { createYnabApi } from "./ynabApi.js";
+import { attachYnabApiRuntimeContext, createYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
 import * as GetCategoryTool from "./tools/GetCategoryTool.js";
 import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
@@ -80,8 +80,9 @@ export function registerServerTools(registrar, api) {
     return registeredToolNames;
 }
 export function createServer(config, api = createYnabApi(config)) {
-    assertYnabConfig(config);
+    const normalizedConfig = assertYnabConfig(config);
     const server = new McpServer(SERVER_INFO);
-    registerServerTools(server, api);
+    const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
+    registerServerTools(server, configuredApi);
     return server;
 }

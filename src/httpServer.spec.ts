@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import { request as httpRequest } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startHttpServer } from "./httpServer.js";
@@ -24,6 +25,50 @@ describe("startHttpServer", () => {
       details !== null &&
       matcher(details as Record<string, unknown>)
     ));
+  }
+
+  async function sendRawHttpRequest(url: string, options: {
+    body?: string;
+    headers?: Record<string, string>;
+    method: string;
+    path?: string;
+  }) {
+    const target = new URL(options.path ?? url, url);
+
+    return await new Promise<{
+      body: string;
+      headers: Record<string, string | string[] | undefined>;
+      statusCode: number | undefined;
+    }>((resolve, reject) => {
+      const request = httpRequest({
+        host: target.hostname,
+        method: options.method,
+        path: `${target.pathname}${target.search}`,
+        port: Number(target.port),
+        headers: options.headers,
+      }, (response) => {
+        const chunks: Buffer[] = [];
+
+        response.on("data", (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        response.on("end", () => {
+          resolve({
+            body: Buffer.concat(chunks).toString("utf8"),
+            headers: response.headers,
+            statusCode: response.statusCode,
+          });
+        });
+      });
+
+      request.on("error", reject);
+
+      if (options.body) {
+        request.write(options.body);
+      }
+
+      request.end();
+    });
   }
 
   beforeEach(() => {
@@ -337,6 +382,96 @@ describe("startHttpServer", () => {
       details.reason === "forbidden-origin" &&
       details.origin === "https://evil.example"
     ))).toBeTruthy();
+  });
+
+  it("rejects invalid host headers when bound to localhost", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Host: "evil.example",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.headers["content-type"]).toContain("application/json");
+    expect(JSON.parse(response.body)).toMatchObject({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: expect.stringContaining("Invalid Host"),
+      },
+      id: null,
+    });
+  });
+
+  it("allows configured proxy host headers on loopback while still rejecting unknown hosts", async () => {
+    const httpServer = await (startHttpServer as any)({
+      ynab,
+      allowedHosts: ["mcp.example.com"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const acceptedResponse = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Host: "mcp.example.com",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(acceptedResponse.statusCode).toBe(200);
+
+    const rejectedResponse = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Host: "unexpected.example",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(rejectedResponse.statusCode).toBe(403);
+    expect(JSON.parse(rejectedResponse.body)).toMatchObject({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: expect.stringContaining("Invalid Host"),
+      },
+      id: null,
+    });
   });
 
   it("rejects authless probing URLs from untrusted origins before returning 404", async () => {
@@ -976,6 +1111,54 @@ describe("startHttpServer", () => {
     expect(result.tools.map((tool) => tool.name)).toContain("ynab_list_plans");
 
     await client.close();
+  });
+
+  it("returns 413 for oversized JSON requests instead of an internal server error", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {
+            payload: "x".repeat(120_000),
+          },
+        },
+      }),
+    });
+
+    expect(response.statusCode).toBe(413);
+    expect(response.headers["content-type"]).toContain("application/json");
+    expect(JSON.parse(response.body)).toMatchObject({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Payload too large",
+      },
+      id: null,
+    });
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+      "Error handling MCP request:",
+      expect.anything(),
+    );
   });
 
   it("allows the started HTTP server to be closed more than once", async () => {
