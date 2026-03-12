@@ -3,7 +3,9 @@ import { createServer, registerServerTools } from "./server.js";
 
 describe("createServer", () => {
   it("registers the rebuilt read-only YNAB toolset", () => {
-    const server = createServer();
+    const server = createServer({
+      apiToken: "test-token",
+    });
     const registeredTools = Object.keys((server as any)._registeredTools);
 
     expect(registeredTools).toHaveLength(29);

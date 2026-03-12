@@ -4,14 +4,15 @@ import type { AddressInfo } from "node:net";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
+import { readYnabConfig, type YnabConfig } from "./config.js";
 import { createServer } from "./server.js";
-import { resetPlanResolutionState } from "./tools/planToolUtils.js";
 
 export type HttpServerOptions = {
   allowedOrigins?: string[];
   host?: string;
   path?: string;
   port?: number;
+  ynab?: YnabConfig;
 };
 
 export type StartedHttpServer = {
@@ -254,8 +255,8 @@ function hasMultipleSessionHeaderValues(req: IncomingMessage) {
     .filter(Boolean).length > 1;
 }
 
-async function createManagedRequest() {
-  const mcpServer = createServer();
+async function createManagedRequest(config: YnabConfig) {
+  const mcpServer = createServer(config);
   const transport = new StreamableHTTPServerTransport({
     enableJsonResponse: true,
     sessionIdGenerator: undefined,
@@ -331,6 +332,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
   const host = options.host ?? "127.0.0.1";
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
+  const ynab = options.ynab ?? readYnabConfig(process.env);
 
   const server = createNodeServer(async (req, res) => {
     logHttpDebug("request.received", getRequestDebugDetails(req));
@@ -374,7 +376,7 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
       const parsedBody = req.method === "POST" ? await readJsonBody(req) : undefined;
       const resolution = await resolveRequest(
         req,
-        createManagedRequest,
+        () => createManagedRequest(ynab),
       );
 
       if (resolution.status !== "ready") {
@@ -457,7 +459,6 @@ export async function startHttpServer(options: HttpServerOptions = {}): Promise<
       }
 
       closed = true;
-      resetPlanResolutionState();
       await closeNodeServer(server);
     },
   };

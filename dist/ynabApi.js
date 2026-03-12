@@ -4,6 +4,18 @@ import { createYnabRateLimiter } from "./ynabRateLimiter.js";
 const DEFAULT_RETRY_DELAY_MS = 5_000;
 const DEFAULT_RETRY_LIMIT = 1;
 const sharedRateLimiter = createYnabRateLimiter();
+const runtimeContextSymbol = Symbol("ynabRuntimeContext");
+function normalizeYnabConfig(configOrToken) {
+    if (typeof configOrToken === "string") {
+        return {
+            apiToken: configOrToken.trim(),
+        };
+    }
+    return configOrToken ?? readYnabConfig(process.env);
+}
+function getSdkConfiguration(api) {
+    return api._configuration;
+}
 function sleep(ms) {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
@@ -38,12 +50,34 @@ function createRateLimitedFetchApi(token, options) {
         }
     };
 }
-export function createYnabApi(token = readYnabConfig(process.env).apiToken, options = {}) {
-    const api = new ynab.API(token);
-    const configuration = api._configuration;
+export function attachYnabApiRuntimeContext(api, config) {
+    const target = api;
+    const existingContext = target[runtimeContextSymbol];
+    if (existingContext) {
+        existingContext.config = config;
+        return target;
+    }
+    Object.defineProperty(target, runtimeContextSymbol, {
+        configurable: false,
+        enumerable: false,
+        value: {
+            config,
+            runtimePlanIdOverride: undefined,
+        },
+        writable: false,
+    });
+    return target;
+}
+export function getYnabApiRuntimeContext(api) {
+    return api[runtimeContextSymbol];
+}
+export function createYnabApi(configOrToken = readYnabConfig(process.env), options = {}) {
+    const config = normalizeYnabConfig(configOrToken);
+    const api = attachYnabApiRuntimeContext(new ynab.API(config.apiToken), config);
+    const configuration = getSdkConfiguration(api);
     configuration.config = {
         ...configuration.configuration,
-        fetchApi: createRateLimitedFetchApi(token, {
+        fetchApi: createRateLimitedFetchApi(config.apiToken, {
             fetchApi: options.fetchApi ?? fetch,
             rateLimiter: options.rateLimiter ?? sharedRateLimiter,
             retryDelayMs: options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS,
@@ -54,7 +88,7 @@ export function createYnabApi(token = readYnabConfig(process.env).apiToken, opti
         Object.defineProperty(api, "moneyMovements", {
             configurable: true,
             enumerable: false,
-            value: new ynab.MoneyMovementsApi(api._configuration),
+            value: new ynab.MoneyMovementsApi(getSdkConfiguration(api)),
         });
     }
     return api;

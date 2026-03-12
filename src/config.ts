@@ -39,13 +39,20 @@ function readFlag(args: string[], name: string) {
   return args[index + 1];
 }
 
-function hasValue(value: string | undefined) {
-  return Boolean(value?.trim());
-}
-
 function readOptionalValue(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function hasValue(value: string | undefined) {
+  return readOptionalValue(value) !== undefined;
+}
+
+function parseCsv(value: string) {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function readCsvFlag(args: string[], name: string) {
@@ -55,10 +62,7 @@ function readCsvFlag(args: string[], name: string) {
     return [];
   }
 
-  return value
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+  return parseCsv(value);
 }
 
 function getBackendReadiness(env: EnvConfig): BackendReadiness {
@@ -108,9 +112,8 @@ export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeCon
 
   const allowedOrigins = readCsvFlag(args, "--allowed-origins");
   const envAllowedOrigins = env.MCP_ALLOWED_ORIGINS
-    ?.split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+    ? parseCsv(env.MCP_ALLOWED_ORIGINS)
+    : undefined;
 
   return {
     allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : (envAllowedOrigins ?? []),

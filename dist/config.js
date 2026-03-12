@@ -5,22 +5,25 @@ function readFlag(args, name) {
     }
     return args[index + 1];
 }
-function hasValue(value) {
-    return Boolean(value?.trim());
-}
 function readOptionalValue(value) {
     const trimmed = value?.trim();
     return trimmed ? trimmed : undefined;
+}
+function hasValue(value) {
+    return readOptionalValue(value) !== undefined;
+}
+function parseCsv(value) {
+    return value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
 }
 function readCsvFlag(args, name) {
     const value = readFlag(args, name);
     if (!value) {
         return [];
     }
-    return value
-        .split(",")
-        .map((entry) => entry.trim())
-        .filter(Boolean);
+    return parseCsv(value);
 }
 function getBackendReadiness(env) {
     const ynabApiToken = hasValue(env.YNAB_API_TOKEN);
@@ -59,9 +62,8 @@ export function resolveRuntimeConfig(args, env) {
     }
     const allowedOrigins = readCsvFlag(args, "--allowed-origins");
     const envAllowedOrigins = env.MCP_ALLOWED_ORIGINS
-        ?.split(",")
-        .map((entry) => entry.trim())
-        .filter(Boolean);
+        ? parseCsv(env.MCP_ALLOWED_ORIGINS)
+        : undefined;
     return {
         allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : (envAllowedOrigins ?? []),
         transport: rawTransport,
