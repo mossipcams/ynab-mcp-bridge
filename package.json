@@ -2,7 +2,15 @@
   "name": "ynab-mcp-bridge",
   "version": "0.3.11",
   "description": "ynab-mcp-bridge MCP server",
-  "author": "Caleb LeNoir <caleb.lenoir@hey.com>",
+  "author": "Matt",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mossipcams/ynab-mcp-bridge.git"
+  },
+  "homepage": "https://github.com/mossipcams/ynab-mcp-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/mossipcams/ynab-mcp-bridge/issues"
+  },
   "type": "module",
   "bin": {
     "ynab-mcp-bridge": "./dist/index.js"
@@ -23,15 +31,17 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@types/axios": "^0.14.4",
     "axios": "^1.8.4",
     "commander": "^14.0.1",
+    "express": "^5.2.1",
     "ynab": "^4.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@modelcontextprotocol/inspector": "^0.16.5",
+    "@types/express": "^5.0.5",
     "@types/node": "^20.11.24",
     "@vitest/coverage-v8": "^3.2.4",
     "typescript": "^5.3.3",

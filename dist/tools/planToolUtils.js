@@ -1,21 +1,36 @@
+import { getYnabApiRuntimeContext } from "../ynabApi.js";
 import { getErrorMessage } from "./errorUtils.js";
-let runtimePlanIdOverride;
-export function getPlanId(inputPlanId) {
-    const planId = inputPlanId || process.env.YNAB_PLAN_ID || "";
+export function getPlanId(inputPlanId, configuredPlanId) {
+    const planId = inputPlanId?.trim() || configuredPlanId?.trim() || "";
     if (!planId) {
         throw new Error("No plan ID provided. Please provide a plan ID or set YNAB_PLAN_ID.");
     }
     return planId;
 }
-function getConfiguredPlanId(inputPlanId, options) {
-    if (inputPlanId) {
-        return inputPlanId;
+function getApiConfiguredPlanId(api) {
+    return getYnabApiRuntimeContext(api)?.config.planId?.trim();
+}
+function getRuntimePlanIdOverride(api) {
+    return getYnabApiRuntimeContext(api)?.runtimePlanIdOverride?.trim();
+}
+function setRuntimePlanIdOverride(api, planId) {
+    const runtimeContext = getYnabApiRuntimeContext(api);
+    if (!runtimeContext) {
+        return;
     }
+    runtimeContext.runtimePlanIdOverride = planId;
+}
+function getConfiguredPlanId(inputPlanId, api, options) {
+    const explicitPlanId = inputPlanId?.trim();
+    if (explicitPlanId) {
+        return explicitPlanId;
+    }
+    const runtimePlanIdOverride = getRuntimePlanIdOverride(api);
     if (!options.ignoreRuntimePlanIdOverride && runtimePlanIdOverride) {
         return runtimePlanIdOverride;
     }
     if (!options.ignoreConfiguredPlanId) {
-        return process.env.YNAB_PLAN_ID || "";
+        return getApiConfiguredPlanId(api) ?? "";
     }
     return "";
 }
@@ -29,28 +44,25 @@ function pickResolvedPlanId(plans, defaultPlanId, excludedPlanIds) {
     }
     return undefined;
 }
-function rememberRuntimePlanId(planId, inputPlanId) {
+function rememberRuntimePlanId(api, planId, inputPlanId) {
     if (!inputPlanId) {
-        runtimePlanIdOverride = planId;
+        setRuntimePlanIdOverride(api, planId);
     }
 }
 function isMissingPlanError(error) {
     const message = getErrorMessage(error).toLowerCase();
     return message.includes("not found") || message.includes("no entity was found");
 }
-export function resetPlanResolutionState() {
-    runtimePlanIdOverride = undefined;
-}
 export async function resolvePlanId(inputPlanId, api, options = {}) {
     const excludedPlanIds = new Set(options.excludePlanIds ?? []);
-    const configuredPlanId = getConfiguredPlanId(inputPlanId, options);
+    const configuredPlanId = getConfiguredPlanId(inputPlanId, api, options);
     if (configuredPlanId && !excludedPlanIds.has(configuredPlanId)) {
         return configuredPlanId;
     }
     const response = await api.plans.getPlans();
     const resolvedPlanId = pickResolvedPlanId(response.data.plans, response.data.default_plan?.id, excludedPlanIds);
     if (resolvedPlanId) {
-        rememberRuntimePlanId(resolvedPlanId, inputPlanId);
+        rememberRuntimePlanId(api, resolvedPlanId, inputPlanId);
         return resolvedPlanId;
     }
     throw new Error("No plan ID provided. Please provide a plan ID, set YNAB_PLAN_ID, or configure a default YNAB plan.");
@@ -69,7 +81,7 @@ export async function withResolvedPlan(inputPlanId, api, operation) {
             ignoreConfiguredPlanId: true,
             ignoreRuntimePlanIdOverride: true,
         });
-        rememberRuntimePlanId(recoveredPlanId);
+        rememberRuntimePlanId(api, recoveredPlanId);
         return operation(recoveredPlanId);
     }
 }
@@ -82,8 +94,11 @@ export function toTextResult(payload) {
     };
 }
 export function toErrorResult(error) {
-    return toTextResult({
-        success: false,
-        error: getErrorMessage(error),
-    });
+    return {
+        isError: true,
+        ...toTextResult({
+            success: false,
+            error: getErrorMessage(error),
+        }),
+    };
 }

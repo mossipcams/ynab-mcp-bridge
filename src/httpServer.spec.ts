@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import { request as httpRequest } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startHttpServer } from "./httpServer.js";
@@ -8,6 +9,9 @@ import { startHttpServer } from "./httpServer.js";
 describe("startHttpServer", () => {
   const cleanups: Array<() => Promise<void>> = [];
   const originalEnv = process.env;
+  const ynab = {
+    apiToken: "test-token",
+  } as const;
 
   function findLogCall(
     spy: ReturnType<typeof vi.spyOn>,
@@ -21,6 +25,50 @@ describe("startHttpServer", () => {
       details !== null &&
       matcher(details as Record<string, unknown>)
     ));
+  }
+
+  async function sendRawHttpRequest(url: string, options: {
+    body?: string;
+    headers?: Record<string, string>;
+    method: string;
+    path?: string;
+  }) {
+    const target = new URL(options.path ?? url, url);
+
+    return await new Promise<{
+      body: string;
+      headers: Record<string, string | string[] | undefined>;
+      statusCode: number | undefined;
+    }>((resolve, reject) => {
+      const request = httpRequest({
+        host: target.hostname,
+        method: options.method,
+        path: `${target.pathname}${target.search}`,
+        port: Number(target.port),
+        headers: options.headers,
+      }, (response) => {
+        const chunks: Buffer[] = [];
+
+        response.on("data", (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        response.on("end", () => {
+          resolve({
+            body: Buffer.concat(chunks).toString("utf8"),
+            headers: response.headers,
+            statusCode: response.statusCode,
+          });
+        });
+      });
+
+      request.on("error", reject);
+
+      if (options.body) {
+        request.write(options.body);
+      }
+
+      request.end();
+    });
   }
 
   beforeEach(() => {
@@ -41,6 +89,7 @@ describe("startHttpServer", () => {
 
   it("serves MCP over authless streamable HTTP", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -63,9 +112,25 @@ describe("startHttpServer", () => {
     await transport.close();
   });
 
+  it("requires explicit YNAB config instead of reading environment during HTTP startup", async () => {
+    await expect((async () => {
+      let httpServer: Awaited<ReturnType<typeof startHttpServer>> | undefined;
+
+      try {
+        httpServer = await (startHttpServer as any)({
+          host: "127.0.0.1",
+          port: 0,
+        });
+      } finally {
+        await httpServer?.close();
+      }
+    })()).rejects.toThrow("YNAB config is required.");
+  });
+
   it("logs request ingress and session initialization details", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -116,6 +181,7 @@ describe("startHttpServer", () => {
 
   it("supports browser preflight requests", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -141,6 +207,7 @@ describe("startHttpServer", () => {
 
   it("adds CORS headers to MCP responses", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -177,6 +244,7 @@ describe("startHttpServer", () => {
 
   it("does not expose OAuth protected resource metadata for path-aware probing on an authless server", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -200,6 +268,7 @@ describe("startHttpServer", () => {
 
   it("does not expose OAuth protected resource metadata at the root well-known endpoint on an authless server", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -223,6 +292,7 @@ describe("startHttpServer", () => {
 
   it("still applies origin validation to path-aware probing URLs", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -245,6 +315,7 @@ describe("startHttpServer", () => {
 
   it("ignores forwarded headers on probing URLs because authless servers do not advertise OAuth resource metadata", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "0.0.0.0",
       port: 0,
@@ -270,6 +341,7 @@ describe("startHttpServer", () => {
   it("rejects requests from untrusted origins", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -312,8 +384,99 @@ describe("startHttpServer", () => {
     ))).toBeTruthy();
   });
 
+  it("rejects invalid host headers when bound to localhost", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Host: "evil.example",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.headers["content-type"]).toContain("application/json");
+    expect(JSON.parse(response.body)).toMatchObject({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: expect.stringContaining("Invalid Host"),
+      },
+      id: null,
+    });
+  });
+
+  it("allows configured proxy host headers on loopback while still rejecting unknown hosts", async () => {
+    const httpServer = await (startHttpServer as any)({
+      ynab,
+      allowedHosts: ["mcp.example.com"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const acceptedResponse = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Host: "mcp.example.com",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(acceptedResponse.statusCode).toBe(200);
+
+    const rejectedResponse = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Host: "unexpected.example",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(rejectedResponse.statusCode).toBe(403);
+    expect(JSON.parse(rejectedResponse.body)).toMatchObject({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: expect.stringContaining("Invalid Host"),
+      },
+      id: null,
+    });
+  });
+
   it("rejects authless probing URLs from untrusted origins before returning 404", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -336,6 +499,7 @@ describe("startHttpServer", () => {
 
   it("returns 405 for authless GET requests to the MCP endpoint", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -363,6 +527,7 @@ describe("startHttpServer", () => {
 
   it("returns 405 for GET requests even after initialization", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -410,6 +575,7 @@ describe("startHttpServer", () => {
 
   it("returns a JSON initialize response without creating an MCP session", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -452,6 +618,7 @@ describe("startHttpServer", () => {
 
   it("handles sessionless tools/call requests without a prior MCP session", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -486,6 +653,7 @@ describe("startHttpServer", () => {
 
   it("keeps authless probing and MCP transport signals consistent for remote clients", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -551,13 +719,18 @@ describe("startHttpServer", () => {
   });
 
   it("returns the same explicit method contract for unsupported MCP endpoint methods", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
       path: "/mcp",
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const response = await fetch(httpServer.url, {
       method: "PUT",
@@ -576,10 +749,16 @@ describe("startHttpServer", () => {
       },
       id: null,
     });
+    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
+      details.reason === "method-not-allowed" &&
+      details.method === "PUT" &&
+      details.path === "/mcp"
+    ))).toBeTruthy();
   });
 
   it("accepts sessionless POST requests after initialization", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -634,6 +813,7 @@ describe("startHttpServer", () => {
 
   it("returns 405 for GET requests after initialization", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -687,6 +867,7 @@ describe("startHttpServer", () => {
 
   it("ignores stale session headers on initialize and later requests", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -746,6 +927,7 @@ describe("startHttpServer", () => {
   it("returns 404 for non-MCP paths", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       host: "127.0.0.1",
       port: 0,
     });
@@ -769,6 +951,7 @@ describe("startHttpServer", () => {
 
   it("lets clients reconnect cleanly without session teardown", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       host: "127.0.0.1",
       port: 0,
     });
@@ -800,6 +983,7 @@ describe("startHttpServer", () => {
   it("logs the JSON-RPC method for a sessionless tools/call request", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -842,6 +1026,7 @@ describe("startHttpServer", () => {
   it("rejects repeated MCP session headers using the SDK transport contract", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       host: "127.0.0.1",
       port: 0,
     });
@@ -887,6 +1072,7 @@ describe("startHttpServer", () => {
   it("returns a client error for malformed JSON without breaking later requests", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       host: "127.0.0.1",
       port: 0,
     });
@@ -925,5 +1111,65 @@ describe("startHttpServer", () => {
     expect(result.tools.map((tool) => tool.name)).toContain("ynab_list_plans");
 
     await client.close();
+  });
+
+  it("returns 413 for oversized JSON requests instead of an internal server error", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {
+            payload: "x".repeat(120_000),
+          },
+        },
+      }),
+    });
+
+    expect(response.statusCode).toBe(413);
+    expect(response.headers["content-type"]).toContain("application/json");
+    expect(JSON.parse(response.body)).toMatchObject({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Payload too large",
+      },
+      id: null,
+    });
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+      "Error handling MCP request:",
+      expect.anything(),
+    );
+  });
+
+  it("allows the started HTTP server to be closed more than once", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    await expect(httpServer.close()).resolves.toBeUndefined();
+    await expect(httpServer.close()).resolves.toBeUndefined();
   });
 });

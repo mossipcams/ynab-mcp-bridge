@@ -20,6 +20,7 @@ describe("resolveRuntimeConfig", () => {
     );
 
     expect(config).toEqual({
+      allowedHosts: [],
       allowedOrigins: ["https://claude.ai", "https://chat.openai.com"],
       host: "127.0.0.1",
       path: "/bridge",
@@ -37,6 +38,7 @@ describe("resolveRuntimeConfig", () => {
     });
 
     expect(config).toEqual({
+      allowedHosts: [],
       allowedOrigins: ["https://claude.ai", "https://chat.openai.com"],
       host: "127.0.0.1",
       path: "/mcp-http",
@@ -47,6 +49,7 @@ describe("resolveRuntimeConfig", () => {
 
   it("defaults to http on port 3000 when no transport is provided", () => {
     expect(resolveRuntimeConfig([], {})).toEqual({
+      allowedHosts: [],
       allowedOrigins: [],
       host: "127.0.0.1",
       path: "/mcp",

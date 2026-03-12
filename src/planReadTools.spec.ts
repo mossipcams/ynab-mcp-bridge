@@ -5,18 +5,14 @@ import * as GetPlanMonthTool from "./tools/GetPlanMonthTool.js";
 import * as GetPlanSettingsTool from "./tools/GetPlanSettingsTool.js";
 import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
 import * as ListPlansTool from "./tools/ListPlansTool.js";
-import { resetPlanResolutionState } from "./tools/planToolUtils.js";
+import { attachYnabApiRuntimeContext } from "./ynabApi.js";
 
 function parseResponseText(result: Awaited<ReturnType<typeof ListPlansTool.execute>>) {
   return JSON.parse(result.content[0].text);
 }
 
 describe("plan read tools", () => {
-  const originalEnv = process.env;
-
   afterEach(() => {
-    process.env = { ...originalEnv };
-    resetPlanResolutionState();
     vi.restoreAllMocks();
   });
 
@@ -75,8 +71,7 @@ describe("plan read tools", () => {
   });
 
   it("gets plan settings using the env fallback when needed", async () => {
-    process.env = { ...originalEnv, YNAB_PLAN_ID: "plan-env" };
-    const api = {
+    const api = attachYnabApiRuntimeContext({
       plans: {
         getPlanSettingsById: vi.fn().mockResolvedValue({
           data: {
@@ -87,7 +82,10 @@ describe("plan read tools", () => {
           },
         }),
       },
-    };
+    }, {
+      apiToken: "token-1",
+      planId: "plan-env",
+    });
 
     const result = await GetPlanSettingsTool.execute({}, api as any);
 
@@ -101,8 +99,7 @@ describe("plan read tools", () => {
   });
 
   it("gets plan settings using the YNAB default plan when no plan is configured", async () => {
-    process.env = { ...originalEnv };
-    const api = {
+    const api = attachYnabApiRuntimeContext({
       plans: {
         getPlans: vi.fn().mockResolvedValue({
           data: {
@@ -122,7 +119,9 @@ describe("plan read tools", () => {
           },
         }),
       },
-    };
+    }, {
+      apiToken: "token-1",
+    });
 
     const result = await GetPlanSettingsTool.execute({}, api as any);
 
@@ -137,8 +136,7 @@ describe("plan read tools", () => {
   });
 
   it("recovers from a stale configured plan id by resolving a fresh default plan", async () => {
-    process.env = { ...originalEnv, YNAB_PLAN_ID: "plan-stale" };
-    const api = {
+    const api = attachYnabApiRuntimeContext({
       plans: {
         getPlans: vi.fn().mockResolvedValue({
           data: {
@@ -165,7 +163,10 @@ describe("plan read tools", () => {
             },
           }),
       },
-    };
+    }, {
+      apiToken: "token-1",
+      planId: "plan-stale",
+    });
 
     const result = await GetPlanSettingsTool.execute({}, api as any);
 
@@ -181,8 +182,7 @@ describe("plan read tools", () => {
   });
 
   it("does not override an explicit invalid plan id", async () => {
-    process.env = { ...originalEnv, YNAB_PLAN_ID: "plan-env" };
-    const api = {
+    const api = attachYnabApiRuntimeContext({
       plans: {
         getPlans: vi.fn(),
         getPlanSettingsById: vi.fn().mockRejectedValue({
@@ -192,13 +192,17 @@ describe("plan read tools", () => {
           },
         }),
       },
-    };
+    }, {
+      apiToken: "token-1",
+      planId: "plan-env",
+    });
 
     const result = await GetPlanSettingsTool.execute({ planId: "plan-explicit" }, api as any);
 
     expect(api.plans.getPlanSettingsById).toHaveBeenCalledOnce();
     expect(api.plans.getPlanSettingsById).toHaveBeenCalledWith("plan-explicit");
     expect(api.plans.getPlans).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
     expect(parseResponseText(result)).toEqual({
       success: false,
       error: "Plan not found",

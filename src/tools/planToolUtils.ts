@@ -1,9 +1,8 @@
+import { getYnabApiRuntimeContext } from "../ynabApi.js";
 import { getErrorMessage } from "./errorUtils.js";
 
-let runtimePlanIdOverride: string | undefined;
-
-export function getPlanId(inputPlanId?: string): string {
-  const planId = inputPlanId || process.env.YNAB_PLAN_ID || "";
+export function getPlanId(inputPlanId?: string, configuredPlanId?: string): string {
+  const planId = inputPlanId?.trim() || configuredPlanId?.trim() || "";
   if (!planId) {
     throw new Error("No plan ID provided. Please provide a plan ID or set YNAB_PLAN_ID.");
   }
@@ -27,17 +26,38 @@ type ResolvePlanIdOptions = {
   ignoreRuntimePlanIdOverride?: boolean;
 };
 
-function getConfiguredPlanId(inputPlanId: string | undefined, options: ResolvePlanIdOptions) {
-  if (inputPlanId) {
-    return inputPlanId;
+function getApiConfiguredPlanId(api: object) {
+  return getYnabApiRuntimeContext(api)?.config.planId?.trim();
+}
+
+function getRuntimePlanIdOverride(api: object) {
+  return getYnabApiRuntimeContext(api)?.runtimePlanIdOverride?.trim();
+}
+
+function setRuntimePlanIdOverride(api: object, planId: string) {
+  const runtimeContext = getYnabApiRuntimeContext(api);
+
+  if (!runtimeContext) {
+    return;
   }
 
+  runtimeContext.runtimePlanIdOverride = planId;
+}
+
+function getConfiguredPlanId(inputPlanId: string | undefined, api: object, options: ResolvePlanIdOptions) {
+  const explicitPlanId = inputPlanId?.trim();
+
+  if (explicitPlanId) {
+    return explicitPlanId;
+  }
+
+  const runtimePlanIdOverride = getRuntimePlanIdOverride(api);
   if (!options.ignoreRuntimePlanIdOverride && runtimePlanIdOverride) {
     return runtimePlanIdOverride;
   }
 
   if (!options.ignoreConfiguredPlanId) {
-    return process.env.YNAB_PLAN_ID || "";
+    return getApiConfiguredPlanId(api) ?? "";
   }
 
   return "";
@@ -61,9 +81,9 @@ function pickResolvedPlanId(
   return undefined;
 }
 
-function rememberRuntimePlanId(planId: string, inputPlanId?: string) {
+function rememberRuntimePlanId(api: object, planId: string, inputPlanId?: string) {
   if (!inputPlanId) {
-    runtimePlanIdOverride = planId;
+    setRuntimePlanIdOverride(api, planId);
   }
 }
 
@@ -72,17 +92,13 @@ function isMissingPlanError(error: unknown) {
   return message.includes("not found") || message.includes("no entity was found");
 }
 
-export function resetPlanResolutionState() {
-  runtimePlanIdOverride = undefined;
-}
-
 export async function resolvePlanId(
   inputPlanId: string | undefined,
   api: PlanResolverApi,
   options: ResolvePlanIdOptions = {},
 ): Promise<string> {
   const excludedPlanIds = new Set(options.excludePlanIds ?? []);
-  const configuredPlanId = getConfiguredPlanId(inputPlanId, options);
+  const configuredPlanId = getConfiguredPlanId(inputPlanId, api, options);
 
   if (configuredPlanId && !excludedPlanIds.has(configuredPlanId)) {
     return configuredPlanId;
@@ -92,7 +108,7 @@ export async function resolvePlanId(
   const resolvedPlanId = pickResolvedPlanId(response.data.plans, response.data.default_plan?.id, excludedPlanIds);
 
   if (resolvedPlanId) {
-    rememberRuntimePlanId(resolvedPlanId, inputPlanId);
+    rememberRuntimePlanId(api, resolvedPlanId, inputPlanId);
     return resolvedPlanId;
   }
 
@@ -121,7 +137,7 @@ export async function withResolvedPlan<T>(
       ignoreRuntimePlanIdOverride: true,
     });
 
-    rememberRuntimePlanId(recoveredPlanId);
+    rememberRuntimePlanId(api, recoveredPlanId);
     return operation(recoveredPlanId);
   }
 }
@@ -136,8 +152,11 @@ export function toTextResult(payload: unknown) {
 }
 
 export function toErrorResult(error: unknown) {
-  return toTextResult({
-    success: false,
-    error: getErrorMessage(error),
-  });
+  return {
+    isError: true,
+    ...toTextResult({
+      success: false,
+      error: getErrorMessage(error),
+    }),
+  };
 }
