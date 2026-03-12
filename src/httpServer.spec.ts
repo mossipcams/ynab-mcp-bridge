@@ -8,6 +8,9 @@ import { startHttpServer } from "./httpServer.js";
 describe("startHttpServer", () => {
   const cleanups: Array<() => Promise<void>> = [];
   const originalEnv = process.env;
+  const ynab = {
+    apiToken: "test-token",
+  } as const;
 
   function findLogCall(
     spy: ReturnType<typeof vi.spyOn>,
@@ -41,6 +44,7 @@ describe("startHttpServer", () => {
 
   it("serves MCP over authless streamable HTTP", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -63,9 +67,25 @@ describe("startHttpServer", () => {
     await transport.close();
   });
 
+  it("requires explicit YNAB config instead of reading environment during HTTP startup", async () => {
+    await expect((async () => {
+      let httpServer: Awaited<ReturnType<typeof startHttpServer>> | undefined;
+
+      try {
+        httpServer = await (startHttpServer as any)({
+          host: "127.0.0.1",
+          port: 0,
+        });
+      } finally {
+        await httpServer?.close();
+      }
+    })()).rejects.toThrow("YNAB config is required.");
+  });
+
   it("logs request ingress and session initialization details", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -116,6 +136,7 @@ describe("startHttpServer", () => {
 
   it("supports browser preflight requests", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -141,6 +162,7 @@ describe("startHttpServer", () => {
 
   it("adds CORS headers to MCP responses", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -177,6 +199,7 @@ describe("startHttpServer", () => {
 
   it("does not expose OAuth protected resource metadata for path-aware probing on an authless server", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -200,6 +223,7 @@ describe("startHttpServer", () => {
 
   it("does not expose OAuth protected resource metadata at the root well-known endpoint on an authless server", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -223,6 +247,7 @@ describe("startHttpServer", () => {
 
   it("still applies origin validation to path-aware probing URLs", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -245,6 +270,7 @@ describe("startHttpServer", () => {
 
   it("ignores forwarded headers on probing URLs because authless servers do not advertise OAuth resource metadata", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "0.0.0.0",
       port: 0,
@@ -270,6 +296,7 @@ describe("startHttpServer", () => {
   it("rejects requests from untrusted origins", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -314,6 +341,7 @@ describe("startHttpServer", () => {
 
   it("rejects authless probing URLs from untrusted origins before returning 404", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -336,6 +364,7 @@ describe("startHttpServer", () => {
 
   it("returns 405 for authless GET requests to the MCP endpoint", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -363,6 +392,7 @@ describe("startHttpServer", () => {
 
   it("returns 405 for GET requests even after initialization", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -410,6 +440,7 @@ describe("startHttpServer", () => {
 
   it("returns a JSON initialize response without creating an MCP session", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -452,6 +483,7 @@ describe("startHttpServer", () => {
 
   it("handles sessionless tools/call requests without a prior MCP session", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -486,6 +518,7 @@ describe("startHttpServer", () => {
 
   it("keeps authless probing and MCP transport signals consistent for remote clients", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -553,6 +586,7 @@ describe("startHttpServer", () => {
   it("returns the same explicit method contract for unsupported MCP endpoint methods", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -589,6 +623,7 @@ describe("startHttpServer", () => {
 
   it("accepts sessionless POST requests after initialization", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -643,6 +678,7 @@ describe("startHttpServer", () => {
 
   it("returns 405 for GET requests after initialization", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -696,6 +732,7 @@ describe("startHttpServer", () => {
 
   it("ignores stale session headers on initialize and later requests", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -755,6 +792,7 @@ describe("startHttpServer", () => {
   it("returns 404 for non-MCP paths", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       host: "127.0.0.1",
       port: 0,
     });
@@ -778,6 +816,7 @@ describe("startHttpServer", () => {
 
   it("lets clients reconnect cleanly without session teardown", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       host: "127.0.0.1",
       port: 0,
     });
@@ -809,6 +848,7 @@ describe("startHttpServer", () => {
   it("logs the JSON-RPC method for a sessionless tools/call request", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -851,6 +891,7 @@ describe("startHttpServer", () => {
   it("rejects repeated MCP session headers using the SDK transport contract", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       host: "127.0.0.1",
       port: 0,
     });
@@ -896,6 +937,7 @@ describe("startHttpServer", () => {
   it("returns a client error for malformed JSON without breaking later requests", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
+      ynab,
       host: "127.0.0.1",
       port: 0,
     });
@@ -938,6 +980,7 @@ describe("startHttpServer", () => {
 
   it("allows the started HTTP server to be closed more than once", async () => {
     const httpServer = await startHttpServer({
+      ynab,
       host: "127.0.0.1",
       port: 0,
     });

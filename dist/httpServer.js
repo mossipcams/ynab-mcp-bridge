@@ -1,7 +1,7 @@
 import { createServer as createNodeServer } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { assertYnabConfig } from "./config.js";
 import { createServer } from "./server.js";
-import { resetPlanResolutionState } from "./tools/planToolUtils.js";
 const CORS_HEADERS = {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "OPTIONS, POST",
@@ -165,8 +165,8 @@ function hasMultipleSessionHeaderValues(req) {
         .map((value) => value.trim())
         .filter(Boolean).length > 1;
 }
-async function createManagedRequest() {
-    const mcpServer = createServer();
+async function createManagedRequest(config) {
+    const mcpServer = createServer(config);
     const transport = new StreamableHTTPServerTransport({
         enableJsonResponse: true,
         sessionIdGenerator: undefined,
@@ -223,11 +223,12 @@ async function closeNodeServer(server) {
         });
     });
 }
-export async function startHttpServer(options = {}) {
+export async function startHttpServer(options) {
     const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
     const host = options.host ?? "127.0.0.1";
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
+    const ynab = assertYnabConfig(options.ynab);
     const server = createNodeServer(async (req, res) => {
         logHttpDebug("request.received", getRequestDebugDetails(req));
         if (!isOriginAllowed(req, allowedOrigins)) {
@@ -263,7 +264,7 @@ export async function startHttpServer(options = {}) {
         }
         try {
             const parsedBody = req.method === "POST" ? await readJsonBody(req) : undefined;
-            const resolution = await resolveRequest(req, createManagedRequest);
+            const resolution = await resolveRequest(req, () => createManagedRequest(ynab));
             if (resolution.status !== "ready") {
                 logHttpDebug("request.rejected", {
                     ...getRequestDebugDetails(req),
@@ -335,7 +336,6 @@ export async function startHttpServer(options = {}) {
                 return;
             }
             closed = true;
-            resetPlanResolutionState();
             await closeNodeServer(server);
         },
     };

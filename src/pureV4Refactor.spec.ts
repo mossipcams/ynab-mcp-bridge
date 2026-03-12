@@ -58,13 +58,15 @@ describe("pure v4 refactor", () => {
     expect(readme).not.toContain("GET /health");
   });
 
-  it("documents that PRs should default to the fork instead of upstream", () => {
+  it("documents this repository as the default PR target without fork-specific upstream rules", () => {
     const claudeMd = readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8");
+    const agentsMd = readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
 
     expect(claudeMd).toContain("Default all PR creation to `mossipcams/ynab-mcp-bridge`.");
-    expect(claudeMd).toContain(
-      "Do not open PRs, create commits for, push to, or take any other action against Caleb's repo (`calebl/ynab-mcp-server`) unless the user explicitly asks for that target repo.",
-    );
+    expect(claudeMd).not.toContain("calebl/ynab-mcp-server");
+    expect(claudeMd).not.toContain("Caleb's repo");
+    expect(agentsMd).toContain("Default PR creation to `mossipcams/ynab-mcp-bridge`.");
+    expect(agentsMd).not.toContain("calebl/ynab-mcp-server");
   });
 
   it("documents the SDK-native source layout and plan-based env naming", () => {

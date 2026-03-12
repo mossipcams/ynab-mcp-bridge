@@ -31,6 +31,9 @@ describe("release-please automation", () => {
   });
 
   it("tracks the current package version in the release manifest", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
     const config = JSON.parse(
       readFileSync(new URL("../.release-please-config.json", import.meta.url), "utf8"),
     );
@@ -43,5 +46,14 @@ describe("release-please automation", () => {
       "release-type": "node",
     });
     expect(manifest["."]).toBe(getPackageVersion());
+    expect(packageJson.author).not.toContain("Caleb");
+    expect(packageJson.repository).toEqual({
+      type: "git",
+      url: "git+https://github.com/mossipcams/ynab-mcp-bridge.git",
+    });
+    expect(packageJson.homepage).toBe("https://github.com/mossipcams/ynab-mcp-bridge#readme");
+    expect(packageJson.bugs).toEqual({
+      url: "https://github.com/mossipcams/ynab-mcp-bridge/issues",
+    });
   });
 });

@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { readYnabConfig } from "./config.js";
+import { assertYnabConfig } from "./config.js";
 import { getPackageInfo } from "./packageInfo.js";
-import { createYnabApi as createSdkYnabApi } from "./ynabApi.js";
+import { createYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
 import * as GetCategoryTool from "./tools/GetCategoryTool.js";
 import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
@@ -67,9 +67,6 @@ export const toolRegistrations = [
     { title: "Get Money Movement Groups", module: GetMoneyMovementGroupsTool },
     { title: "Get Money Movement Groups By Month", module: GetMoneyMovementGroupsByMonthTool },
 ];
-export function createYnabApi(token = readYnabConfig(process.env).apiToken) {
-    return createSdkYnabApi(token);
-}
 export function registerServerTools(registrar, api) {
     const registeredToolNames = [];
     for (const { title, module } of toolRegistrations) {
@@ -82,7 +79,8 @@ export function registerServerTools(registrar, api) {
     }
     return registeredToolNames;
 }
-export function createServer(api = createYnabApi()) {
+export function createServer(config, api = createYnabApi(config)) {
+    assertYnabConfig(config);
     const server = new McpServer(SERVER_INFO);
     registerServerTools(server, api);
     return server;

@@ -1,9 +1,21 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, registerServerTools } from "./server.js";
 
 describe("createServer", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
   it("registers the rebuilt read-only YNAB toolset", () => {
-    const server = createServer();
+    const server = createServer({
+      apiToken: "test-token",
+    });
     const registeredTools = Object.keys((server as any)._registeredTools);
 
     expect(registeredTools).toHaveLength(29);
@@ -101,5 +113,11 @@ describe("createServer", () => {
       }),
       expect.any(Function),
     );
+  });
+
+  it("requires explicit config instead of reading the API token from environment", () => {
+    process.env = { ...originalEnv, YNAB_API_TOKEN: "env-token" };
+
+    expect(() => (createServer as any)()).toThrow("YNAB config is required.");
   });
 });
