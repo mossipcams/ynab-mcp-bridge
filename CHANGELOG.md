@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.13](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.12...ynab-mcp-bridge-v0.3.13) (2026-03-12)
+
+
+### Bug Fixes
+
+* centralize runtime config and require explicit config ([#32](https://github.com/mossipcams/ynab-mcp-bridge/issues/32)) ([f22d1f8](https://github.com/mossipcams/ynab-mcp-bridge/commit/f22d1f8d25c62473b2b31dd2afc631b612f1b0b3))
+
+## [0.3.12](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.11...ynab-mcp-bridge-v0.3.12) (2026-03-12)
+
+
+### Bug Fixes
+
+* centralize runtime config and harden HTTP defaults ([#29](https://github.com/mossipcams/ynab-mcp-bridge/issues/29)) ([ca2acf7](https://github.com/mossipcams/ynab-mcp-bridge/commit/ca2acf7d1afb542012b1c2044036423d478871c7))
+
 ## [0.3.11](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.10...ynab-mcp-bridge-v0.3.11) (2026-03-12)
 
 
