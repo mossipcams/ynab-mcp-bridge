@@ -1,6 +1,6 @@
 import * as ynab from "ynab";
 
-import { readYnabConfig, type YnabConfig } from "./config.js";
+import { assertYnabConfig, type YnabConfig } from "./config.js";
 import { SlidingWindowRateLimiter, createYnabRateLimiter } from "./ynabRateLimiter.js";
 
 declare module "ynab" {
@@ -41,12 +41,12 @@ type YnabApiWithRuntimeContext = ynab.API & {
 
 function normalizeYnabConfig(configOrToken: YnabConfig | string | undefined): YnabConfig {
   if (typeof configOrToken === "string") {
-    return {
+    return assertYnabConfig({
       apiToken: configOrToken.trim(),
-    };
+    });
   }
 
-  return configOrToken ?? readYnabConfig(process.env);
+  return assertYnabConfig(configOrToken);
 }
 
 function getSdkConfiguration(api: ynab.API): YnabSdkConfiguration {
@@ -128,7 +128,7 @@ export function getYnabApiRuntimeContext(api: object) {
   return (api as YnabApiWithRuntimeContext)[runtimeContextSymbol];
 }
 
-export function createYnabApi(configOrToken: YnabConfig | string | undefined = readYnabConfig(process.env), options: CreateYnabApiOptions = {}) {
+export function createYnabApi(configOrToken: YnabConfig | string | undefined, options: CreateYnabApiOptions = {}) {
   const config = normalizeYnabConfig(configOrToken);
   const api = attachYnabApiRuntimeContext(new ynab.API(config.apiToken), config);
   const configuration = getSdkConfiguration(api);

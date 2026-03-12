@@ -1,6 +1,6 @@
 import { createServer as createNodeServer } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { readYnabConfig } from "./config.js";
+import { assertYnabConfig } from "./config.js";
 import { createServer } from "./server.js";
 const CORS_HEADERS = {
     "access-control-allow-origin": "*",
@@ -223,12 +223,12 @@ async function closeNodeServer(server) {
         });
     });
 }
-export async function startHttpServer(options = {}) {
+export async function startHttpServer(options) {
     const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
     const host = options.host ?? "127.0.0.1";
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
-    const ynab = options.ynab ?? readYnabConfig(process.env);
+    const ynab = assertYnabConfig(options.ynab);
     const server = createNodeServer(async (req, res) => {
         logHttpDebug("request.received", getRequestDebugDetails(req));
         if (!isOriginAllowed(req, allowedOrigins)) {

@@ -50,6 +50,16 @@ export function readYnabConfig(env) {
         planId: readOptionalValue(env.YNAB_PLAN_ID),
     };
 }
+export function assertYnabConfig(config) {
+    const apiToken = readOptionalValue(config?.apiToken);
+    if (!apiToken) {
+        throw new Error("YNAB config is required.");
+    }
+    return {
+        apiToken,
+        planId: readOptionalValue(config?.planId),
+    };
+}
 export function resolveRuntimeConfig(args, env) {
     const rawTransport = readFlag(args, "--transport") ?? env.MCP_TRANSPORT ?? "http";
     if (rawTransport !== "http" && rawTransport !== "stdio") {

@@ -1,5 +1,5 @@
 import * as ynab from "ynab";
-import { readYnabConfig } from "./config.js";
+import { assertYnabConfig } from "./config.js";
 import { createYnabRateLimiter } from "./ynabRateLimiter.js";
 const DEFAULT_RETRY_DELAY_MS = 5_000;
 const DEFAULT_RETRY_LIMIT = 1;
@@ -7,11 +7,11 @@ const sharedRateLimiter = createYnabRateLimiter();
 const runtimeContextSymbol = Symbol("ynabRuntimeContext");
 function normalizeYnabConfig(configOrToken) {
     if (typeof configOrToken === "string") {
-        return {
+        return assertYnabConfig({
             apiToken: configOrToken.trim(),
-        };
+        });
     }
-    return configOrToken ?? readYnabConfig(process.env);
+    return assertYnabConfig(configOrToken);
 }
 function getSdkConfiguration(api) {
     return api._configuration;
@@ -71,7 +71,7 @@ export function attachYnabApiRuntimeContext(api, config) {
 export function getYnabApiRuntimeContext(api) {
     return api[runtimeContextSymbol];
 }
-export function createYnabApi(configOrToken = readYnabConfig(process.env), options = {}) {
+export function createYnabApi(configOrToken, options = {}) {
     const config = normalizeYnabConfig(configOrToken);
     const api = attachYnabApiRuntimeContext(new ynab.API(config.apiToken), config);
     const configuration = getSdkConfiguration(api);

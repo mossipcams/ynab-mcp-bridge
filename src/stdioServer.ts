@@ -1,10 +1,10 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
-import { readYnabConfig, type YnabConfig } from "./config.js";
+import { assertYnabConfig, type YnabConfig } from "./config.js";
 import { createServer } from "./server.js";
 
-export async function startStdioServer(config: YnabConfig = readYnabConfig(process.env)) {
-  const server = createServer(config);
+export async function startStdioServer(config: YnabConfig) {
+  const server = createServer(assertYnabConfig(config));
   const transport = new StdioServerTransport();
 
   await server.connect(transport);

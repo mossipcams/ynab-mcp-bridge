@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as ynab from "ynab";
 
-import { readYnabConfig, type YnabConfig } from "./config.js";
+import { assertYnabConfig, type YnabConfig } from "./config.js";
 import { getPackageInfo } from "./packageInfo.js";
 import { createYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
@@ -120,7 +120,8 @@ export function registerServerTools(registrar: ToolRegistrar, api: ynab.API) {
   return registeredToolNames;
 }
 
-export function createServer(config: YnabConfig = readYnabConfig(process.env), api = createYnabApi(config)) {
+export function createServer(config: YnabConfig, api = createYnabApi(config)) {
+  assertYnabConfig(config);
   const server = new McpServer(SERVER_INFO);
 
   registerServerTools(server, api);

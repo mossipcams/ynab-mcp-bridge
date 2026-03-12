@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
-import { readYnabConfig, type YnabConfig } from "./config.js";
+import { assertYnabConfig, type YnabConfig } from "./config.js";
 import { createServer } from "./server.js";
 
 export type HttpServerOptions = {
@@ -12,7 +12,7 @@ export type HttpServerOptions = {
   host?: string;
   path?: string;
   port?: number;
-  ynab?: YnabConfig;
+  ynab: YnabConfig;
 };
 
 export type StartedHttpServer = {
@@ -327,12 +327,12 @@ async function closeNodeServer(server: ReturnType<typeof createNodeServer>) {
   });
 }
 
-export async function startHttpServer(options: HttpServerOptions = {}): Promise<StartedHttpServer> {
+export async function startHttpServer(options: HttpServerOptions): Promise<StartedHttpServer> {
   const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
   const host = options.host ?? "127.0.0.1";
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
-  const ynab = options.ynab ?? readYnabConfig(process.env);
+  const ynab = assertYnabConfig(options.ynab);
 
   const server = createNodeServer(async (req, res) => {
     logHttpDebug("request.received", getRequestDebugDetails(req));

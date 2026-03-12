@@ -96,6 +96,19 @@ export function readYnabConfig(env: EnvConfig): YnabConfig {
   };
 }
 
+export function assertYnabConfig(config: YnabConfig | undefined): YnabConfig {
+  const apiToken = readOptionalValue(config?.apiToken);
+
+  if (!apiToken) {
+    throw new Error("YNAB config is required.");
+  }
+
+  return {
+    apiToken,
+    planId: readOptionalValue(config?.planId),
+  };
+}
+
 export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeConfig {
   const rawTransport = readFlag(args, "--transport") ?? env.MCP_TRANSPORT ?? "http";
 
