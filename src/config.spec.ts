@@ -16,6 +16,8 @@ describe("config", () => {
         "/bridge",
         "--allowed-origins",
         "https://claude.ai,https://chat.openai.com",
+        "--allowed-hosts",
+        "mcp.example.com,localhost",
       ],
       {
         MCP_ALLOWED_ORIGINS: "https://ignored.example",
@@ -27,6 +29,7 @@ describe("config", () => {
     expect(config).toEqual({
       runtime: {
         allowedOrigins: ["https://claude.ai", "https://chat.openai.com"],
+        allowedHosts: ["mcp.example.com", "localhost"],
         host: "0.0.0.0",
         path: "/bridge",
         port: 8080,
@@ -37,6 +40,21 @@ describe("config", () => {
         planId: "plan-1",
       },
     });
+  });
+
+  it("reads allowed hosts from environment when CLI flags do not override them", () => {
+    const config = resolveAppConfig(
+      [],
+      {
+        MCP_ALLOWED_HOSTS: "mcp.example.com, localhost ",
+        YNAB_API_TOKEN: "token-1",
+      },
+    );
+
+    expect(config.runtime.allowedHosts).toEqual([
+      "mcp.example.com",
+      "localhost",
+    ]);
   });
 
   it("reads only YNAB settings from environment", () => {

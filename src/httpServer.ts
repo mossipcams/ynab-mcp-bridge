@@ -1,13 +1,18 @@
-import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Server as NodeHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import express, { type ErrorRequestHandler, type Request, type Response } from "express";
+import {
+  hostHeaderValidation,
+  localhostHostValidation,
+} from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
 import { assertYnabConfig, type YnabConfig } from "./config.js";
 import { createServer } from "./server.js";
 
 export type HttpServerOptions = {
+  allowedHosts?: string[];
   allowedOrigins?: string[];
   host?: string;
   path?: string;
@@ -45,9 +50,6 @@ type RequestResolution =
     }
   | {
       status: "invalid-session-header";
-    }
-  | {
-      status: "method-not-allowed";
     };
 
 type HttpDebugDetails = Record<string, unknown>;
@@ -57,13 +59,17 @@ type JsonRpcRequestLike = {
   method?: unknown;
 };
 
-function applyCorsHeaders(res: ServerResponse) {
+function applyCorsHeaders(res: Response) {
   for (const [name, value] of Object.entries(CORS_HEADERS)) {
     res.setHeader(name, value);
   }
 }
 
-function getRequestPath(req: IncomingMessage) {
+function getRequestPath(req: Pick<Request, "path" | "url">) {
+  if (typeof req.path === "string" && req.path.length > 0) {
+    return req.path;
+  }
+
   if (!req.url) {
     return "/";
   }
@@ -95,7 +101,7 @@ function isLoopbackHostname(hostname: string | undefined) {
   return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
 }
 
-function getRequestHostName(req: IncomingMessage) {
+function getRequestHostName(req: Pick<Request, "headers">) {
   const forwardedHost = getFirstHeaderValue(req.headers["x-forwarded-host"]);
   const host = forwardedHost ?? getFirstHeaderValue(req.headers.host);
 
@@ -106,7 +112,7 @@ function normalizeOrigin(origin: string) {
   return new URL(origin).origin;
 }
 
-function isOriginAllowed(req: IncomingMessage, allowedOrigins: Set<string>) {
+function isOriginAllowed(req: Pick<Request, "headers">, allowedOrigins: Set<string>) {
   const originHeader = getFirstHeaderValue(req.headers.origin);
 
   if (!originHeader) {
@@ -129,28 +135,14 @@ function isOriginAllowed(req: IncomingMessage, allowedOrigins: Set<string>) {
   }
 }
 
-async function readJsonBody(req: IncomingMessage) {
-  const chunks: Buffer[] = [];
-
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-
-  if (chunks.length === 0) {
-    return undefined;
-  }
-
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
-
-function writeJson(res: ServerResponse, statusCode: number, body: unknown) {
-  res.statusCode = statusCode;
+function writeJson(res: Response, statusCode: number, body: unknown) {
+  res.status(statusCode);
   applyCorsHeaders(res);
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(body));
 }
 
-function writeJsonRpcError(res: ServerResponse, statusCode: number, code: number, message: string) {
+function writeJsonRpcError(res: Response, statusCode: number, code: number, message: string) {
   writeJson(res, statusCode, {
     jsonrpc: "2.0",
     error: {
@@ -161,28 +153,32 @@ function writeJsonRpcError(res: ServerResponse, statusCode: number, code: number
   });
 }
 
-function writeMethodNotAllowed(res: ServerResponse, allowedMethods: readonly string[]) {
+function writeMethodNotAllowed(res: Response, allowedMethods: readonly string[]) {
   res.setHeader("allow", allowedMethods.join(", "));
   writeJsonRpcError(res, 405, -32000, "Method not allowed.");
 }
 
-function writeNotFound(res: ServerResponse) {
+function writeNotFound(res: Response) {
   writeJson(res, 404, {
     error: "Not found",
   });
 }
 
-function writeForbiddenOrigin(res: ServerResponse) {
+function writeForbiddenOrigin(res: Response) {
   writeJson(res, 403, {
     error: "Forbidden origin",
   });
 }
 
-function writeParseError(res: ServerResponse) {
+function writeParseError(res: Response) {
   writeJsonRpcError(res, 400, -32700, "Parse error");
 }
 
-function writeInternalServerError(res: ServerResponse) {
+function writePayloadTooLarge(res: Response) {
+  writeJsonRpcError(res, 413, -32000, "Payload too large");
+}
+
+function writeInternalServerError(res: Response) {
   writeJsonRpcError(res, 500, -32603, "Internal server error");
 }
 
@@ -190,7 +186,7 @@ function logHttpDebug(event: string, details: HttpDebugDetails) {
   console.error("[http]", event, details);
 }
 
-function getSessionId(req: IncomingMessage) {
+function getSessionId(req: Pick<Request, "headers">) {
   const sessionId = req.headers["mcp-session-id"];
 
   if (typeof sessionId !== "string") {
@@ -209,7 +205,7 @@ function getSessionId(req: IncomingMessage) {
   return values[0];
 }
 
-function getRequestDebugDetails(req: IncomingMessage): HttpDebugDetails {
+function getRequestDebugDetails(req: Request): HttpDebugDetails {
   return {
     method: req.method ?? "UNKNOWN",
     origin: getFirstHeaderValue(req.headers.origin),
@@ -238,7 +234,7 @@ function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
   return details;
 }
 
-function hasMultipleSessionHeaderValues(req: IncomingMessage) {
+function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">) {
   const sessionId = req.headers["mcp-session-id"];
 
   if (Array.isArray(sessionId)) {
@@ -253,6 +249,25 @@ function hasMultipleSessionHeaderValues(req: IncomingMessage) {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean).length > 1;
+}
+
+function isJsonParseError(error: unknown) {
+  return error instanceof SyntaxError || (
+    typeof error === "object" &&
+    error !== null &&
+    "type" in error &&
+    error.type === "entity.parse.failed"
+  );
+}
+
+function isPayloadTooLargeError(error: unknown) {
+  return typeof error === "object" &&
+    error !== null &&
+    (
+      ("type" in error && error.type === "entity.too.large") ||
+      ("status" in error && error.status === 413) ||
+      ("statusCode" in error && error.statusCode === 413)
+    );
 }
 
 async function createManagedRequest(config: YnabConfig) {
@@ -274,18 +289,12 @@ async function createManagedRequest(config: YnabConfig) {
 }
 
 async function resolveRequest(
-  req: IncomingMessage,
+  req: Request,
   createRequest: () => Promise<ManagedRequest>,
 ): Promise<RequestResolution> {
   if (hasMultipleSessionHeaderValues(req)) {
     return {
       status: "invalid-session-header",
-    };
-  }
-
-  if (req.method !== "POST") {
-    return {
-      status: "method-not-allowed",
     };
   }
 
@@ -298,18 +307,19 @@ async function resolveRequest(
   };
 }
 
-function writeRequestResolution(res: ServerResponse, resolution: Exclude<RequestResolution, { cleanup?: () => Promise<void>; managedRequest: ManagedRequest; status: "ready" }>) {
+function writeRequestResolution(res: Response, resolution: Exclude<RequestResolution, {
+  cleanup?: () => Promise<void>;
+  managedRequest: ManagedRequest;
+  status: "ready";
+}>) {
   switch (resolution.status) {
     case "invalid-session-header":
       writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single value");
       return;
-    case "method-not-allowed":
-      writeMethodNotAllowed(res, HTTP_ALLOWED_METHODS);
-      return;
   }
 }
 
-async function closeNodeServer(server: ReturnType<typeof createNodeServer>) {
+async function closeNodeServer(server: NodeHttpServer) {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => {
       if (error) {
@@ -328,15 +338,30 @@ async function closeNodeServer(server: ReturnType<typeof createNodeServer>) {
 }
 
 export async function startHttpServer(options: HttpServerOptions): Promise<StartedHttpServer> {
+  const allowedHosts = options.allowedHosts ?? [];
   const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
   const host = options.host ?? "127.0.0.1";
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
   const ynab = assertYnabConfig(options.ynab);
 
-  const server = createNodeServer(async (req, res) => {
-    logHttpDebug("request.received", getRequestDebugDetails(req));
+  const app = express();
+  const jsonParser = express.json();
 
+  app.disable("x-powered-by");
+
+  app.use((req, _res, next) => {
+    logHttpDebug("request.received", getRequestDebugDetails(req));
+    next();
+  });
+
+  if (allowedHosts.length > 0) {
+    app.use(hostHeaderValidation(allowedHosts));
+  } else if (isLoopbackHostname(host)) {
+    app.use(localhostHostValidation());
+  }
+
+  app.use((req, res, next) => {
     if (!isOriginAllowed(req, allowedOrigins)) {
       logHttpDebug("request.rejected", {
         ...getRequestDebugDetails(req),
@@ -346,20 +371,32 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       return;
     }
 
+    next();
+  });
+
+  app.use((req, res, next) => {
     if (req.method === "OPTIONS") {
       logHttpDebug("request.preflight", getRequestDebugDetails(req));
       applyCorsHeaders(res);
-      res.statusCode = 204;
-      res.end();
+      res.status(204).end();
       return;
     }
 
+    next();
+  });
+
+  app.use((req, res, next) => {
+    if (getRequestPath(req) === path && req.method === "POST") {
+      jsonParser(req, res, next);
+      return;
+    }
+
+    next();
+  });
+
+  app.use(async (req, res, next) => {
     if (getRequestPath(req) !== path) {
-      logHttpDebug("request.rejected", {
-        ...getRequestDebugDetails(req),
-        reason: "path-not-found",
-      });
-      writeNotFound(res);
+      next();
       return;
     }
 
@@ -372,68 +409,89 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       return;
     }
 
-    try {
-      const parsedBody = req.method === "POST" ? await readJsonBody(req) : undefined;
-      const resolution = await resolveRequest(
-        req,
-        () => createManagedRequest(ynab),
-      );
+    const parsedBody = req.body;
+    const resolution = await resolveRequest(
+      req,
+      () => createManagedRequest(ynab),
+    );
 
-      if (resolution.status !== "ready") {
-        logHttpDebug("request.rejected", {
-          ...getRequestDebugDetails(req),
-          reason: resolution.status,
-        });
-        writeRequestResolution(res, resolution);
-        return;
-      }
-
-      let cleanedUp = false;
-      const cleanup = async () => {
-        if (cleanedUp) {
-          return;
-        }
-
-        cleanedUp = true;
-        await resolution.cleanup?.();
-      };
-
-      try {
-        res.once("close", () => {
-          void cleanup();
-        });
-        logHttpDebug("transport.handoff", {
-          ...getRequestDebugDetails(req),
-          ...getJsonRpcDebugDetails(parsedBody),
-          cleanup: Boolean(resolution.cleanup),
-        });
-        applyCorsHeaders(res);
-        await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
-      } catch (error) {
-        await cleanup();
-        throw error;
-      }
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        logHttpDebug("request.parse_error", getRequestDebugDetails(req));
-        writeParseError(res);
-        return;
-      }
-
-      console.error("Error handling MCP request:", {
+    if (resolution.status !== "ready") {
+      logHttpDebug("request.rejected", {
         ...getRequestDebugDetails(req),
-        error,
+        reason: resolution.status,
       });
+      writeRequestResolution(res, resolution);
+      return;
+    }
 
-      if (!res.headersSent) {
-        writeInternalServerError(res);
+    let cleanedUp = false;
+    const cleanup = async () => {
+      if (cleanedUp) {
+        return;
       }
+
+      cleanedUp = true;
+      await resolution.cleanup?.();
+    };
+
+    try {
+      res.once("close", () => {
+        void cleanup();
+      });
+      logHttpDebug("transport.handoff", {
+        ...getRequestDebugDetails(req),
+        ...getJsonRpcDebugDetails(parsedBody),
+        cleanup: Boolean(resolution.cleanup),
+      });
+      applyCorsHeaders(res);
+      await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
+    } catch (error) {
+      await cleanup();
+      next(error);
     }
   });
 
+  app.use((req, res) => {
+    logHttpDebug("request.rejected", {
+      ...getRequestDebugDetails(req),
+      reason: "path-not-found",
+    });
+    writeNotFound(res);
+  });
+
+  const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
+    if (res.headersSent) {
+      next(error);
+      return;
+    }
+
+    if (isJsonParseError(error)) {
+      logHttpDebug("request.parse_error", getRequestDebugDetails(req));
+      writeParseError(res);
+      return;
+    }
+
+    if (isPayloadTooLargeError(error)) {
+      logHttpDebug("request.payload_too_large", getRequestDebugDetails(req));
+      writePayloadTooLarge(res);
+      return;
+    }
+
+    console.error("Error handling MCP request:", {
+      ...getRequestDebugDetails(req),
+      error,
+    });
+
+    writeInternalServerError(res);
+  };
+
+  app.use(errorHandler);
+
+  const server = app.listen(port, host);
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, host, () => {
+    server.once("listening", () => {
       server.off("error", reject);
       resolve();
     });

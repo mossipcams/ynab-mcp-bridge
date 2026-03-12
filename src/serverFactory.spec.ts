@@ -120,4 +120,50 @@ describe("createServer", () => {
 
     expect(() => (createServer as any)()).toThrow("YNAB config is required.");
   });
+
+  it("applies explicit plan config even when a custom API client is injected", async () => {
+    const calls: Array<[string, ...string[]]> = [];
+    const api = {
+      plans: {
+        getPlanById: async (planId: string) => {
+          calls.push(["getPlanById", planId]);
+          return {
+            data: {
+              plan: {
+                id: planId,
+              },
+            },
+          };
+        },
+        getPlans: async () => {
+          calls.push(["getPlans"]);
+          return {
+            data: {
+              plans: [
+                { id: "plan-1" },
+                { id: "plan-2" },
+              ],
+              default_plan: null,
+            },
+          };
+        },
+      },
+    };
+
+    const server = createServer({
+      apiToken: "test-token",
+      planId: "plan-1",
+    }, api as any);
+
+    const result = await (server as any)._registeredTools.ynab_get_plan.handler({});
+
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      plan: {
+        id: "plan-1",
+      },
+    });
+    expect(calls).toEqual([
+      ["getPlanById", "plan-1"],
+    ]);
+  });
 });

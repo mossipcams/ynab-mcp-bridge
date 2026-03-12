@@ -3,7 +3,7 @@ import * as ynab from "ynab";
 
 import { assertYnabConfig, type YnabConfig } from "./config.js";
 import { getPackageInfo } from "./packageInfo.js";
-import { createYnabApi } from "./ynabApi.js";
+import { attachYnabApiRuntimeContext, createYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
 import * as GetCategoryTool from "./tools/GetCategoryTool.js";
 import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
@@ -121,10 +121,11 @@ export function registerServerTools(registrar: ToolRegistrar, api: ynab.API) {
 }
 
 export function createServer(config: YnabConfig, api = createYnabApi(config)) {
-  assertYnabConfig(config);
+  const normalizedConfig = assertYnabConfig(config);
   const server = new McpServer(SERVER_INFO);
+  const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
 
-  registerServerTools(server, api);
+  registerServerTools(server, configuredApi);
 
   return server;
 }
