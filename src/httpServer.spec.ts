@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { createHash } from "node:crypto";
 import { createServer as createNodeHttpServer, request as httpRequest } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -125,6 +126,91 @@ describe("startHttpServer", () => {
     };
   }
 
+  async function startUpstreamOAuthServer() {
+    let lastTokenRequest: {
+      authorization?: string;
+      body: URLSearchParams;
+    } | undefined;
+
+    const server = createNodeHttpServer((req, res) => {
+      const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+
+      if (requestUrl.pathname === "/authorize") {
+        res.statusCode = 200;
+        res.end("ok");
+        return;
+      }
+
+      if (requestUrl.pathname === "/jwks") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ keys: [] }));
+        return;
+      }
+
+      if (requestUrl.pathname === "/token" && req.method === "POST") {
+        const chunks: Buffer[] = [];
+
+        req.on("data", (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        req.on("end", () => {
+          lastTokenRequest = {
+            authorization: req.headers.authorization,
+            body: new URLSearchParams(Buffer.concat(chunks).toString("utf8")),
+          };
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({
+            access_token: "upstream-access-token",
+            expires_in: 3600,
+            refresh_token: "upstream-refresh-token",
+            scope: "openid profile",
+            token_type: "Bearer",
+          }));
+        });
+        return;
+      }
+
+      res.statusCode = 404;
+      res.end();
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Upstream OAuth test server did not expose a TCP address");
+    }
+
+    const origin = `http://127.0.0.1:${address.port}`;
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    });
+
+    return {
+      authorizationUrl: `${origin}/authorize`,
+      getLastTokenRequest: () => lastTokenRequest,
+      issuer: origin,
+      jwksUrl: `${origin}/jwks`,
+      tokenUrl: `${origin}/token`,
+    };
+  }
+
   async function createOAuthTestToken(privateKey: CryptoKey, overrides: {
     aud?: string;
     iss?: string;
@@ -139,11 +225,36 @@ describe("startHttpServer", () => {
         kid: "http-server-test-key",
       })
       .setIssuedAt()
-      .setIssuer(overrides.iss ?? "https://example.cloudflareaccess.com")
+      .setIssuer(overrides.iss ?? "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123")
       .setAudience(overrides.aud ?? "https://mcp.example.com/mcp")
       .setExpirationTime("5 minutes")
       .setSubject("user-123")
       .sign(privateKey);
+  }
+
+  function createCodeChallenge(codeVerifier: string) {
+    return createHash("sha256")
+      .update(codeVerifier)
+      .digest("base64url");
+  }
+
+  function createCloudflareOAuthAuth(overrides: Partial<Extract<Parameters<typeof startHttpServer>[0]["auth"], {
+    mode: "oauth";
+  }>> = {}) {
+    return {
+      audience: "https://mcp.example.com/mcp",
+      authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      callbackPath: "/oauth/callback",
+      clientId: "cloudflare-client-id",
+      clientSecret: "cloudflare-client-secret",
+      issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      mode: "oauth" as const,
+      publicUrl: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile"],
+      tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      ...overrides,
+    };
   }
 
   beforeEach(() => {
@@ -1252,16 +1363,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: {
-        audience: "https://mcp.example.com/mcp",
-        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
-        issuer: "https://example.cloudflareaccess.com",
-        jwksUrl,
-        mode: "oauth",
-        publicUrl: "https://mcp.example.com/mcp",
-        scopes: ["openid", "profile"],
-        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
-      },
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1277,26 +1379,42 @@ describe("startHttpServer", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      authorization_servers: ["https://example.cloudflareaccess.com"],
+      authorization_servers: ["https://mcp.example.com/"],
       resource: "https://mcp.example.com/mcp",
       scopes_supported: ["openid", "profile"],
     });
+  });
+
+  it("rejects legacy Cloudflare Access oauth2 endpoints passed directly to the HTTP server", async () => {
+    await expect(startHttpServer({
+      ynab,
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        issuer: "https://example.cloudflareaccess.com",
+        jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/certs",
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: ["openid", "profile"],
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+      },
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    })).rejects.toThrow(
+      "Cloudflare Access OAuth settings must use the per-application OIDC SaaS endpoints under /cdn-cgi/access/sso/oidc/<client-id> for issuer, authorization, token, and jwks URLs.",
+    );
   });
 
   it("returns a bearer challenge with resource metadata when oauth mode is enabled", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: {
-        audience: "https://mcp.example.com/mcp",
-        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
-        issuer: "https://example.cloudflareaccess.com",
+      auth: createCloudflareOAuthAuth({
         jwksUrl,
-        mode: "oauth",
-        publicUrl: "https://mcp.example.com/mcp",
         scopes: ["openid"],
-        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
-      },
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -1327,16 +1445,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: {
-        audience: "https://mcp.example.com/mcp",
-        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
-        issuer: "https://example.cloudflareaccess.com",
-        jwksUrl,
-        mode: "oauth",
-        publicUrl: "https://mcp.example.com/mcp",
-        scopes: ["openid", "profile"],
-        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
-      },
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1352,11 +1461,246 @@ describe("startHttpServer", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      authorization_endpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
-      issuer: "https://example.cloudflareaccess.com",
-      jwks_uri: jwksUrl,
-      token_endpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+      authorization_endpoint: "https://mcp.example.com/authorize",
+      issuer: "https://mcp.example.com/",
+      registration_endpoint: "https://mcp.example.com/register",
+      token_endpoint: "https://mcp.example.com/token",
+      token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
     });
+  });
+
+  it("registers clients and redirects authorization requests through the upstream provider", async () => {
+    const upstream = await startUpstreamOAuthServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+      },
+      body: JSON.stringify({
+        client_name: "Claude Web",
+        grant_types: ["authorization_code", "refresh_token"],
+        redirect_uris: ["https://claude.ai/oauth/callback"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+
+    expect(registrationResponse.status).toBe(201);
+    const registration = await registrationResponse.json();
+
+    const authorizeResponse = await fetch(new URL(
+      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://claude.ai/oauth/callback")}&response_type=code&code_challenge=test-challenge&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(authorizeResponse.status).toBe(302);
+    const location = authorizeResponse.headers.get("location");
+
+    expect(location).toBeTruthy();
+    const redirectUrl = new URL(location!);
+    expect(redirectUrl.origin).toBe(new URL(upstream.authorizationUrl).origin);
+    expect(redirectUrl.pathname).toBe("/authorize");
+    expect(redirectUrl.searchParams.get("client_id")).toBe("cloudflare-client-id");
+    expect(redirectUrl.searchParams.get("redirect_uri")).toBe("https://mcp.example.com/oauth/callback");
+    expect(redirectUrl.searchParams.get("response_type")).toBe("code");
+    expect(redirectUrl.searchParams.get("scope")).toBe("openid profile");
+    expect(redirectUrl.searchParams.get("state")).toBeTruthy();
+  });
+
+  it("exchanges upstream callback codes and redirects back to the registered client", async () => {
+    const upstream = await startUpstreamOAuthServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+      },
+      body: JSON.stringify({
+        client_name: "Claude Web",
+        grant_types: ["authorization_code", "refresh_token"],
+        redirect_uris: ["https://claude.ai/oauth/callback"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+    const registration = await registrationResponse.json();
+
+    const authorizeResponse = await fetch(new URL(
+      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://claude.ai/oauth/callback")}&response_type=code&code_challenge=test-challenge&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    const upstreamState = new URL(authorizeResponse.headers.get("location")!).searchParams.get("state");
+    expect(upstreamState).toBeTruthy();
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(callbackResponse.status).toBe(302);
+    const location = callbackResponse.headers.get("location");
+    expect(location).toBeTruthy();
+
+    const clientRedirectUrl = new URL(location!);
+    expect(clientRedirectUrl.origin).toBe("https://claude.ai");
+    expect(clientRedirectUrl.pathname).toBe("/oauth/callback");
+    expect(clientRedirectUrl.searchParams.get("code")).toBeTruthy();
+    expect(clientRedirectUrl.searchParams.get("state")).toBe("client-state-123");
+
+    expect(upstream.getLastTokenRequest()).toMatchObject({
+      body: expect.any(URLSearchParams),
+    });
+    expect(upstream.getLastTokenRequest()?.body.get("grant_type")).toBe("authorization_code");
+    expect(upstream.getLastTokenRequest()?.body.get("code")).toBe("upstream-code-123");
+    expect(upstream.getLastTokenRequest()?.body.get("client_id")).toBe("cloudflare-client-id");
+    expect(upstream.getLastTokenRequest()?.body.get("client_secret")).toBe("cloudflare-client-secret");
+    expect(upstream.getLastTokenRequest()?.body.get("redirect_uri")).toBe("https://mcp.example.com/oauth/callback");
+  });
+
+  it("exchanges a local authorization code for a bearer token and accepts it on MCP requests", async () => {
+    const upstream = await startUpstreamOAuthServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const codeVerifier = "test-code-verifier-123456789";
+    const codeChallenge = createCodeChallenge(codeVerifier);
+    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+      },
+      body: JSON.stringify({
+        client_name: "Claude Web",
+        grant_types: ["authorization_code", "refresh_token"],
+        redirect_uris: ["https://claude.ai/oauth/callback"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+    const registration = await registrationResponse.json();
+
+    const authorizeResponse = await fetch(new URL(
+      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://claude.ai/oauth/callback")}&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+    const upstreamState = new URL(authorizeResponse.headers.get("location")!).searchParams.get("state");
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
+
+    const tokenResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        code: localAuthorizationCode!,
+        code_verifier: codeVerifier,
+        grant_type: "authorization_code",
+        redirect_uri: "https://claude.ai/oauth/callback",
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(tokenResponse.status).toBe(200);
+    const tokens = await tokenResponse.json();
+    expect(tokens.access_token).toEqual(expect.any(String));
+    expect(tokens.refresh_token).toEqual(expect.any(String));
+    expect(tokens.token_type).toBe("Bearer");
+
+    const mcpResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${tokens.access_token}`,
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(mcpResponse.status).toBe(200);
   });
 
   it("accepts bearer tokens for oauth-protected MCP requests", async () => {
@@ -1364,16 +1708,10 @@ describe("startHttpServer", () => {
     const token = await createOAuthTestToken(privateKey);
     const httpServer = await startHttpServer({
       ynab,
-      auth: {
-        audience: "https://mcp.example.com/mcp",
-        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
-        issuer: "https://example.cloudflareaccess.com",
+      auth: createCloudflareOAuthAuth({
         jwksUrl,
-        mode: "oauth",
-        publicUrl: "https://mcp.example.com/mcp",
         scopes: ["openid"],
-        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
-      },
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -1415,16 +1753,10 @@ describe("startHttpServer", () => {
     const token = await createOAuthTestToken(privateKey);
     const httpServer = await startHttpServer({
       ynab,
-      auth: {
-        audience: "https://mcp.example.com/mcp",
-        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
-        issuer: "https://example.cloudflareaccess.com",
+      auth: createCloudflareOAuthAuth({
         jwksUrl,
-        mode: "oauth",
-        publicUrl: "https://mcp.example.com/mcp",
         scopes: ["openid"],
-        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
-      },
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
@@ -1456,16 +1788,10 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: {
-        audience: "https://mcp.example.com/mcp",
-        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
-        issuer: "https://example.cloudflareaccess.com",
+      auth: createCloudflareOAuthAuth({
         jwksUrl,
-        mode: "oauth",
-        publicUrl: "https://mcp.example.com/mcp",
         scopes: ["openid"],
-        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
-      },
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,

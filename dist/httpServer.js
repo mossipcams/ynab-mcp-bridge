@@ -1,10 +1,10 @@
 import express from "express";
 import { hostHeaderValidation, localhostHostValidation, } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
-import { getOAuthProtectedResourceMetadataUrl, mcpAuthMetadataRouter, } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { assertYnabConfig } from "./config.js";
-import { createOAuthTokenVerifier } from "./oauthVerifier.js";
+import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
+import { createOAuthBroker } from "./oauthBroker.js";
 import { createServer } from "./server.js";
 const CORS_HEADERS = {
     "access-control-allow-origin": "*",
@@ -128,19 +128,6 @@ function logHttpDebug(event, details) {
 }
 function getPublicResourceServerUrl(auth) {
     return new URL(auth.publicUrl);
-}
-function createOAuthMetadata(auth) {
-    return {
-        authorization_endpoint: auth.authorizationUrl,
-        code_challenge_methods_supported: ["S256"],
-        grant_types_supported: ["authorization_code", "refresh_token"],
-        issuer: auth.issuer,
-        jwks_uri: auth.jwksUrl,
-        response_types_supported: ["code"],
-        scopes_supported: auth.scopes.length > 0 ? auth.scopes : undefined,
-        token_endpoint: auth.tokenUrl,
-        token_endpoint_auth_methods_supported: ["none"],
-    };
 }
 function getSessionId(req) {
     const sessionId = req.headers["mcp-session-id"];
@@ -266,6 +253,15 @@ export async function startHttpServer(options) {
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
     const ynab = assertYnabConfig(options.ynab);
+    const oauthBroker = auth.mode === "oauth" ? createOAuthBroker(auth) : undefined;
+    if (auth.mode === "oauth") {
+        validateCloudflareAccessOAuthSettings({
+            authorizationUrl: auth.authorizationUrl,
+            issuer: auth.issuer,
+            jwksUrl: auth.jwksUrl,
+            tokenUrl: auth.tokenUrl,
+        });
+    }
     const app = express();
     const jsonParser = express.json();
     app.disable("x-powered-by");
@@ -296,8 +292,11 @@ export async function startHttpServer(options) {
     });
     if (auth.mode === "oauth") {
         const publicServerUrl = getPublicResourceServerUrl(auth);
-        app.use(mcpAuthMetadataRouter({
-            oauthMetadata: createOAuthMetadata(auth),
+        app.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
+        app.use(mcpAuthRouter({
+            baseUrl: oauthBroker.getIssuerUrl(),
+            issuerUrl: oauthBroker.getIssuerUrl(),
+            provider: oauthBroker.provider,
             resourceName: "YNAB MCP Bridge",
             resourceServerUrl: publicServerUrl,
             scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
@@ -327,7 +326,7 @@ export async function startHttpServer(options) {
         const authMiddleware = requireBearerAuth({
             requiredScopes: auth.scopes,
             resourceMetadataUrl,
-            verifier: createOAuthTokenVerifier(auth),
+            verifier: oauthBroker.provider,
         });
         app.use((req, res, next) => {
             if (getRequestPath(req) !== path || req.method !== "POST") {

@@ -71,24 +71,29 @@ describe("resolveRuntimeConfig", () => {
     expect(resolveRuntimeConfig([], {
       MCP_AUTH_MODE: "oauth",
       MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
-      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
-      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com",
-      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/certs",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
       MCP_OAUTH_SCOPES: "openid,profile,email",
-      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
     })).toEqual({
       allowedHosts: [],
       allowedOrigins: [],
       auth: {
         audience: "https://mcp.example.com",
-        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
-        issuer: "https://example.cloudflareaccess.com",
-        jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/certs",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+        callbackPath: "/oauth/callback",
+        clientId: "cloudflare-client-id",
+        clientSecret: "cloudflare-client-secret",
+        issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+        jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
         mode: "oauth",
         publicUrl: "https://mcp.example.com/mcp",
         scopes: ["openid", "profile", "email"],
-        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
       },
       host: "127.0.0.1",
       path: "/mcp",
@@ -97,9 +102,39 @@ describe("resolveRuntimeConfig", () => {
     });
   });
 
+  it("rejects legacy Cloudflare Access oauth2 endpoints in oauth mode", () => {
+    expect(() => resolveRuntimeConfig([], {
+      MCP_AUTH_MODE: "oauth",
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/certs",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+    })).toThrow(
+      "Cloudflare Access OAuth settings must use the per-application OIDC SaaS endpoints under /cdn-cgi/access/sso/oidc/<client-id> for issuer, authorization, token, and jwks URLs.",
+    );
+  });
+
   it("throws for unsupported transports", () => {
     expect(() => resolveRuntimeConfig(["--transport", "sse"], {})).toThrow(
       "Unsupported transport: sse",
+    );
+  });
+
+  it("fails fast when oauth mode is missing upstream client credentials", () => {
+    expect(() => resolveRuntimeConfig([], {
+      MCP_AUTH_MODE: "oauth",
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+    })).toThrow(
+      "OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, and MCP_OAUTH_CLIENT_SECRET.",
     );
   });
 
