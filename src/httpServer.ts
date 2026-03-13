@@ -6,14 +6,21 @@ import {
   hostHeaderValidation,
   localhostHostValidation,
 } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
+import {
+  getOAuthProtectedResourceMetadataUrl,
+  mcpAuthMetadataRouter,
+} from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
-import { assertYnabConfig, type YnabConfig } from "./config.js";
+import { assertYnabConfig, type RuntimeAuthConfig, type YnabConfig } from "./config.js";
+import { createOAuthTokenVerifier } from "./oauthVerifier.js";
 import { createServer } from "./server.js";
 
 export type HttpServerOptions = {
   allowedHosts?: string[];
   allowedOrigins?: string[];
+  auth?: RuntimeAuthConfig;
   host?: string;
   path?: string;
   port?: number;
@@ -63,6 +70,22 @@ function applyCorsHeaders(res: Response) {
   for (const [name, value] of Object.entries(CORS_HEADERS)) {
     res.setHeader(name, value);
   }
+}
+
+function applyCloudflareAccessAuthorizationHeader(req: Pick<Request, "headers">) {
+  const existingAuthorization = getFirstHeaderValue(req.headers.authorization);
+
+  if (existingAuthorization) {
+    return;
+  }
+
+  const cfAccessJwt = getFirstHeaderValue(req.headers["cf-access-jwt-assertion"]);
+
+  if (!cfAccessJwt) {
+    return;
+  }
+
+  req.headers.authorization = `Bearer ${cfAccessJwt}`;
 }
 
 function getRequestPath(req: Pick<Request, "path" | "url">) {
@@ -186,6 +209,24 @@ function logHttpDebug(event: string, details: HttpDebugDetails) {
   console.error("[http]", event, details);
 }
 
+function getPublicResourceServerUrl(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
+  return new URL(auth.publicUrl);
+}
+
+function createOAuthMetadata(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
+  return {
+    authorization_endpoint: auth.authorizationUrl,
+    code_challenge_methods_supported: ["S256"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
+    issuer: auth.issuer,
+    jwks_uri: auth.jwksUrl,
+    response_types_supported: ["code"],
+    scopes_supported: auth.scopes.length > 0 ? auth.scopes : undefined,
+    token_endpoint: auth.tokenUrl,
+    token_endpoint_auth_methods_supported: ["none"],
+  };
+}
+
 function getSessionId(req: Pick<Request, "headers">) {
   const sessionId = req.headers["mcp-session-id"];
 
@@ -206,7 +247,10 @@ function getSessionId(req: Pick<Request, "headers">) {
 }
 
 function getRequestDebugDetails(req: Request): HttpDebugDetails {
+  const authSubject = req.auth?.extra?.subject;
   return {
+    authClientId: req.auth?.clientId,
+    authSubject: typeof authSubject === "string" ? authSubject : undefined,
     method: req.method ?? "UNKNOWN",
     origin: getFirstHeaderValue(req.headers.origin),
     path: getRequestPath(req),
@@ -347,6 +391,7 @@ async function closeNodeServer(server: NodeHttpServer) {
 export async function startHttpServer(options: HttpServerOptions): Promise<StartedHttpServer> {
   const allowedHosts = options.allowedHosts ?? [];
   const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
+  const auth = options.auth ?? { mode: "none" };
   const host = options.host ?? "127.0.0.1";
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
@@ -381,6 +426,22 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     next();
   });
 
+  app.use((_req, res, next) => {
+    applyCorsHeaders(res);
+    next();
+  });
+
+  if (auth.mode === "oauth") {
+    const publicServerUrl = getPublicResourceServerUrl(auth);
+
+    app.use(mcpAuthMetadataRouter({
+      oauthMetadata: createOAuthMetadata(auth),
+      resourceName: "YNAB MCP Bridge",
+      resourceServerUrl: publicServerUrl,
+      scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
+    }));
+  }
+
   app.use((req, res, next) => {
     if (req.method === "OPTIONS") {
       logHttpDebug("request.preflight", getRequestDebugDetails(req));
@@ -394,12 +455,45 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   app.use((req, res, next) => {
     if (getRequestPath(req) === path && req.method === "POST") {
+      if (auth.mode === "oauth") {
+        applyCloudflareAccessAuthorizationHeader(req);
+      }
+
       jsonParser(req, res, next);
       return;
     }
 
     next();
   });
+
+  if (auth.mode === "oauth") {
+    const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(getPublicResourceServerUrl(auth));
+    const authMiddleware = requireBearerAuth({
+      requiredScopes: auth.scopes,
+      resourceMetadataUrl,
+      verifier: createOAuthTokenVerifier(auth),
+    });
+
+    app.use((req, res, next) => {
+      if (getRequestPath(req) !== path || req.method !== "POST") {
+        next();
+        return;
+      }
+
+      res.once("finish", () => {
+        if (req.auth || (res.statusCode !== 401 && res.statusCode !== 403)) {
+          return;
+        }
+
+        logHttpDebug("request.rejected", {
+          ...getRequestDebugDetails(req),
+          reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope",
+        });
+      });
+
+      authMiddleware(req, res, next);
+    });
+  }
 
   app.use(async (req, res, next) => {
     if (getRequestPath(req) !== path) {

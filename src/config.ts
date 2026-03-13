@@ -1,8 +1,24 @@
 export type RuntimeTransport = "http" | "stdio";
 
+export type RuntimeAuthConfig =
+  | {
+      mode: "none";
+    }
+  | {
+      audience: string;
+      authorizationUrl: string;
+      issuer: string;
+      jwksUrl: string;
+      mode: "oauth";
+      publicUrl: string;
+      scopes: string[];
+      tokenUrl: string;
+    };
+
 export type RuntimeConfig = {
   allowedOrigins: string[];
   allowedHosts: string[];
+  auth: RuntimeAuthConfig;
   host: string;
   path: string;
   port: number;
@@ -64,6 +80,75 @@ function readCsvFlag(args: string[], name: string) {
   }
 
   return parseCsv(value);
+}
+
+function readUrlLikeValue(value: string | undefined, name: string) {
+  const normalized = readOptionalValue(value);
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(normalized);
+
+    if (url.pathname === "/" && !url.search && !url.hash) {
+      return url.origin;
+    }
+
+    return url.toString();
+  } catch {
+    throw new Error(`${name} must be a valid URL.`);
+  }
+}
+
+function readAuthMode(args: string[], env: EnvConfig) {
+  const authMode = readOptionalValue(readFlag(args, "--auth-mode")) ?? readOptionalValue(env.MCP_AUTH_MODE) ?? "none";
+
+  if (authMode !== "none" && authMode !== "oauth") {
+    throw new Error(`Unsupported auth mode: ${authMode}`);
+  }
+
+  return authMode;
+}
+
+function resolveRuntimeAuthConfig(args: string[], env: EnvConfig): RuntimeAuthConfig {
+  const mode = readAuthMode(args, env);
+
+  if (mode === "none") {
+    return {
+      mode,
+    };
+  }
+
+  const issuer = readUrlLikeValue(readFlag(args, "--oauth-issuer") ?? env.MCP_OAUTH_ISSUER, "MCP_OAUTH_ISSUER");
+  const authorizationUrl = readUrlLikeValue(
+    readFlag(args, "--oauth-authorization-url") ?? env.MCP_OAUTH_AUTHORIZATION_URL,
+    "MCP_OAUTH_AUTHORIZATION_URL",
+  );
+  const tokenUrl = readUrlLikeValue(readFlag(args, "--oauth-token-url") ?? env.MCP_OAUTH_TOKEN_URL, "MCP_OAUTH_TOKEN_URL");
+  const jwksUrl = readUrlLikeValue(readFlag(args, "--oauth-jwks-url") ?? env.MCP_OAUTH_JWKS_URL, "MCP_OAUTH_JWKS_URL");
+  const publicUrl = readUrlLikeValue(readFlag(args, "--public-url") ?? env.MCP_PUBLIC_URL, "MCP_PUBLIC_URL");
+  const audience = readOptionalValue(readFlag(args, "--oauth-audience") ?? env.MCP_OAUTH_AUDIENCE);
+
+  if (!issuer || !authorizationUrl || !tokenUrl || !jwksUrl || !audience || !publicUrl) {
+    throw new Error(
+      "OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, and MCP_OAUTH_AUDIENCE.",
+    );
+  }
+
+  const scopes = parseCsv(readFlag(args, "--oauth-scopes") ?? env.MCP_OAUTH_SCOPES ?? "");
+
+  return {
+    audience,
+    authorizationUrl,
+    issuer,
+    jwksUrl,
+    mode,
+    publicUrl,
+    scopes,
+    tokenUrl,
+  };
 }
 
 function getBackendReadiness(env: EnvConfig): BackendReadiness {
@@ -136,6 +221,7 @@ export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeCon
   return {
     allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : (envAllowedOrigins ?? []),
     allowedHosts: allowedHosts.length > 0 ? allowedHosts : (envAllowedHosts ?? []),
+    auth: resolveRuntimeAuthConfig(args, env),
     transport: rawTransport,
     host: readFlag(args, "--host") ?? env.MCP_HOST ?? "127.0.0.1",
     path: readFlag(args, "--path") ?? env.MCP_PATH ?? "/mcp",
