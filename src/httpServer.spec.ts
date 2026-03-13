@@ -1,7 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
-import { request as httpRequest } from "node:http";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { createServer as createNodeHttpServer, request as httpRequest } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startHttpServer } from "./httpServer.js";
@@ -69,6 +70,80 @@ describe("startHttpServer", () => {
 
       request.end();
     });
+  }
+
+  async function startJwksServer() {
+    const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const jwk = await exportJWK(publicKey);
+
+    jwk.kid = "http-server-test-key";
+
+    const server = createNodeHttpServer((req, res) => {
+      if (req.url !== "/jwks") {
+        res.statusCode = 404;
+        res.end();
+        return;
+      }
+
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        keys: [jwk],
+      }));
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("JWKS test server did not expose a TCP address");
+    }
+
+    const jwksUrl = `http://127.0.0.1:${address.port}/jwks`;
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    });
+
+    return {
+      jwksUrl,
+      privateKey,
+    };
+  }
+
+  async function createOAuthTestToken(privateKey: CryptoKey, overrides: {
+    aud?: string;
+    iss?: string;
+    scope?: string;
+  } = {}) {
+    return await new SignJWT({
+      client_id: "client-123",
+      scope: overrides.scope ?? "openid profile",
+    })
+      .setProtectedHeader({
+        alg: "RS256",
+        kid: "http-server-test-key",
+      })
+      .setIssuedAt()
+      .setIssuer(overrides.iss ?? "https://example.cloudflareaccess.com")
+      .setAudience(overrides.aud ?? "https://mcp.example.com/mcp")
+      .setExpirationTime("5 minutes")
+      .setSubject("user-123")
+      .sign(privateKey);
   }
 
   beforeEach(() => {
@@ -1171,5 +1246,256 @@ describe("startHttpServer", () => {
 
     await expect(httpServer.close()).resolves.toBeUndefined();
     await expect(httpServer.close()).resolves.toBeUndefined();
+  });
+
+  it("exposes OAuth protected resource metadata using the configured public URL", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        issuer: "https://example.cloudflareaccess.com",
+        jwksUrl,
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: ["openid", "profile"],
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+      },
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/oauth-protected-resource/mcp", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      authorization_servers: ["https://example.cloudflareaccess.com"],
+      resource: "https://mcp.example.com/mcp",
+      scopes_supported: ["openid", "profile"],
+    });
+  });
+
+  it("returns a bearer challenge with resource metadata when oauth mode is enabled", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        issuer: "https://example.cloudflareaccess.com",
+        jwksUrl,
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: ["openid"],
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+      },
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"");
+  });
+
+  it("exposes OAuth authorization server metadata when oauth mode is enabled", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        issuer: "https://example.cloudflareaccess.com",
+        jwksUrl,
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: ["openid", "profile"],
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+      },
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/oauth-authorization-server", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      authorization_endpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+      issuer: "https://example.cloudflareaccess.com",
+      jwks_uri: jwksUrl,
+      token_endpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+    });
+  });
+
+  it("accepts bearer tokens for oauth-protected MCP requests", async () => {
+    const { jwksUrl, privateKey } = await startJwksServer();
+    const token = await createOAuthTestToken(privateKey);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        issuer: "https://example.cloudflareaccess.com",
+        jwksUrl,
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: ["openid"],
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+      },
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      result: {
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_list_plans",
+          }),
+        ]),
+      },
+    });
+  });
+
+  it("accepts Cloudflare Access JWT assertion headers when authorization is absent", async () => {
+    const { jwksUrl, privateKey } = await startJwksServer();
+    const token = await createOAuthTestToken(privateKey);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        issuer: "https://example.cloudflareaccess.com",
+        jwksUrl,
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: ["openid"],
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+      },
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Cf-Access-Jwt-Assertion": token,
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.status).toBe(200);
+  });
+
+  it("logs oauth auth failures without leaking token material", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        issuer: "https://example.cloudflareaccess.com",
+        jwksUrl,
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: ["openid"],
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+      },
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
+      details.reason === "unauthorized" &&
+      details.path === "/mcp" &&
+      !("authorization" in details)
+    ))).toBeTruthy();
   });
 });
