@@ -30,6 +30,9 @@ describe("config", () => {
       runtime: {
         allowedOrigins: ["https://claude.ai", "https://chat.openai.com"],
         allowedHosts: ["mcp.example.com", "localhost"],
+        auth: {
+          mode: "none",
+        },
         host: "0.0.0.0",
         path: "/bridge",
         port: 8080,
@@ -55,6 +58,42 @@ describe("config", () => {
       "mcp.example.com",
       "localhost",
     ]);
+  });
+
+  it("reads OAuth runtime settings from environment", () => {
+    const config = resolveAppConfig(
+      [],
+      {
+        MCP_AUTH_MODE: "oauth",
+        MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+        MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com",
+        MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/certs",
+        MCP_OAUTH_SCOPES: "openid,profile,email",
+        MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+        MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+        YNAB_API_TOKEN: "token-1",
+      },
+    );
+
+    expect(config.runtime.auth).toEqual({
+      audience: "https://mcp.example.com",
+      authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+      issuer: "https://example.cloudflareaccess.com",
+      jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/certs",
+      mode: "oauth",
+      publicUrl: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile", "email"],
+      tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
+    });
+  });
+
+  it("fails fast when oauth mode is missing required settings", () => {
+    expect(() => resolveAppConfig([], {
+      MCP_AUTH_MODE: "oauth",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+      YNAB_API_TOKEN: "token-1",
+    })).toThrow("OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, and MCP_OAUTH_AUDIENCE.");
   });
 
   it("reads only YNAB settings from environment", () => {
