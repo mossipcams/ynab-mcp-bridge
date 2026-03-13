@@ -11,7 +11,7 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string }, api: ynab.API) {
   try {
-    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.payeeLocations.getPayeeLocations(planId));
+    const response = await withResolvedPlan(input.planId, api, async (planId) => api.payeeLocations.getPayeeLocations(planId));
     const payeeLocations = response.data.payee_locations
       .filter((location) => !location.deleted)
       .map((location) => ({

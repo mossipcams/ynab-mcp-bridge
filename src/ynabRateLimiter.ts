@@ -30,6 +30,10 @@ export class SlidingWindowRateLimiter {
     this.windowMs = options.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
   }
 
+  get size() {
+    return this.states.size;
+  }
+
   async acquire(token: string) {
     const state = this.getState(token);
     const task = state.queue.then(async () => {
@@ -49,6 +53,7 @@ export class SlidingWindowRateLimiter {
 
     state.queue = task.catch(() => undefined);
     await task;
+    this.evictStaleEntries();
   }
 
   private getState(token: string) {
@@ -66,6 +71,16 @@ export class SlidingWindowRateLimiter {
 
     this.states.set(key, state);
     return state;
+  }
+
+  private evictStaleEntries() {
+    for (const [key, state] of this.states) {
+      this.pruneExpiredTimestamps(state.timestamps);
+
+      if (state.timestamps.length === 0) {
+        this.states.delete(key);
+      }
+    }
   }
 
   private pruneExpiredTimestamps(timestamps: number[]) {

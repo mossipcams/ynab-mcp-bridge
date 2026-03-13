@@ -175,6 +175,13 @@ function isPayloadTooLargeError(error) {
             ("status" in error && error.status === 413) ||
             ("statusCode" in error && error.statusCode === 413));
 }
+/**
+ * Creates a fresh McpServer + transport per request. This is intentional:
+ * StreamableHTTPServerTransport in stateless mode (sessionIdGenerator: undefined)
+ * does not support server reuse across requests. The overhead is low — tool modules
+ * are loaded once at startup and registrations iterate a static array. Revisit if
+ * the SDK adds support for reusable stateless servers.
+ */
 async function createManagedRequest(config) {
     const mcpServer = createServer(config);
     const transport = new StreamableHTTPServerTransport({
@@ -305,7 +312,9 @@ export async function startHttpServer(options) {
         };
         try {
             res.once("close", () => {
-                void cleanup();
+                cleanup().catch((error) => {
+                    logHttpDebug("cleanup.error", { error });
+                });
             });
             logHttpDebug("transport.handoff", {
                 ...getRequestDebugDetails(req),

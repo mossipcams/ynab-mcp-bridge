@@ -16,7 +16,7 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
-    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.categories.getMonthCategoryById(planId, input.month, input.categoryId));
+    const response = await withResolvedPlan(input.planId, api, async (planId) => api.categories.getMonthCategoryById(planId, input.month, input.categoryId));
     return toTextResult({
       category: response.data.category,
     });
