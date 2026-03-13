@@ -24,7 +24,7 @@ describe("planToolUtils", () => {
             plans: [
               { id: "plan-1", name: "Home" },
             ],
-            default_plan: null,
+            default_plan: undefined,
           },
         }),
       },
@@ -34,7 +34,7 @@ describe("planToolUtils", () => {
     });
 
     expect(() => getPlanId(undefined, "   ")).toThrow("No plan ID provided. Please provide a plan ID or set YNAB_PLAN_ID.");
-    await expect(resolvePlanId(undefined, api as any)).resolves.toBe("plan-1");
+    await expect(resolvePlanId(undefined, api)).resolves.toBe("plan-1");
   });
 
   it("resolves the YNAB default plan when no planId is configured", async () => {
@@ -54,7 +54,7 @@ describe("planToolUtils", () => {
       apiToken: "token-1",
     });
 
-    await expect(resolvePlanId(undefined, api as any)).resolves.toBe("plan-2");
+    await expect(resolvePlanId(undefined, api)).resolves.toBe("plan-2");
   });
 
   it("resolves the only available plan when no default is returned", async () => {
@@ -65,7 +65,7 @@ describe("planToolUtils", () => {
             plans: [
               { id: "plan-1", name: "Home" },
             ],
-            default_plan: null,
+            default_plan: undefined,
           },
         }),
       },
@@ -73,7 +73,7 @@ describe("planToolUtils", () => {
       apiToken: "token-1",
     });
 
-    await expect(resolvePlanId(undefined, api as any)).resolves.toBe("plan-1");
+    await expect(resolvePlanId(undefined, api)).resolves.toBe("plan-1");
   });
 
   it("keeps resolved plan overrides scoped to each API instance", async () => {
@@ -84,7 +84,7 @@ describe("planToolUtils", () => {
             plans: [
               { id: "plan-1", name: "Home" },
             ],
-            default_plan: null,
+            default_plan: undefined,
           },
         }),
       },
@@ -98,7 +98,7 @@ describe("planToolUtils", () => {
             plans: [
               { id: "plan-2", name: "Work" },
             ],
-            default_plan: null,
+            default_plan: undefined,
           },
         }),
       },
@@ -106,8 +106,8 @@ describe("planToolUtils", () => {
       apiToken: "token-2",
     });
 
-    await expect(resolvePlanId(undefined, firstApi as any)).resolves.toBe("plan-1");
-    await expect(resolvePlanId(undefined, secondApi as any)).resolves.toBe("plan-2");
+    await expect(resolvePlanId(undefined, firstApi)).resolves.toBe("plan-1");
+    await expect(resolvePlanId(undefined, secondApi)).resolves.toBe("plan-2");
   });
 
   it("fails clearly when no plan can be resolved", async () => {
@@ -116,7 +116,7 @@ describe("planToolUtils", () => {
         getPlans: async () => ({
           data: {
             plans: [],
-            default_plan: null,
+            default_plan: undefined,
           },
         }),
       },
@@ -124,7 +124,7 @@ describe("planToolUtils", () => {
       apiToken: "token-1",
     });
 
-    await expect(resolvePlanId(undefined, api as any)).rejects.toThrow(
+    await expect(resolvePlanId(undefined, api)).rejects.toThrow(
       "No plan ID provided. Please provide a plan ID, set YNAB_PLAN_ID, or configure a default YNAB plan.",
     );
   });

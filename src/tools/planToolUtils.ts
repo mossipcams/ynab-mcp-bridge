@@ -11,10 +11,10 @@ export function getPlanId(inputPlanId?: string, configuredPlanId?: string): stri
 
 type PlanResolverApi = {
   plans: {
-    getPlans: () => Promise<{
+    getPlans: (...args: any[]) => Promise<{
       data: {
         plans: Array<{ id: string }>;
-        default_plan?: { id: string } | null;
+        default_plan?: { id: string };
       };
     }>;
   };

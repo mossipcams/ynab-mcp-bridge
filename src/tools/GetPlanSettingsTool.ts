@@ -11,7 +11,7 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string }, api: ynab.API) {
   try {
-    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.plans.getPlanSettingsById(planId));
+    const response = await withResolvedPlan(input.planId, api, async (planId) => api.plans.getPlanSettingsById(planId));
     return toTextResult({
       settings: response.data.settings,
     });

@@ -45,6 +45,39 @@ describe("SlidingWindowRateLimiter", () => {
     expect(settled).toBe(true);
   });
 
+  it("exposes the number of tracked tokens via size", async () => {
+    const limiter = new SlidingWindowRateLimiter({
+      maxRequests: 2,
+      windowMs: 60_000,
+    });
+
+    expect(limiter.size).toBe(0);
+
+    await limiter.acquire("token-a");
+    expect(limiter.size).toBe(1);
+
+    await limiter.acquire("token-b");
+    expect(limiter.size).toBe(2);
+  });
+
+  it("evicts stale token entries after their timestamps expire", async () => {
+    const limiter = new SlidingWindowRateLimiter({
+      maxRequests: 2,
+      windowMs: 60_000,
+    });
+
+    await limiter.acquire("token-a");
+    await limiter.acquire("token-b");
+    expect(limiter.size).toBe(2);
+
+    // Advance past the window so all timestamps expire
+    vi.advanceTimersByTime(60_001);
+
+    // The next acquire on a different token should trigger eviction of stale entries
+    await limiter.acquire("token-c");
+    expect(limiter.size).toBe(1);
+  });
+
   it("tracks different access tokens independently", async () => {
     const limiter = new SlidingWindowRateLimiter({
       maxRequests: 1,

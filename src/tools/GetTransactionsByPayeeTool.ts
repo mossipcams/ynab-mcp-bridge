@@ -12,7 +12,7 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string; payeeId: string }, api: ynab.API) {
   try {
-    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.transactions.getTransactionsByPayee(
+    const response = await withResolvedPlan(input.planId, api, async (planId) => api.transactions.getTransactionsByPayee(
       planId,
       input.payeeId,
       undefined,
