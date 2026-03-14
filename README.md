@@ -22,16 +22,21 @@ Set these environment variables before starting the server:
 * `MCP_ALLOWED_ORIGINS` optional comma-separated allowlist for browser-based HTTP clients like remote MCP hosts
 * `MCP_AUTH_MODE` optional, `none` or `oauth`, default `none`
 * `MCP_PUBLIC_URL` required in `oauth` mode, the externally reachable MCP URL such as `https://mcp.example.com/mcp`
-* `MCP_OAUTH_ISSUER` required in `oauth` mode, the OAuth issuer URL
-* `MCP_OAUTH_AUTHORIZATION_URL` required in `oauth` mode, the OAuth authorization endpoint
-* `MCP_OAUTH_TOKEN_URL` required in `oauth` mode, the OAuth token endpoint
-* `MCP_OAUTH_JWKS_URL` required in `oauth` mode, the JWKS endpoint used to verify access tokens
+* `MCP_OAUTH_ISSUER` required in `oauth` mode, the upstream OAuth issuer URL
+* `MCP_OAUTH_AUTHORIZATION_URL` required in `oauth` mode, the upstream OAuth authorization endpoint
+* `MCP_OAUTH_TOKEN_URL` required in `oauth` mode, the upstream OAuth token endpoint
+* `MCP_OAUTH_JWKS_URL` required in `oauth` mode, the upstream JWKS endpoint used to verify fallback Cloudflare Access JWTs
 * `MCP_OAUTH_AUDIENCE` required in `oauth` mode, the resource/audience this MCP server expects
+* `MCP_OAUTH_CLIENT_ID` required in `oauth` mode, the upstream confidential OAuth client ID used by the MCP bridge
+* `MCP_OAUTH_CLIENT_SECRET` required in `oauth` mode, the upstream confidential OAuth client secret used by the MCP bridge
+* `MCP_OAUTH_STORE_PATH` required in `oauth` mode, the filesystem path used to persist OAuth broker state across restarts
+* `MCP_OAUTH_TOKEN_SIGNING_SECRET` required in `oauth` mode, the stable secret used to sign MCP-issued bearer tokens
+* `MCP_OAUTH_CALLBACK_PATH` optional in `oauth` mode, default `/oauth/callback`
 * `MCP_OAUTH_SCOPES` optional comma-separated scopes to advertise and require in `oauth` mode
 
 HTTP mode validates the `Origin` header when one is present. Loopback origins are allowed automatically for loopback hosts, but remote/browser deployments should set `MCP_ALLOWED_ORIGINS` explicitly, for example `https://claude.ai`.
 The default HTTP transport is stateless: clients should use `POST /mcp` requests directly and should not rely on returned `Mcp-Session-Id` headers, session-scoped `GET` streams, or `DELETE` session teardown.
-In `oauth` mode the server exposes OAuth protected resource metadata and enforces bearer tokens on `POST /mcp`. If Cloudflare Access injects `Cf-Access-Jwt-Assertion`, the server will treat it like a bearer token automatically.
+In `oauth` mode the server acts as the MCP authorization server for clients such as Claude Web. It exposes local `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`, and `/.well-known/oauth-protected-resource/mcp` endpoints, requires an MCP-side consent step before redirecting upstream, brokers the upstream authorization-code and refresh-token exchanges, and enforces broker-issued bearer tokens on `POST /mcp`. If Cloudflare Access injects `Cf-Access-Jwt-Assertion`, the server will still bridge that header into the MCP request path as an explicit compatibility mode.
 
 If `YNAB_PLAN_ID` is not set, the bridge automatically resolves YNAB's `default_plan` when one exists or the only available plan when there is exactly one. If a configured plan becomes stale, the bridge retries once with a fresh plan resolution.
 OAuth here protects access to a shared backend YNAB token configured through `YNAB_API_TOKEN`; it does not yet perform per-user YNAB OAuth delegation.
@@ -107,11 +112,15 @@ MCP_HOST=0.0.0.0 \
 MCP_ALLOWED_ORIGINS=https://claude.ai \
 MCP_AUTH_MODE=oauth \
 MCP_PUBLIC_URL=https://mcp.example.com/mcp \
-MCP_OAUTH_ISSUER=https://example.cloudflareaccess.com \
-MCP_OAUTH_AUTHORIZATION_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth \
-MCP_OAUTH_TOKEN_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token \
-MCP_OAUTH_JWKS_URL=https://example.cloudflareaccess.com/cdn-cgi/access/certs \
+MCP_OAUTH_ISSUER=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123 \
+MCP_OAUTH_AUTHORIZATION_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization \
+MCP_OAUTH_TOKEN_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token \
+MCP_OAUTH_JWKS_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks \
 MCP_OAUTH_AUDIENCE=https://mcp.example.com/mcp \
+MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
+MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
+MCP_OAUTH_STORE_PATH=/var/lib/ynab-mcp-bridge/oauth-store.json \
+MCP_OAUTH_TOKEN_SIGNING_SECRET=replace-with-a-long-random-secret \
 MCP_OAUTH_SCOPES=openid,profile \
 npm run start:http
 ```
@@ -119,7 +128,11 @@ npm run start:http
 ## Cloudflare Access
 
 For Cloudflare Access, use the public MCP URL for both `MCP_PUBLIC_URL` and `MCP_OAUTH_AUDIENCE` unless your Access app is configured with a different audience/resource identifier.
-Point the issuer, authorization, token, and JWKS settings at your Access tenant endpoints. The MCP server advertises protected-resource metadata from `/.well-known/oauth-protected-resource/mcp` and authorization server metadata from `/.well-known/oauth-authorization-server`.
+Use the per-application OIDC SaaS endpoints under `/cdn-cgi/access/sso/oidc/<client-id>` for `MCP_OAUTH_ISSUER`, `MCP_OAUTH_AUTHORIZATION_URL`, `MCP_OAUTH_TOKEN_URL`, and `MCP_OAUTH_JWKS_URL`.
+Set `MCP_OAUTH_CLIENT_ID` and `MCP_OAUTH_CLIENT_SECRET` to the confidential client credentials for the upstream Access application, and make sure the Access application allows the bridge callback URL built from `MCP_PUBLIC_URL` and `MCP_OAUTH_CALLBACK_PATH` such as `https://mcp.example.com/oauth/callback`.
+Set `MCP_OAUTH_STORE_PATH` to durable storage that survives restarts, and set `MCP_OAUTH_TOKEN_SIGNING_SECRET` to a stable secret value so broker-issued MCP tokens remain valid across process restarts.
+The bridge advertises itself as the MCP authorization server from `/.well-known/oauth-authorization-server`, dynamically registers MCP clients at `/register`, presents an MCP-side consent step at `/authorize`, exchanges the upstream code at the callback URL, refreshes the upstream grant when Claude refreshes, and issues MCP bearer tokens from `/token`.
+Do not use the older tenant-wide `/cdn-cgi/access/sso/oauth2/*` or `/cdn-cgi/access/certs` endpoints here. With current MCP clients, that legacy configuration can break the authorization-code redirect and surface errors like `code: Field required`.
 When deployed behind Cloudflare, keep `MCP_PUBLIC_URL` on the external HTTPS hostname even if the local bind address is `127.0.0.1` or `0.0.0.0`; discovery metadata must describe the public URL, not the internal listener.
 
 ## CLI Usage
@@ -159,11 +172,15 @@ node dist/index.js \
   --allowed-origins https://claude.ai \
   --auth-mode oauth \
   --public-url https://mcp.example.com/mcp \
-  --oauth-issuer https://example.cloudflareaccess.com \
-  --oauth-authorization-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth \
-  --oauth-token-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token \
-  --oauth-jwks-url https://example.cloudflareaccess.com/cdn-cgi/access/certs \
+  --oauth-issuer https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123 \
+  --oauth-authorization-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization \
+  --oauth-token-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token \
+  --oauth-jwks-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks \
   --oauth-audience https://mcp.example.com/mcp \
+  --oauth-client-id cloudflare-access-client-id \
+  --oauth-client-secret cloudflare-access-client-secret \
+  --oauth-store-path /var/lib/ynab-mcp-bridge/oauth-store.json \
+  --oauth-token-signing-secret replace-with-a-long-random-secret \
   --oauth-scopes openid,profile
 ```
 

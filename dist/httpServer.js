@@ -1,10 +1,11 @@
 import express from "express";
+import { decodeJwt } from "jose";
 import { hostHeaderValidation, localhostHostValidation, } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
-import { getOAuthProtectedResourceMetadataUrl, mcpAuthMetadataRouter, } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { assertYnabConfig } from "./config.js";
-import { createOAuthTokenVerifier } from "./oauthVerifier.js";
+import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
+import { createOAuthBroker } from "./oauthBroker.js";
 import { createServer } from "./server.js";
 const CORS_HEADERS = {
     "access-control-allow-origin": "*",
@@ -13,6 +14,7 @@ const CORS_HEADERS = {
     "access-control-expose-headers": "Mcp-Session-Id",
 };
 const HTTP_ALLOWED_METHODS = ["POST"];
+const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 function applyCorsHeaders(res) {
     for (const [name, value] of Object.entries(CORS_HEADERS)) {
         res.setHeader(name, value);
@@ -28,6 +30,7 @@ function applyCloudflareAccessAuthorizationHeader(req) {
         return;
     }
     req.headers.authorization = `Bearer ${cfAccessJwt}`;
+    req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER] = "cf-access-jwt-assertion";
 }
 function getRequestPath(req) {
     if (typeof req.path === "string" && req.path.length > 0) {
@@ -43,6 +46,28 @@ function getFirstHeaderValue(value) {
         return value.split(",")[0]?.trim();
     }
     return value?.[0]?.split(",")[0]?.trim();
+}
+function getBearerToken(authorizationHeader) {
+    if (!authorizationHeader?.startsWith("Bearer ")) {
+        return undefined;
+    }
+    return authorizationHeader.slice("Bearer ".length).trim();
+}
+function isDirectUpstreamBearerToken(req, auth) {
+    const authorizationSource = getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]);
+    if (authorizationSource === "cf-access-jwt-assertion") {
+        return false;
+    }
+    const token = getBearerToken(getFirstHeaderValue(req.headers.authorization));
+    if (!token) {
+        return false;
+    }
+    try {
+        return decodeJwt(token).iss === auth.issuer;
+    }
+    catch {
+        return false;
+    }
 }
 function parseHostName(host) {
     if (!host) {
@@ -129,19 +154,6 @@ function logHttpDebug(event, details) {
 function getPublicResourceServerUrl(auth) {
     return new URL(auth.publicUrl);
 }
-function createOAuthMetadata(auth) {
-    return {
-        authorization_endpoint: auth.authorizationUrl,
-        code_challenge_methods_supported: ["S256"],
-        grant_types_supported: ["authorization_code", "refresh_token"],
-        issuer: auth.issuer,
-        jwks_uri: auth.jwksUrl,
-        response_types_supported: ["code"],
-        scopes_supported: auth.scopes.length > 0 ? auth.scopes : undefined,
-        token_endpoint: auth.tokenUrl,
-        token_endpoint_auth_methods_supported: ["none"],
-    };
-}
 function getSessionId(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (typeof sessionId !== "string") {
@@ -208,13 +220,6 @@ function isPayloadTooLargeError(error) {
             ("status" in error && error.status === 413) ||
             ("statusCode" in error && error.statusCode === 413));
 }
-/**
- * Creates a fresh McpServer + transport per request. This is intentional:
- * StreamableHTTPServerTransport in stateless mode (sessionIdGenerator: undefined)
- * does not support server reuse across requests. The overhead is low — tool modules
- * are loaded once at startup and registrations iterate a static array. Revisit if
- * the SDK adds support for reusable stateless servers.
- */
 async function createManagedRequest(config) {
     const mcpServer = createServer(config);
     const transport = new StreamableHTTPServerTransport({
@@ -273,8 +278,18 @@ export async function startHttpServer(options) {
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
     const ynab = assertYnabConfig(options.ynab);
+    const oauthBroker = auth.mode === "oauth" ? createOAuthBroker(auth) : undefined;
+    if (auth.mode === "oauth") {
+        validateCloudflareAccessOAuthSettings({
+            authorizationUrl: auth.authorizationUrl,
+            issuer: auth.issuer,
+            jwksUrl: auth.jwksUrl,
+            tokenUrl: auth.tokenUrl,
+        });
+    }
     const app = express();
     const jsonParser = express.json();
+    const urlencodedParser = express.urlencoded({ extended: false });
     app.disable("x-powered-by");
     app.use((req, _res, next) => {
         logHttpDebug("request.received", getRequestDebugDetails(req));
@@ -303,8 +318,12 @@ export async function startHttpServer(options) {
     });
     if (auth.mode === "oauth") {
         const publicServerUrl = getPublicResourceServerUrl(auth);
-        app.use(mcpAuthMetadataRouter({
-            oauthMetadata: createOAuthMetadata(auth),
+        app.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
+        app.post("/authorize/consent", urlencodedParser, oauthBroker.handleConsent);
+        app.use(mcpAuthRouter({
+            baseUrl: oauthBroker.getIssuerUrl(),
+            issuerUrl: oauthBroker.getIssuerUrl(),
+            provider: oauthBroker.provider,
             resourceName: "YNAB MCP Bridge",
             resourceServerUrl: publicServerUrl,
             scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
@@ -334,12 +353,15 @@ export async function startHttpServer(options) {
         const authMiddleware = requireBearerAuth({
             requiredScopes: auth.scopes,
             resourceMetadataUrl,
-            verifier: createOAuthTokenVerifier(auth),
+            verifier: oauthBroker.provider,
         });
         app.use((req, res, next) => {
             if (getRequestPath(req) !== path || req.method !== "POST") {
                 next();
                 return;
+            }
+            if (isDirectUpstreamBearerToken(req, auth)) {
+                delete req.headers.authorization;
             }
             res.once("finish", () => {
                 if (req.auth || (res.statusCode !== 401 && res.statusCode !== 403)) {
@@ -386,9 +408,7 @@ export async function startHttpServer(options) {
         };
         try {
             res.once("close", () => {
-                cleanup().catch((error) => {
-                    logHttpDebug("cleanup.error", { error });
-                });
+                void cleanup();
             });
             logHttpDebug("transport.handoff", {
                 ...getRequestDebugDetails(req),

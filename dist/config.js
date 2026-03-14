@@ -1,3 +1,62 @@
+export const CLOUDFLARE_ACCESS_ERROR = "Cloudflare Access OAuth settings must use the per-application OIDC SaaS endpoints under /cdn-cgi/access/sso/oidc/<client-id> for issuer, authorization, token, and jwks URLs.";
+function isCloudflareAccessHostname(hostname) {
+    return hostname === "cloudflareaccess.com" || hostname.endsWith(".cloudflareaccess.com");
+}
+function getCloudflareAccessClientId(url, endpoint) {
+    const segments = url.pathname
+        .split("/")
+        .filter(Boolean);
+    if (segments[0] !== "cdn-cgi" ||
+        segments[1] !== "access" ||
+        segments[2] !== "sso" ||
+        segments[3] !== "oidc") {
+        return undefined;
+    }
+    const clientId = segments[4];
+    if (!clientId) {
+        return undefined;
+    }
+    if (endpoint === "issuer") {
+        return segments.length === 5 ? clientId : undefined;
+    }
+    return segments.length === 6 && segments[5] === endpoint
+        ? clientId
+        : undefined;
+}
+export function validateCloudflareAccessOAuthSettings(config) {
+    const authorizationUrl = new URL(config.authorizationUrl);
+    const issuerUrl = new URL(config.issuer);
+    const jwksUrl = new URL(config.jwksUrl);
+    const tokenUrl = new URL(config.tokenUrl);
+    const cloudflareCoreUrls = [authorizationUrl, issuerUrl, tokenUrl];
+    const includesCloudflareAccess = [authorizationUrl, issuerUrl, jwksUrl, tokenUrl].some((url) => (isCloudflareAccessHostname(url.hostname)));
+    if (!includesCloudflareAccess) {
+        return;
+    }
+    if (!cloudflareCoreUrls.every((url) => isCloudflareAccessHostname(url.hostname))) {
+        throw new Error(CLOUDFLARE_ACCESS_ERROR);
+    }
+    const authorizationClientId = getCloudflareAccessClientId(authorizationUrl, "authorization");
+    const issuerClientId = getCloudflareAccessClientId(issuerUrl, "issuer");
+    const tokenClientId = getCloudflareAccessClientId(tokenUrl, "token");
+    if (!authorizationClientId || !issuerClientId || !tokenClientId) {
+        throw new Error(CLOUDFLARE_ACCESS_ERROR);
+    }
+    if (authorizationUrl.origin !== issuerUrl.origin ||
+        authorizationUrl.origin !== tokenUrl.origin ||
+        authorizationClientId !== issuerClientId ||
+        authorizationClientId !== tokenClientId) {
+        throw new Error(CLOUDFLARE_ACCESS_ERROR);
+    }
+    if (isCloudflareAccessHostname(jwksUrl.hostname)) {
+        const jwksClientId = getCloudflareAccessClientId(jwksUrl, "jwks");
+        if (!jwksClientId ||
+            authorizationUrl.origin !== jwksUrl.origin ||
+            authorizationClientId !== jwksClientId) {
+            throw new Error(CLOUDFLARE_ACCESS_ERROR);
+        }
+    }
+}
 function readFlag(args, name) {
     const index = args.indexOf(name);
     if (index === -1) {
@@ -8,6 +67,20 @@ function readFlag(args, name) {
 function readOptionalValue(value) {
     const trimmed = value?.trim();
     return trimmed ? trimmed : undefined;
+}
+function readPathValue(value, name) {
+    const normalized = readOptionalValue(value);
+    if (!normalized) {
+        return undefined;
+    }
+    if (!normalized.startsWith("/")) {
+        throw new Error(`${name} must start with '/'.`);
+    }
+    return normalized;
+}
+function readFilePathValue(value) {
+    const normalized = readOptionalValue(value);
+    return normalized ? normalized : undefined;
 }
 function hasValue(value) {
     return readOptionalValue(value) !== undefined;
@@ -61,18 +134,34 @@ function resolveRuntimeAuthConfig(args, env) {
     const jwksUrl = readUrlLikeValue(readFlag(args, "--oauth-jwks-url") ?? env.MCP_OAUTH_JWKS_URL, "MCP_OAUTH_JWKS_URL");
     const publicUrl = readUrlLikeValue(readFlag(args, "--public-url") ?? env.MCP_PUBLIC_URL, "MCP_PUBLIC_URL");
     const audience = readOptionalValue(readFlag(args, "--oauth-audience") ?? env.MCP_OAUTH_AUDIENCE);
-    if (!issuer || !authorizationUrl || !tokenUrl || !jwksUrl || !audience || !publicUrl) {
-        throw new Error("OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, and MCP_OAUTH_AUDIENCE.");
+    const clientId = readOptionalValue(readFlag(args, "--oauth-client-id") ?? env.MCP_OAUTH_CLIENT_ID);
+    const clientSecret = readOptionalValue(readFlag(args, "--oauth-client-secret") ?? env.MCP_OAUTH_CLIENT_SECRET);
+    const callbackPath = readPathValue(readFlag(args, "--oauth-callback-path") ?? env.MCP_OAUTH_CALLBACK_PATH ?? "/oauth/callback", "MCP_OAUTH_CALLBACK_PATH");
+    const storePath = readFilePathValue(readFlag(args, "--oauth-store-path") ?? env.MCP_OAUTH_STORE_PATH);
+    const tokenSigningSecret = readOptionalValue(readFlag(args, "--oauth-token-signing-secret") ?? env.MCP_OAUTH_TOKEN_SIGNING_SECRET);
+    if (!issuer || !authorizationUrl || !tokenUrl || !jwksUrl || !audience || !publicUrl || !clientId || !clientSecret || !callbackPath || !storePath || !tokenSigningSecret) {
+        throw new Error("OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, and MCP_OAUTH_TOKEN_SIGNING_SECRET.");
     }
+    validateCloudflareAccessOAuthSettings({
+        authorizationUrl,
+        issuer,
+        jwksUrl,
+        tokenUrl,
+    });
     const scopes = parseCsv(readFlag(args, "--oauth-scopes") ?? env.MCP_OAUTH_SCOPES ?? "");
     return {
         audience,
         authorizationUrl,
+        callbackPath,
+        clientId,
+        clientSecret,
         issuer,
         jwksUrl,
         mode,
         publicUrl,
         scopes,
+        storePath,
+        tokenSigningSecret,
         tokenUrl,
     };
 }
