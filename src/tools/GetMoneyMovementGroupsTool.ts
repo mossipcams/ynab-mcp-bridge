@@ -11,7 +11,7 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string }, api: ynab.API) {
   try {
-    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.moneyMovements.getMoneyMovementGroups(planId));
+    const response = await withResolvedPlan(input.planId, api, async (planId) => api.moneyMovements.getMoneyMovementGroups(planId));
     return toTextResult({
       money_movement_groups: response.data.money_movement_groups,
       count: response.data.money_movement_groups.length,

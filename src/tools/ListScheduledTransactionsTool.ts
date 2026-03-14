@@ -11,7 +11,7 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string }, api: ynab.API) {
   try {
-    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.scheduledTransactions.getScheduledTransactions(planId, undefined));
+    const response = await withResolvedPlan(input.planId, api, async (planId) => api.scheduledTransactions.getScheduledTransactions(planId, undefined));
     const scheduledTransactions = response.data.scheduled_transactions
       .filter((transaction) => !transaction.deleted)
       .map((transaction) => ({

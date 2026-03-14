@@ -15,7 +15,7 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
-    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.scheduledTransactions.getScheduledTransactionById(
+    const response = await withResolvedPlan(input.planId, api, async (planId) => api.scheduledTransactions.getScheduledTransactionById(
       planId,
       input.scheduledTransactionId,
     ));

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.15...ynab-mcp-bridge-v0.4.0) (2026-03-13)
+
+
+### Features
+
+* add optional MCP OAuth mode for Cloudflare deployments ([#40](https://github.com/mossipcams/ynab-mcp-bridge/issues/40)) ([037c99b](https://github.com/mossipcams/ynab-mcp-bridge/commit/037c99bcf4df903cbda85f45755432e4dd52d83d))
+
+## [0.3.15](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.14...ynab-mcp-bridge-v0.3.15) (2026-03-13)
+
+
+### Bug Fixes
+
+* address 4 architectural issues ([#37](https://github.com/mossipcams/ynab-mcp-bridge/issues/37)) ([1a376af](https://github.com/mossipcams/ynab-mcp-bridge/commit/1a376affb62679150355659af702b9916972876d))
+
 ## [0.3.14](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.13...ynab-mcp-bridge-v0.3.14) (2026-03-12)
 
 

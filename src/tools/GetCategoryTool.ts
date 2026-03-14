@@ -12,7 +12,7 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string; categoryId: string }, api: ynab.API) {
   try {
-    const response = await withResolvedPlan(input.planId, api as any, async (planId) => api.categories.getCategoryById(planId, input.categoryId));
+    const response = await withResolvedPlan(input.planId, api, async (planId) => api.categories.getCategoryById(planId, input.categoryId));
     return toTextResult({
       category: response.data.category,
     });
