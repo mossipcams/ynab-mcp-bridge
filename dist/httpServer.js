@@ -1,4 +1,5 @@
 import express from "express";
+import { decodeJwt } from "jose";
 import { hostHeaderValidation, localhostHostValidation, } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
@@ -13,6 +14,7 @@ const CORS_HEADERS = {
     "access-control-expose-headers": "Mcp-Session-Id",
 };
 const HTTP_ALLOWED_METHODS = ["POST"];
+const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 function applyCorsHeaders(res) {
     for (const [name, value] of Object.entries(CORS_HEADERS)) {
         res.setHeader(name, value);
@@ -28,6 +30,7 @@ function applyCloudflareAccessAuthorizationHeader(req) {
         return;
     }
     req.headers.authorization = `Bearer ${cfAccessJwt}`;
+    req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER] = "cf-access-jwt-assertion";
 }
 function getRequestPath(req) {
     if (typeof req.path === "string" && req.path.length > 0) {
@@ -43,6 +46,28 @@ function getFirstHeaderValue(value) {
         return value.split(",")[0]?.trim();
     }
     return value?.[0]?.split(",")[0]?.trim();
+}
+function getBearerToken(authorizationHeader) {
+    if (!authorizationHeader?.startsWith("Bearer ")) {
+        return undefined;
+    }
+    return authorizationHeader.slice("Bearer ".length).trim();
+}
+function isDirectUpstreamBearerToken(req, auth) {
+    const authorizationSource = getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]);
+    if (authorizationSource === "cf-access-jwt-assertion") {
+        return false;
+    }
+    const token = getBearerToken(getFirstHeaderValue(req.headers.authorization));
+    if (!token) {
+        return false;
+    }
+    try {
+        return decodeJwt(token).iss === auth.issuer;
+    }
+    catch {
+        return false;
+    }
 }
 function parseHostName(host) {
     if (!host) {
@@ -264,6 +289,7 @@ export async function startHttpServer(options) {
     }
     const app = express();
     const jsonParser = express.json();
+    const urlencodedParser = express.urlencoded({ extended: false });
     app.disable("x-powered-by");
     app.use((req, _res, next) => {
         logHttpDebug("request.received", getRequestDebugDetails(req));
@@ -293,6 +319,7 @@ export async function startHttpServer(options) {
     if (auth.mode === "oauth") {
         const publicServerUrl = getPublicResourceServerUrl(auth);
         app.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
+        app.post("/authorize/consent", urlencodedParser, oauthBroker.handleConsent);
         app.use(mcpAuthRouter({
             baseUrl: oauthBroker.getIssuerUrl(),
             issuerUrl: oauthBroker.getIssuerUrl(),
@@ -332,6 +359,9 @@ export async function startHttpServer(options) {
             if (getRequestPath(req) !== path || req.method !== "POST") {
                 next();
                 return;
+            }
+            if (isDirectUpstreamBearerToken(req, auth)) {
+                delete req.headers.authorization;
             }
             res.once("finish", () => {
                 if (req.auth || (res.statusCode !== 401 && res.statusCode !== 403)) {

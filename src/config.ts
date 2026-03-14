@@ -15,6 +15,8 @@ export type RuntimeAuthConfig =
       mode: "oauth";
       publicUrl: string;
       scopes: string[];
+      storePath?: string;
+      tokenSigningSecret?: string;
       tokenUrl: string;
     };
 
@@ -167,6 +169,11 @@ function readPathValue(value: string | undefined, name: string) {
   return normalized;
 }
 
+function readFilePathValue(value: string | undefined) {
+  const normalized = readOptionalValue(value);
+  return normalized ? normalized : undefined;
+}
+
 function hasValue(value: string | undefined) {
   return readOptionalValue(value) !== undefined;
 }
@@ -242,10 +249,12 @@ function resolveRuntimeAuthConfig(args: string[], env: EnvConfig): RuntimeAuthCo
     readFlag(args, "--oauth-callback-path") ?? env.MCP_OAUTH_CALLBACK_PATH ?? "/oauth/callback",
     "MCP_OAUTH_CALLBACK_PATH",
   );
+  const storePath = readFilePathValue(readFlag(args, "--oauth-store-path") ?? env.MCP_OAUTH_STORE_PATH);
+  const tokenSigningSecret = readOptionalValue(readFlag(args, "--oauth-token-signing-secret") ?? env.MCP_OAUTH_TOKEN_SIGNING_SECRET);
 
-  if (!issuer || !authorizationUrl || !tokenUrl || !jwksUrl || !audience || !publicUrl || !clientId || !clientSecret || !callbackPath) {
+  if (!issuer || !authorizationUrl || !tokenUrl || !jwksUrl || !audience || !publicUrl || !clientId || !clientSecret || !callbackPath || !storePath || !tokenSigningSecret) {
     throw new Error(
-      "OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, and MCP_OAUTH_CLIENT_SECRET.",
+      "OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, and MCP_OAUTH_TOKEN_SIGNING_SECRET.",
     );
   }
 
@@ -269,6 +278,8 @@ function resolveRuntimeAuthConfig(args: string[], env: EnvConfig): RuntimeAuthCo
     mode,
     publicUrl,
     scopes,
+    storePath,
+    tokenSigningSecret,
     tokenUrl,
   };
 }

@@ -2,6 +2,7 @@ import type { Server as NodeHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
+import { decodeJwt } from "jose";
 import {
   hostHeaderValidation,
   localhostHostValidation,
@@ -48,6 +49,7 @@ const CORS_HEADERS = {
 } as const;
 
 const HTTP_ALLOWED_METHODS = ["POST"] as const;
+const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 
 type ManagedRequest = {
   close: () => Promise<void>;
@@ -91,6 +93,7 @@ function applyCloudflareAccessAuthorizationHeader(req: Pick<Request, "headers">)
   }
 
   req.headers.authorization = `Bearer ${cfAccessJwt}`;
+  req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER] = "cf-access-jwt-assertion";
 }
 
 function getRequestPath(req: Pick<Request, "path" | "url">) {
@@ -111,6 +114,34 @@ function getFirstHeaderValue(value: string | string[] | undefined) {
   }
 
   return value?.[0]?.split(",")[0]?.trim();
+}
+
+function getBearerToken(authorizationHeader: string | undefined) {
+  if (!authorizationHeader?.startsWith("Bearer ")) {
+    return undefined;
+  }
+
+  return authorizationHeader.slice("Bearer ".length).trim();
+}
+
+function isDirectUpstreamBearerToken(req: Pick<Request, "headers">, auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
+  const authorizationSource = getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]);
+
+  if (authorizationSource === "cf-access-jwt-assertion") {
+    return false;
+  }
+
+  const token = getBearerToken(getFirstHeaderValue(req.headers.authorization));
+
+  if (!token) {
+    return false;
+  }
+
+  try {
+    return decodeJwt(token).iss === auth.issuer;
+  } catch {
+    return false;
+  }
 }
 
 function parseHostName(host: string | undefined) {
@@ -393,6 +424,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   const app = express();
   const jsonParser = express.json();
+  const urlencodedParser = express.urlencoded({ extended: false });
 
   app.disable("x-powered-by");
 
@@ -429,6 +461,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     const publicServerUrl = getPublicResourceServerUrl(auth);
 
     app.use(oauthBroker!.callbackPath, oauthBroker!.handleCallback);
+    app.post("/authorize/consent", urlencodedParser, oauthBroker!.handleConsent);
     app.use(mcpAuthRouter({
       baseUrl: oauthBroker!.getIssuerUrl(),
       issuerUrl: oauthBroker!.getIssuerUrl(),
@@ -475,6 +508,10 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       if (getRequestPath(req) !== path || req.method !== "POST") {
         next();
         return;
+      }
+
+      if (isDirectUpstreamBearerToken(req, auth)) {
+        delete req.headers.authorization;
       }
 
       res.once("finish", () => {

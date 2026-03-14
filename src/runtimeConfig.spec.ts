@@ -77,6 +77,8 @@ describe("resolveRuntimeConfig", () => {
       MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
       MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
       MCP_OAUTH_SCOPES: "openid,profile,email",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
       MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
     })).toEqual({
@@ -93,6 +95,8 @@ describe("resolveRuntimeConfig", () => {
         mode: "oauth",
         publicUrl: "https://mcp.example.com/mcp",
         scopes: ["openid", "profile", "email"],
+        storePath: "/tmp/ynab-mcp-oauth-store.json",
+        tokenSigningSecret: "test-signing-secret",
         tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
       },
       host: "127.0.0.1",
@@ -111,6 +115,8 @@ describe("resolveRuntimeConfig", () => {
       MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
       MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com",
       MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/certs",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
       MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
     })).toThrow(
@@ -134,7 +140,7 @@ describe("resolveRuntimeConfig", () => {
       MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
     })).toThrow(
-      "OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, and MCP_OAUTH_CLIENT_SECRET.",
+      "OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, and MCP_OAUTH_TOKEN_SIGNING_SECRET.",
     );
   });
 
