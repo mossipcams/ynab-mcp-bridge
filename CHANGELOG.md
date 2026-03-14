@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.4.0...ynab-mcp-bridge-v0.5.0) (2026-03-14)
+
+
+### Features
+
+* broker Cloudflare OAuth for Claude web ([#42](https://github.com/mossipcams/ynab-mcp-bridge/issues/42)) ([404294d](https://github.com/mossipcams/ynab-mcp-bridge/commit/404294dd83dccf1273074449f3bd3056c3743e64))
+
 ## [0.4.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.3.15...ynab-mcp-bridge-v0.4.0) (2026-03-13)
 
 
