@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -77,15 +77,226 @@ describe("oauth store", () => {
     expect(reloadedStore.getRefreshToken("refresh-1")).toBeUndefined();
 
     const persistedState = JSON.parse(await readFile(storePath, "utf8")) as {
-      authorizationCodes: Record<string, unknown>;
-      pendingAuthorizations: Record<string, unknown>;
-      pendingConsents: Record<string, unknown>;
-      refreshTokens: Record<string, unknown>;
+      grants: Record<string, unknown>;
+      version: number;
     };
 
-    expect(persistedState.pendingConsents).toEqual({});
-    expect(persistedState.pendingAuthorizations).toEqual({});
-    expect(persistedState.authorizationCodes).toEqual({});
-    expect(persistedState.refreshTokens).toEqual({});
+    expect(persistedState.version).toBe(2);
+    expect(persistedState.grants).toEqual({});
+  });
+
+  it("stores the OAuth flow as a first-class grant and rotates its active keys", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
+    const storePath = path.join(tempDir, "oauth-store.json");
+    cleanups.push(async () => {
+      await rm(tempDir, { force: true, recursive: true });
+    });
+
+    const store = createOAuthStore(storePath);
+    const upstreamTokens = {
+      access_token: "upstream-token",
+      refresh_token: "upstream-refresh-token",
+      token_type: "Bearer",
+    } as const;
+
+    store.saveGrant({
+      grantId: "grant-1",
+      clientId: "client-1",
+      clientName: "Claude Web",
+      codeChallenge: "challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["profile", "openid", "openid"],
+      state: "client-state",
+      consent: {
+        challenge: "consent-1",
+        expiresAt: Date.now() + 60_000,
+      },
+    });
+
+    expect(store.getPendingConsentGrant("consent-1")).toMatchObject({
+      grantId: "grant-1",
+      scopes: ["openid", "profile"],
+      consent: {
+        challenge: "consent-1",
+      },
+    });
+
+    store.saveGrant({
+      grantId: "grant-1",
+      clientId: "client-1",
+      codeChallenge: "challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile"],
+      state: "client-state",
+      subject: "client-1",
+      upstreamTokens,
+      authorizationCode: {
+        code: "code-1",
+        expiresAt: Date.now() + 60_000,
+      },
+    });
+
+    expect(store.getPendingConsentGrant("consent-1")).toBeUndefined();
+    expect(store.getAuthorizationCodeGrant("code-1")).toMatchObject({
+      grantId: "grant-1",
+      authorizationCode: {
+        code: "code-1",
+      },
+    });
+
+    store.saveGrant({
+      grantId: "grant-1",
+      clientId: "client-1",
+      codeChallenge: "challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile"],
+      state: "client-state",
+      subject: "client-1",
+      upstreamTokens,
+      refreshToken: {
+        token: "refresh-1",
+        expiresAt: Date.now() + 60_000,
+      },
+    });
+
+    expect(store.getAuthorizationCodeGrant("code-1")).toBeUndefined();
+    expect(store.getRefreshTokenGrant("refresh-1")).toMatchObject({
+      grantId: "grant-1",
+      refreshToken: {
+        token: "refresh-1",
+      },
+    });
+
+    const persistedState = JSON.parse(await readFile(storePath, "utf8")) as {
+      grants: Record<string, unknown>;
+      version: number;
+    };
+
+    expect(persistedState.version).toBe(2);
+    expect(Object.keys(persistedState.grants)).toEqual(["grant-1"]);
+  });
+
+  it("migrates legacy OAuth state into the grant model on load", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
+    const storePath = path.join(tempDir, "oauth-store.json");
+    cleanups.push(async () => {
+      await rm(tempDir, { force: true, recursive: true });
+    });
+
+    await writeFile(storePath, JSON.stringify({
+      approvals: [],
+      authorizationCodes: {
+        "code-1": {
+          clientId: "client-1",
+          codeChallenge: "challenge",
+          expiresAt: Date.now() + 60_000,
+          redirectUri: "https://claude.ai/oauth/callback",
+          resource: "https://mcp.example.com/mcp",
+          scopes: ["profile", "openid"],
+          state: "client-state",
+          subject: "client-1",
+          upstreamTokens: {
+            access_token: "upstream-token",
+            refresh_token: "upstream-refresh-token",
+            token_type: "Bearer",
+          },
+        },
+      },
+      clients: {
+        "client-1": {
+          client_id: "client-1",
+          client_id_issued_at: 1_700_000_000,
+          client_name: "Claude Web",
+          grant_types: ["authorization_code", "refresh_token"],
+          redirect_uris: ["https://claude.ai/oauth/callback"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+        },
+      },
+      pendingAuthorizations: {
+        "state-1": {
+          clientId: "client-1",
+          codeChallenge: "challenge",
+          expiresAt: Date.now() + 60_000,
+          redirectUri: "https://claude.ai/oauth/callback",
+          resource: "https://mcp.example.com/mcp",
+          scopes: ["openid", "profile"],
+          state: "client-state",
+        },
+      },
+      pendingConsents: {
+        "consent-1": {
+          clientId: "client-1",
+          clientName: "Claude Web",
+          codeChallenge: "challenge",
+          expiresAt: Date.now() + 60_000,
+          redirectUri: "https://claude.ai/oauth/callback",
+          resource: "https://mcp.example.com/mcp",
+          scopes: ["openid", "profile"],
+          state: "client-state",
+        },
+      },
+      refreshTokens: {
+        "refresh-1": {
+          clientId: "client-1",
+          expiresAt: Date.now() + 60_000,
+          resource: "https://mcp.example.com/mcp",
+          scopes: ["openid", "profile"],
+          subject: "client-1",
+          upstreamTokens: {
+            access_token: "upstream-token",
+            refresh_token: "upstream-refresh-token",
+            token_type: "Bearer",
+          },
+        },
+      },
+      version: 1,
+    }, null, 2));
+
+    const store = createOAuthStore(storePath);
+
+    expect(store.getPendingConsentGrant("consent-1")).toMatchObject({
+      clientId: "client-1",
+      consent: {
+        challenge: "consent-1",
+      },
+    });
+    expect(store.getPendingAuthorizationGrant("state-1")).toMatchObject({
+      clientId: "client-1",
+      pendingAuthorization: {
+        stateId: "state-1",
+      },
+    });
+    expect(store.getAuthorizationCodeGrant("code-1")).toMatchObject({
+      clientId: "client-1",
+      authorizationCode: {
+        code: "code-1",
+      },
+    });
+    expect(store.getRefreshTokenGrant("refresh-1")).toMatchObject({
+      clientId: "client-1",
+      refreshToken: {
+        token: "refresh-1",
+      },
+    });
+
+    const persistedState = JSON.parse(await readFile(storePath, "utf8")) as {
+      authorizationCodes?: unknown;
+      grants: Record<string, unknown>;
+      pendingAuthorizations?: unknown;
+      pendingConsents?: unknown;
+      refreshTokens?: unknown;
+      version: number;
+    };
+
+    expect(persistedState.version).toBe(2);
+    expect(persistedState.pendingConsents).toBeUndefined();
+    expect(persistedState.pendingAuthorizations).toBeUndefined();
+    expect(persistedState.authorizationCodes).toBeUndefined();
+    expect(persistedState.refreshTokens).toBeUndefined();
+    expect(Object.keys(persistedState.grants)).toHaveLength(4);
   });
 });

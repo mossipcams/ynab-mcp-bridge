@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import path from "node:path";
+import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { assertBackendEnvironment, resolveRuntimeConfig } from "./runtimeConfig.js";
 
@@ -23,6 +26,7 @@ describe("resolveRuntimeConfig", () => {
       allowedHosts: [],
       allowedOrigins: ["https://claude.ai", "https://chat.openai.com"],
       auth: {
+        deployment: "authless",
         mode: "none",
       },
       host: "127.0.0.1",
@@ -44,6 +48,7 @@ describe("resolveRuntimeConfig", () => {
       allowedHosts: [],
       allowedOrigins: ["https://claude.ai", "https://chat.openai.com"],
       auth: {
+        deployment: "authless",
         mode: "none",
       },
       host: "127.0.0.1",
@@ -58,6 +63,7 @@ describe("resolveRuntimeConfig", () => {
       allowedHosts: [],
       allowedOrigins: [],
       auth: {
+        deployment: "authless",
         mode: "none",
       },
       host: "127.0.0.1",
@@ -90,6 +96,7 @@ describe("resolveRuntimeConfig", () => {
         callbackPath: "/oauth/callback",
         clientId: "cloudflare-client-id",
         clientSecret: "cloudflare-client-secret",
+        deployment: "oauth-single-tenant",
         issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
         jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
         mode: "oauth",
@@ -144,6 +151,116 @@ describe("resolveRuntimeConfig", () => {
     );
   });
 
+  it("supports explicit oauth-hardened deployment mode when trusted origins are configured", () => {
+    expect(resolveRuntimeConfig([], {
+      MCP_ALLOWED_ORIGINS: "https://claude.ai",
+      MCP_DEPLOYMENT_MODE: "oauth-hardened",
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+    })).toMatchObject({
+      allowedOrigins: ["https://claude.ai"],
+      auth: {
+        deployment: "oauth-hardened",
+        mode: "oauth",
+      },
+    });
+  });
+
+  it("rejects oauth deployments on stdio transport", () => {
+    expect(() => resolveRuntimeConfig(["--transport", "stdio"], {
+      MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+    })).toThrow("OAuth deployment modes require HTTP transport.");
+  });
+
+  it("rejects oauth-hardened deployments without an explicit origin allowlist", () => {
+    expect(() => resolveRuntimeConfig([], {
+      MCP_DEPLOYMENT_MODE: "oauth-hardened",
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+    })).toThrow("oauth-hardened deployment requires MCP_ALLOWED_ORIGINS or --allowed-origins.");
+  });
+
+  it("derives Cloudflare endpoints, store path, and a stable local signing secret from minimal oauth settings", () => {
+    expect(resolveRuntimeConfig([], {
+      MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
+      MCP_OAUTH_CLIENT_ID: "client-123",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_CLOUDFLARE_DOMAIN: "example.cloudflareaccess.com",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+    })).toEqual({
+      allowedHosts: [],
+      allowedOrigins: [],
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+        callbackPath: "/oauth/callback",
+        clientId: "client-123",
+        clientSecret: "cloudflare-client-secret",
+        deployment: "oauth-single-tenant",
+        issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+        jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: [],
+        storePath: path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json"),
+        tokenSigningSecret: createHash("sha256")
+          .update("cloudflare-client-secret\nhttps://mcp.example.com/mcp\nclient-123")
+          .digest("base64url"),
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      },
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 3000,
+      transport: "http",
+    });
+  });
+
+  it("lets explicit upstream URLs override the Cloudflare preset when both are provided", () => {
+    expect(resolveRuntimeConfig([], {
+      MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://id.example.com/oauth/authorize",
+      MCP_OAUTH_CLIENT_ID: "client-123",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_CLOUDFLARE_DOMAIN: "example.cloudflareaccess.com",
+      MCP_OAUTH_ISSUER: "https://id.example.com",
+      MCP_OAUTH_JWKS_URL: "https://id.example.com/.well-known/jwks.json",
+      MCP_OAUTH_TOKEN_URL: "https://id.example.com/oauth/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+    })).toMatchObject({
+      auth: {
+        authorizationUrl: "https://id.example.com/oauth/authorize",
+        issuer: "https://id.example.com",
+        jwksUrl: "https://id.example.com/.well-known/jwks.json",
+        tokenUrl: "https://id.example.com/oauth/token",
+      },
+    });
+  });
   it("throws for invalid ports", () => {
     expect(() => resolveRuntimeConfig(["--port", "abc"], {})).toThrow(
       "Invalid port: abc",

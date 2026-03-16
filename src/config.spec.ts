@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import path from "node:path";
+import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
 
 import { readYnabConfig, resolveAppConfig } from "./config.js";
@@ -31,6 +34,7 @@ describe("config", () => {
         allowedOrigins: ["https://claude.ai", "https://chat.openai.com"],
         allowedHosts: ["mcp.example.com", "localhost"],
         auth: {
+          deployment: "authless",
           mode: "none",
         },
         host: "0.0.0.0",
@@ -86,6 +90,7 @@ describe("config", () => {
       callbackPath: "/oauth/callback",
       clientId: "cloudflare-client-id",
       clientSecret: "cloudflare-client-secret",
+      deployment: "oauth-single-tenant",
       issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
       jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
       mode: "oauth",
@@ -122,6 +127,77 @@ describe("config", () => {
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
       YNAB_API_TOKEN: "token-1",
     })).toThrow("OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, and MCP_OAUTH_TOKEN_SIGNING_SECRET.");
+  });
+
+  it("accepts explicit deployment profiles and keeps MCP_AUTH_MODE as a compatibility shim", () => {
+    const config = resolveAppConfig([], {
+      MCP_ALLOWED_ORIGINS: "https://claude.ai",
+      MCP_DEPLOYMENT_MODE: "oauth-hardened",
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+      YNAB_API_TOKEN: "token-1",
+    });
+
+    expect(config.runtime.auth).toMatchObject({
+      deployment: "oauth-hardened",
+      mode: "oauth",
+    });
+  });
+
+  it("derives Cloudflare OAuth endpoints and local defaults from a small remote deployment config", () => {
+    const config = resolveAppConfig([], {
+      MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
+      MCP_OAUTH_CLIENT_ID: "client-123",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_CLOUDFLARE_DOMAIN: "example.cloudflareaccess.com",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+      YNAB_API_TOKEN: "token-1",
+    });
+
+    expect(config.runtime.auth).toEqual({
+      audience: "https://mcp.example.com/mcp",
+      authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      callbackPath: "/oauth/callback",
+      clientId: "client-123",
+      clientSecret: "cloudflare-client-secret",
+      deployment: "oauth-single-tenant",
+      issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      mode: "oauth",
+      publicUrl: "https://mcp.example.com/mcp",
+      scopes: [],
+      storePath: path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json"),
+      tokenSigningSecret: createHash("sha256")
+        .update("cloudflare-client-secret\nhttps://mcp.example.com/mcp\nclient-123")
+        .digest("base64url"),
+      tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+    });
+  });
+
+  it("fails with an actionable setup message when oauth deployment settings are incomplete", () => {
+    expect(() => resolveAppConfig([], {
+      MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+      YNAB_API_TOKEN: "token-1",
+    })).toThrow(
+      "OAuth deployment requires MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, and either MCP_OAUTH_CLOUDFLARE_DOMAIN or the explicit MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, and MCP_OAUTH_JWKS_URL settings. The callback URL to register upstream is https://mcp.example.com/oauth/callback.",
+    );
+  });
+
+  it("fails fast when deployment mode conflicts with the legacy auth mode", () => {
+    expect(() => resolveAppConfig([], {
+      MCP_AUTH_MODE: "oauth",
+      MCP_DEPLOYMENT_MODE: "authless",
+      YNAB_API_TOKEN: "token-1",
+    })).toThrow("MCP_DEPLOYMENT_MODE=authless is incompatible with MCP_AUTH_MODE=oauth.");
   });
 
   it("reads only YNAB settings from environment", () => {

@@ -2,11 +2,18 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createHash } from "node:crypto";
 import { createServer as createNodeHttpServer, request as httpRequest } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startHttpServer } from "./httpServer.js";
+import {
+  approveAuthorizationConsent,
+  createCloudflareOAuthAuth,
+  createCodeChallenge,
+  registerOAuthClient,
+  startAuthorization,
+  startUpstreamOAuthServer,
+} from "./oauthTestHelpers.js";
 
 describe("startHttpServer", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -126,91 +133,6 @@ describe("startHttpServer", () => {
     };
   }
 
-  async function startUpstreamOAuthServer() {
-    let lastTokenRequest: {
-      authorization?: string;
-      body: URLSearchParams;
-    } | undefined;
-
-    const server = createNodeHttpServer((req, res) => {
-      const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
-
-      if (requestUrl.pathname === "/authorize") {
-        res.statusCode = 200;
-        res.end("ok");
-        return;
-      }
-
-      if (requestUrl.pathname === "/jwks") {
-        res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ keys: [] }));
-        return;
-      }
-
-      if (requestUrl.pathname === "/token" && req.method === "POST") {
-        const chunks: Buffer[] = [];
-
-        req.on("data", (chunk) => {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        });
-        req.on("end", () => {
-          lastTokenRequest = {
-            authorization: req.headers.authorization,
-            body: new URLSearchParams(Buffer.concat(chunks).toString("utf8")),
-          };
-          res.setHeader("content-type", "application/json");
-          res.end(JSON.stringify({
-            access_token: "upstream-access-token",
-            expires_in: 3600,
-            refresh_token: "upstream-refresh-token",
-            scope: "openid profile",
-            token_type: "Bearer",
-          }));
-        });
-        return;
-      }
-
-      res.statusCode = 404;
-      res.end();
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => {
-        server.off("error", reject);
-        resolve();
-      });
-    });
-
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Upstream OAuth test server did not expose a TCP address");
-    }
-
-    const origin = `http://127.0.0.1:${address.port}`;
-    cleanups.push(async () => {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve();
-        });
-      });
-    });
-
-    return {
-      authorizationUrl: `${origin}/authorize`,
-      getLastTokenRequest: () => lastTokenRequest,
-      issuer: origin,
-      jwksUrl: `${origin}/jwks`,
-      tokenUrl: `${origin}/token`,
-    };
-  }
-
   async function createOAuthTestToken(privateKey: CryptoKey, overrides: {
     aud?: string;
     iss?: string;
@@ -230,84 +152,6 @@ describe("startHttpServer", () => {
       .setExpirationTime("5 minutes")
       .setSubject("user-123")
       .sign(privateKey);
-  }
-
-  function createCodeChallenge(codeVerifier: string) {
-    return createHash("sha256")
-      .update(codeVerifier)
-      .digest("base64url");
-  }
-
-  function createCloudflareOAuthAuth(overrides: Partial<Extract<Parameters<typeof startHttpServer>[0]["auth"], {
-    mode: "oauth";
-  }>> = {}) {
-    return {
-      audience: "https://mcp.example.com/mcp",
-      authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
-      callbackPath: "/oauth/callback",
-      clientId: "cloudflare-client-id",
-      clientSecret: "cloudflare-client-secret",
-      issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
-      jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
-      mode: "oauth" as const,
-      publicUrl: "https://mcp.example.com/mcp",
-      scopes: ["openid", "profile"],
-      tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
-      ...overrides,
-    };
-  }
-
-  async function registerOAuthClient(httpServerUrl: string) {
-    const registrationResponse = await fetch(new URL("/register", httpServerUrl), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-      },
-      body: JSON.stringify({
-        client_name: "Claude Web",
-        grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://claude.ai/oauth/callback"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-      }),
-    });
-
-    expect(registrationResponse.status).toBe(201);
-    return await registrationResponse.json() as {
-      client_id: string;
-    };
-  }
-
-  async function startAuthorization(httpServerUrl: string, clientId: string, codeChallenge = "test-challenge") {
-    return await fetch(new URL(
-      `/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent("https://claude.ai/oauth/callback")}&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
-      httpServerUrl,
-    ), {
-      redirect: "manual",
-      headers: {
-        Origin: "https://claude.ai",
-      },
-    });
-  }
-
-  async function approveAuthorizationConsent(httpServerUrl: string, consentBody: string) {
-    const challengeMatch = consentBody.match(/name="consent_challenge" value="([^"]+)"/);
-
-    expect(challengeMatch?.[1]).toBeTruthy();
-
-    return await fetch(new URL("/authorize/consent", httpServerUrl), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Origin: "https://claude.ai",
-      },
-      body: new URLSearchParams({
-        action: "approve",
-        consent_challenge: challengeMatch![1],
-      }),
-      redirect: "manual",
-    });
   }
 
   beforeEach(() => {
@@ -437,11 +281,12 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(204);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://claude.ai");
     expect(response.headers.get("access-control-allow-methods")).toContain("POST");
     expect(response.headers.get("access-control-allow-headers")).toContain("content-type");
     expect(response.headers.get("access-control-allow-headers")).toContain("mcp-session-id");
     expect(response.headers.get("access-control-expose-headers")).toContain("Mcp-Session-Id");
+    expect(response.headers.get("vary")).toContain("Origin");
   });
 
   it("adds CORS headers to MCP responses", async () => {
@@ -477,7 +322,7 @@ describe("startHttpServer", () => {
     });
 
     expect(response.ok).toBe(true);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://claude.ai");
     expect(response.headers.get("access-control-expose-headers")).toContain("Mcp-Session-Id");
   });
 
@@ -499,7 +344,7 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(404);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://claude.ai");
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
@@ -523,7 +368,7 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(404);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://claude.ai");
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
@@ -753,7 +598,7 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(405);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://claude.ai");
     await expect(response.json()).resolves.toEqual({
       jsonrpc: "2.0",
       error: {
@@ -1178,7 +1023,7 @@ describe("startHttpServer", () => {
     const response = await fetch(new URL("/health", httpServer.url));
 
     expect(response.status).toBe(404);
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
@@ -1331,7 +1176,7 @@ describe("startHttpServer", () => {
     });
 
     expect(invalidResponse.status).toBe(400);
-    expect(invalidResponse.headers.get("access-control-allow-origin")).toBe("*");
+    expect(invalidResponse.headers.get("access-control-allow-origin")).toBeNull();
     expect(findLogCall(consoleErrorSpy, "request.parse_error", (details) => (
       details.method === "POST" &&
       details.path === "/mcp"
@@ -1431,11 +1276,35 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://claude.ai");
     await expect(response.json()).resolves.toMatchObject({
       authorization_servers: ["https://mcp.example.com/"],
       resource: "https://mcp.example.com/mcp",
       scopes_supported: ["openid", "profile"],
     });
+  });
+
+  it("allows the bridge public origin on OAuth metadata routes and reflects it in CORS headers", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/oauth-authorization-server", httpServer.url), {
+      headers: {
+        Origin: "https://mcp.example.com",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://mcp.example.com");
+    expect(response.headers.get("vary")).toContain("Origin");
   });
 
   it("rejects legacy Cloudflare Access oauth2 endpoints passed directly to the HTTP server", async () => {
@@ -1444,6 +1313,7 @@ describe("startHttpServer", () => {
       auth: {
         audience: "https://mcp.example.com/mcp",
         authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        deployment: "oauth-single-tenant",
         issuer: "https://example.cloudflareaccess.com",
         jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/certs",
         mode: "oauth",
@@ -1522,8 +1392,134 @@ describe("startHttpServer", () => {
     });
   });
 
+  it("registers OAuth clients with the requested public metadata", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+
+    expect(registration.client_id).toEqual(expect.any(String));
+    expect(registration.client_id_issued_at).toEqual(expect.any(Number));
+    expect(registration.client_name).toBe("Claude Web");
+    expect(registration.grant_types).toEqual(["authorization_code", "refresh_token"]);
+    expect(registration.redirect_uris).toEqual(["https://claude.ai/oauth/callback"]);
+    expect(registration.response_types).toEqual(["code"]);
+    expect(registration.token_endpoint_auth_method).toBe("none");
+  });
+
+  it("rejects client registrations with insecure redirect URIs", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+      },
+      body: JSON.stringify({
+        client_name: "Insecure Client",
+        grant_types: ["authorization_code"],
+        redirect_uris: ["http://claude.ai/oauth/callback"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_client_metadata",
+    });
+  });
+
+  it("rejects overbroad client registration metadata", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+      },
+      body: JSON.stringify({
+        client_name: "Overbroad Client",
+        contacts: ["owner@example.com"],
+        grant_types: ["authorization_code", "client_credentials"],
+        jwks_uri: "https://client.example.com/jwks.json",
+        redirect_uris: ["https://claude.ai/oauth/callback"],
+        response_types: ["code", "token"],
+        token_endpoint_auth_method: "private_key_jwt",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_client_metadata",
+    });
+  });
+
+  it("rejects authorization requests whose redirect URI is not registered exactly", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+
+    const response = await fetch(new URL(
+      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://claude.ai/other-callback")}&response_type=code&code_challenge=test-challenge&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_request",
+    });
+  });
+
   it("requires local client consent before redirecting authorization requests through the upstream provider", async () => {
-    const upstream = await startUpstreamOAuthServer();
+    const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
       auth: createCloudflareOAuthAuth({
@@ -1564,8 +1560,56 @@ describe("startHttpServer", () => {
     expect(redirectUrl.searchParams.get("state")).toBeTruthy();
   });
 
+  it("escapes client metadata and sends hardened headers on the consent page", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+      },
+      body: JSON.stringify({
+        client_name: "<img src=x onerror=alert('boom')>",
+        grant_types: ["authorization_code", "refresh_token"],
+        redirect_uris: ["https://claude.ai/oauth/callback"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+    const registration = await registrationResponse.json() as { client_id: string };
+
+    expect(registrationResponse.status).toBe(201);
+
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    const consentBody = await authorizeResponse.text();
+
+    expect(authorizeResponse.status).toBe(200);
+    expect(consentBody).toContain("&lt;img src=x onerror=alert(&#39;boom&#39;)&gt;");
+    expect(consentBody).not.toContain("<img src=x onerror=alert('boom')>");
+    expect(authorizeResponse.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(authorizeResponse.headers.get("content-security-policy")).toContain("form-action 'self'");
+    expect(authorizeResponse.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(authorizeResponse.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(authorizeResponse.headers.get("cache-control")).toContain("no-store");
+  });
+
   it("exchanges upstream callback codes and redirects back to the registered client", async () => {
-    const upstream = await startUpstreamOAuthServer();
+    const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
       auth: createCloudflareOAuthAuth({
@@ -1619,7 +1663,7 @@ describe("startHttpServer", () => {
   });
 
   it("exchanges a local authorization code for a bearer token and accepts it on MCP requests", async () => {
-    const upstream = await startUpstreamOAuthServer();
+    const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
       auth: createCloudflareOAuthAuth({
@@ -1696,7 +1740,7 @@ describe("startHttpServer", () => {
   });
 
   it("brokers refresh-token exchanges through the upstream provider before issuing a fresh local token", async () => {
-    const upstream = await startUpstreamOAuthServer();
+    const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
       auth: createCloudflareOAuthAuth({
@@ -1766,10 +1810,34 @@ describe("startHttpServer", () => {
     });
 
     expect(refreshResponse.status).toBe(200);
+    const refreshedTokens = await refreshResponse.json() as {
+      refresh_token: string;
+    };
+    expect(refreshedTokens.refresh_token).toEqual(expect.any(String));
+    expect(refreshedTokens.refresh_token).not.toBe(initialTokens.refresh_token);
     expect(upstream.getLastTokenRequest()?.body.get("grant_type")).toBe("refresh_token");
     expect(upstream.getLastTokenRequest()?.body.get("refresh_token")).toBe("upstream-refresh-token");
     expect(upstream.getLastTokenRequest()?.body.get("client_id")).toBe("cloudflare-client-id");
     expect(upstream.getLastTokenRequest()?.body.get("client_secret")).toBe("cloudflare-client-secret");
+
+    const replayResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token,
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(replayResponse.status).toBe(400);
+    await expect(replayResponse.json()).resolves.toMatchObject({
+      error: "invalid_grant",
+    });
   });
 
   it("rejects upstream OAuth bearer tokens passed directly in the authorization header", async () => {
