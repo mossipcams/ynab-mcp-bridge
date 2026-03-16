@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import * as ynab from "ynab";
 
-import { assertYnabConfig, type YnabConfig } from "./config.js";
+import { assertYnabConfig, type RuntimeAuthConfig, type YnabConfig } from "./config.js";
 import { getPackageInfo } from "./packageInfo.js";
 import { attachYnabApiRuntimeContext, createYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
@@ -64,6 +65,8 @@ type ToolRegistration = {
 };
 
 type ToolConfig = {
+  _meta?: Record<string, unknown>;
+  annotations?: ToolAnnotations;
   description: string;
   inputSchema: any;
   title: string;
@@ -78,6 +81,20 @@ type ToolRegistrar = {
     handler: ToolHandler,
   ) => void;
 };
+
+type ToolRegistrationOptions = {
+  authMode: RuntimeAuthConfig["mode"];
+  oauthScopes?: string[];
+};
+
+type ToolSecurityScheme =
+  | {
+      type: "noauth";
+    }
+  | {
+      scopes?: string[];
+      type: "oauth2";
+    };
 
 export const toolRegistrations: ToolRegistration[] = [
   { title: "Get MCP Version", module: GetMcpVersionTool },
@@ -121,13 +138,59 @@ export const toolRegistrations: ToolRegistration[] = [
   { title: "Get 70/20/10 Summary", module: GetBudgetRatioSummaryTool },
 ];
 
-export function registerServerTools(registrar: ToolRegistrar, api: ynab.API) {
+const PUBLIC_OAUTH_TOOL_NAMES = new Set<string>([
+  GetMcpVersionTool.name,
+]);
+
+function buildToolMetadata(
+  toolName: string,
+  options: ToolRegistrationOptions,
+): {
+  _meta: Record<string, unknown>;
+  annotations: ToolAnnotations;
+} {
+  const securitySchemes: ToolSecurityScheme[] = (
+    options.authMode === "oauth" && !PUBLIC_OAUTH_TOOL_NAMES.has(toolName)
+  )
+    ? [{
+        scopes: options.oauthScopes && options.oauthScopes.length > 0 ? options.oauthScopes : undefined,
+        type: "oauth2",
+      }]
+    : [{
+        type: "noauth",
+      }];
+
+  return {
+    _meta: {
+      securitySchemes,
+    },
+    annotations: {
+      openWorldHint: false,
+      readOnlyHint: true,
+    },
+  };
+}
+
+export function isPublicToolName(toolName: string) {
+  return PUBLIC_OAUTH_TOOL_NAMES.has(toolName);
+}
+
+export function registerServerTools(
+  registrar: ToolRegistrar,
+  api: ynab.API,
+  options: ToolRegistrationOptions = {
+    authMode: "none",
+  },
+) {
   const registeredToolNames: string[] = [];
 
   for (const { title, module } of toolRegistrations) {
+    const metadata = buildToolMetadata(module.name, options);
+
     registrar.registerTool(
       module.name,
       {
+        ...metadata,
         title,
         description: module.description,
         inputSchema: module.inputSchema,
@@ -140,12 +203,21 @@ export function registerServerTools(registrar: ToolRegistrar, api: ynab.API) {
   return registeredToolNames;
 }
 
-export function createServer(config: YnabConfig, api = createYnabApi(config)) {
+export function createServer(
+  config: YnabConfig,
+  api = createYnabApi(config),
+  options: {
+    auth?: RuntimeAuthConfig;
+  } = {},
+) {
   const normalizedConfig = assertYnabConfig(config);
   const server = new McpServer(SERVER_INFO);
   const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
 
-  registerServerTools(server, configuredApi);
+  registerServerTools(server, configuredApi, {
+    authMode: options.auth?.mode ?? "none",
+    oauthScopes: options.auth?.mode === "oauth" ? options.auth.scopes : undefined,
+  });
 
   return server;
 }

@@ -205,7 +205,7 @@ describe("oauth security regressions", () => {
     });
   });
 
-  it("rejects upstream bearer tokens passed directly to the MCP endpoint", async () => {
+  it("rejects upstream bearer tokens passed directly to protected MCP tool calls", async () => {
     const { jwksUrl, privateKey } = await startJwksServer();
     const token = await createUpstreamAccessToken(privateKey);
     const httpServer = await startHttpServer({
@@ -232,8 +232,11 @@ describe("oauth security regressions", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/list",
-        params: {},
+        method: "tools/call",
+        params: {
+          name: "ynab_get_user",
+          arguments: {},
+        },
       }),
     });
 
