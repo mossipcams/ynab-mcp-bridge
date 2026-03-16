@@ -6,20 +6,10 @@ import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middlew
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
 import { createOAuthBroker } from "./oauthBroker.js";
+import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { createServer } from "./server.js";
-const CORS_HEADERS = {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "OPTIONS, POST",
-    "access-control-allow-headers": "content-type, mcp-session-id, mcp-protocol-version, authorization",
-    "access-control-expose-headers": "Mcp-Session-Id",
-};
 const HTTP_ALLOWED_METHODS = ["POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
-function applyCorsHeaders(res) {
-    for (const [name, value] of Object.entries(CORS_HEADERS)) {
-        res.setHeader(name, value);
-    }
-}
 function applyCloudflareAccessAuthorizationHeader(req) {
     const existingAuthorization = getFirstHeaderValue(req.headers.authorization);
     if (existingAuthorization) {
@@ -69,52 +59,12 @@ function isDirectUpstreamBearerToken(req, auth) {
         return false;
     }
 }
-function parseHostName(host) {
-    if (!host) {
-        return undefined;
-    }
-    try {
-        return new URL(`http://${host}`).hostname;
-    }
-    catch {
-        return undefined;
-    }
-}
 function isLoopbackHostname(hostname) {
     return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
 }
-function getRequestHostName(req) {
-    const forwardedHost = getFirstHeaderValue(req.headers["x-forwarded-host"]);
-    const host = forwardedHost ?? getFirstHeaderValue(req.headers.host);
-    return parseHostName(host);
-}
-function normalizeOrigin(origin) {
-    return new URL(origin).origin;
-}
-function isOriginAllowed(req, allowedOrigins) {
-    const originHeader = getFirstHeaderValue(req.headers.origin);
-    if (!originHeader) {
-        return true;
-    }
-    if (originHeader === "null" && getRequestPath(req) === "/authorize/consent") {
-        return true;
-    }
-    try {
-        const normalizedOrigin = normalizeOrigin(originHeader);
-        if (allowedOrigins.has(normalizedOrigin)) {
-            return true;
-        }
-        const requestHostName = getRequestHostName(req);
-        const originHostName = new URL(normalizedOrigin).hostname;
-        return isLoopbackHostname(requestHostName) && isLoopbackHostname(originHostName);
-    }
-    catch {
-        return false;
-    }
-}
 function writeJson(res, statusCode, body) {
     res.status(statusCode);
-    applyCorsHeaders(res);
+    applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify(body));
 }
@@ -275,13 +225,16 @@ async function closeNodeServer(server) {
 }
 export async function startHttpServer(options) {
     const allowedHosts = options.allowedHosts ?? [];
+    const auth = options.auth ?? { deployment: "authless", mode: "none" };
     const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
-    const auth = options.auth ?? { mode: "none" };
     const host = options.host ?? "127.0.0.1";
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
     const ynab = assertYnabConfig(options.ynab);
     const oauthBroker = auth.mode === "oauth" ? createOAuthBroker(auth) : undefined;
+    if (auth.mode === "oauth") {
+        allowedOrigins.add(new URL(auth.publicUrl).origin);
+    }
     if (auth.mode === "oauth") {
         validateCloudflareAccessOAuthSettings({
             authorizationUrl: auth.authorizationUrl,
@@ -299,6 +252,17 @@ export async function startHttpServer(options) {
         logHttpDebug("request.received", getRequestDebugDetails(req));
         next();
     });
+    app.use((_req, res, next) => {
+        const originalSetHeader = res.setHeader.bind(res);
+        res.setHeader = ((name, value) => {
+            if (name.toLowerCase() === "access-control-allow-origin" &&
+                typeof res.locals.corsOrigin === "string") {
+                return originalSetHeader(name, res.locals.corsOrigin);
+            }
+            return originalSetHeader(name, value);
+        });
+        next();
+    });
     if (allowedHosts.length > 0) {
         app.use(hostHeaderValidation(allowedHosts));
     }
@@ -306,7 +270,12 @@ export async function startHttpServer(options) {
         app.use(localhostHostValidation());
     }
     app.use((req, res, next) => {
-        if (!isOriginAllowed(req, allowedOrigins)) {
+        const resolution = resolveOriginPolicy({
+            allowedOrigins,
+            headers: req.headers,
+            path: getRequestPath(req),
+        });
+        if (!resolution.allowed) {
             logHttpDebug("request.rejected", {
                 ...getRequestDebugDetails(req),
                 reason: "forbidden-origin",
@@ -314,10 +283,11 @@ export async function startHttpServer(options) {
             writeForbiddenOrigin(res);
             return;
         }
+        res.locals.corsOrigin = resolution.responseOrigin;
         next();
     });
     app.use((_req, res, next) => {
-        applyCorsHeaders(res);
+        applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
         next();
     });
     if (auth.mode === "oauth") {
@@ -336,7 +306,7 @@ export async function startHttpServer(options) {
     app.use((req, res, next) => {
         if (req.method === "OPTIONS") {
             logHttpDebug("request.preflight", getRequestDebugDetails(req));
-            applyCorsHeaders(res);
+            applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
             res.status(204).end();
             return;
         }
@@ -419,7 +389,7 @@ export async function startHttpServer(options) {
                 ...getJsonRpcDebugDetails(parsedBody),
                 cleanup: Boolean(resolution.cleanup),
             });
-            applyCorsHeaders(res);
+            applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
             await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
         }
         catch (error) {
