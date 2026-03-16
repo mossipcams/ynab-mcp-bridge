@@ -442,6 +442,9 @@ export async function startHttpServer(options) {
                 return;
             }
             applyCloudflareAccessAuthorizationHeader(req);
+            if (getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]) === "cf-access-jwt-assertion") {
+                delete req.headers.authorization;
+            }
             if (isDirectUpstreamBearerToken(req, auth)) {
                 delete req.headers.authorization;
             }

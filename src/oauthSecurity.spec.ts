@@ -7,6 +7,7 @@ import { startHttpServer } from "./httpServer.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
+  createGenericOAuthAuth,
   registerOAuthClient,
   startAuthorization,
   startUpstreamOAuthServer,
@@ -137,7 +138,7 @@ describe("oauth security regressions", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      auth: createGenericOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -210,7 +211,7 @@ describe("oauth security regressions", () => {
     const token = await createUpstreamAccessToken(privateKey);
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({
+      auth: createGenericOAuthAuth({
         jwksUrl,
       }),
       allowedOrigins: ["https://claude.ai"],
