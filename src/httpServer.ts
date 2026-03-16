@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Server as NodeHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -13,6 +14,7 @@ import {
 } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
 import {
   assertYnabConfig,
@@ -22,7 +24,8 @@ import {
 } from "./config.js";
 import { createOAuthBroker } from "./oauthBroker.js";
 import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
-import { createServer } from "./server.js";
+import { createServer, isPublicToolName } from "./server.js";
+import { createYnabApi } from "./ynabApi.js";
 
 export type HttpServerOptions = {
   allowedHosts?: string[];
@@ -47,6 +50,7 @@ const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-sou
 
 type ManagedRequest = {
   close: () => Promise<void>;
+  persistent: boolean;
   transport: StreamableHTTPServerTransport;
 };
 
@@ -57,6 +61,12 @@ type RequestResolution =
       status: "ready";
     }
   | {
+      status: "missing-session-header";
+    }
+  | {
+      status: "session-not-found";
+    }
+  | {
       status: "invalid-session-header";
     };
 
@@ -65,6 +75,11 @@ type HttpDebugDetails = Record<string, unknown>;
 type JsonRpcRequestLike = {
   id?: unknown;
   method?: unknown;
+  params?: unknown;
+};
+
+type JsonRpcToolCallParamsLike = {
+  name?: unknown;
 };
 
 function applyCloudflareAccessAuthorizationHeader(req: Pick<Request, "headers">) {
@@ -242,6 +257,34 @@ function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
   return details;
 }
 
+function isPublicJsonRpcRequest(parsedBody: unknown) {
+  const messages = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
+
+  if (messages.length === 0) {
+    return false;
+  }
+
+  return messages.every((message) => {
+    if (!message || typeof message !== "object") {
+      return false;
+    }
+
+    const request = message as JsonRpcRequestLike;
+
+    if (request.method === "initialize" || request.method === "notifications/initialized" || request.method === "ping" || request.method === "tools/list") {
+      return true;
+    }
+
+    if (request.method !== "tools/call") {
+      return false;
+    }
+
+    const params = request.params as JsonRpcToolCallParamsLike | undefined;
+
+    return typeof params?.name === "string" && isPublicToolName(params.name);
+  });
+}
+
 function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">) {
   const sessionId = req.headers["mcp-session-id"];
 
@@ -278,8 +321,8 @@ function isPayloadTooLargeError(error: unknown) {
     );
 }
 
-async function createManagedRequest(config: YnabConfig) {
-  const mcpServer = createServer(config);
+async function createManagedRequest(config: YnabConfig, auth?: RuntimeAuthConfig) {
+  const mcpServer = createServer(config, createYnabApi(config), { auth });
   const transport = new StreamableHTTPServerTransport({
     enableJsonResponse: true,
     sessionIdGenerator: undefined,
@@ -288,6 +331,7 @@ async function createManagedRequest(config: YnabConfig) {
   await mcpServer.connect(transport);
 
   return {
+    persistent: false,
     transport,
     close: async () => {
       await transport.close();
@@ -296,9 +340,80 @@ async function createManagedRequest(config: YnabConfig) {
   } satisfies ManagedRequest;
 }
 
+async function createPersistentManagedRequest(
+  config: YnabConfig,
+  auth: RuntimeAuthConfig,
+  onSessionInitialized: (sessionId: string, managedRequest: ManagedRequest) => void,
+  onSessionClosed: (sessionId: string) => void,
+) {
+  const mcpServer = createServer(config, createYnabApi(config), { auth });
+  let cleanedUp = false;
+  let currentSessionId: string | undefined;
+
+  const transport = new StreamableHTTPServerTransport({
+    enableJsonResponse: true,
+    sessionIdGenerator: () => randomUUID(),
+    onsessioninitialized: (sessionId) => {
+      currentSessionId = sessionId;
+      onSessionInitialized(sessionId, managedRequest);
+    },
+  });
+
+  const cleanup = async (closeTransport: boolean) => {
+    if (cleanedUp) {
+      return;
+    }
+
+    cleanedUp = true;
+
+    if (currentSessionId) {
+      onSessionClosed(currentSessionId);
+    }
+
+    if (closeTransport) {
+      await transport.close();
+    }
+
+    await mcpServer.close();
+  };
+
+  const managedRequest = {
+    persistent: true,
+    transport,
+    close: async () => {
+      await cleanup(true);
+    },
+  } satisfies ManagedRequest;
+
+  transport.onclose = () => {
+    void cleanup(false);
+  };
+
+  await mcpServer.connect(transport);
+
+  return managedRequest;
+}
+
+function isInitializeBody(parsedBody: unknown) {
+  if (Array.isArray(parsedBody)) {
+    return parsedBody.length === 1 && isInitializeRequest(parsedBody[0]);
+  }
+
+  if (!parsedBody || typeof parsedBody !== "object") {
+    return false;
+  }
+
+  return isInitializeRequest(parsedBody);
+}
+
 async function resolveRequest(
   req: Request,
+  parsedBody: unknown,
   createRequest: () => Promise<ManagedRequest>,
+  options?: {
+    createPersistentRequest?: () => Promise<ManagedRequest>;
+    persistentRequests?: ReadonlyMap<string, ManagedRequest>;
+  },
 ): Promise<RequestResolution> {
   if (hasMultipleSessionHeaderValues(req)) {
     return {
@@ -306,10 +421,42 @@ async function resolveRequest(
     };
   }
 
+  const sessionId = getSessionId(req);
+
+  if (sessionId && options?.persistentRequests) {
+    const managedRequest = options?.persistentRequests?.get(sessionId);
+
+    if (!managedRequest) {
+      return {
+        status: "session-not-found",
+      };
+    }
+
+    return {
+      managedRequest,
+      status: "ready",
+    };
+  }
+
+  if (req.method !== "POST" && options?.createPersistentRequest) {
+    return {
+      status: "missing-session-header",
+    };
+  }
+
+  if (options?.createPersistentRequest && req.method === "POST" && isInitializeBody(parsedBody)) {
+    const managedRequest = await options.createPersistentRequest();
+
+    return {
+      managedRequest,
+      status: "ready",
+    };
+  }
+
   const managedRequest = await createRequest();
 
   return {
-    cleanup: managedRequest.close,
+    cleanup: managedRequest.persistent ? undefined : managedRequest.close,
     managedRequest,
     status: "ready",
   };
@@ -321,6 +468,12 @@ function writeRequestResolution(res: Response, resolution: Exclude<RequestResolu
   status: "ready";
 }>) {
   switch (resolution.status) {
+    case "missing-session-header":
+      writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header is required");
+      return;
+    case "session-not-found":
+      writeJsonRpcError(res, 404, -32001, "Session not found");
+      return;
     case "invalid-session-header":
       writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single value");
       return;
@@ -354,6 +507,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const port = options.port ?? 3000;
   const ynab = assertYnabConfig(options.ynab);
   const oauthBroker = auth.mode === "oauth" ? createOAuthBroker(auth) : undefined;
+  const persistentRequests = new Map<string, ManagedRequest>();
 
   if (auth.mode === "oauth") {
     allowedOrigins.add(new URL(auth.publicUrl).origin);
@@ -477,10 +631,17 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     });
 
     app.use((req, res, next) => {
-      if (getRequestPath(req) !== path || req.method !== "POST") {
+      if (getRequestPath(req) !== path || !["DELETE", "GET", "POST"].includes(req.method)) {
         next();
         return;
       }
+
+      if (isPublicJsonRpcRequest(req.body) || req.method === "GET" || req.method === "DELETE") {
+        next();
+        return;
+      }
+
+      applyCloudflareAccessAuthorizationHeader(req);
 
       if (isDirectUpstreamBearerToken(req, auth)) {
         delete req.headers.authorization;
@@ -507,19 +668,39 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       return;
     }
 
-    if (req.method !== "POST") {
+    const allowedMethods: readonly string[] = auth.mode === "oauth"
+      ? ["DELETE", "GET", "POST"]
+      : HTTP_ALLOWED_METHODS;
+
+    if (!allowedMethods.includes(req.method)) {
       logHttpDebug("request.rejected", {
         ...getRequestDebugDetails(req),
         reason: "method-not-allowed",
       });
-      writeMethodNotAllowed(res, HTTP_ALLOWED_METHODS);
+      writeMethodNotAllowed(res, allowedMethods);
       return;
     }
 
     const parsedBody = req.body;
     const resolution = await resolveRequest(
       req,
-      () => createManagedRequest(ynab),
+      parsedBody,
+      () => createManagedRequest(ynab, auth),
+      auth.mode === "oauth"
+        ? {
+            createPersistentRequest: () => createPersistentManagedRequest(
+              ynab,
+              auth,
+              (sessionId, managedRequest) => {
+                persistentRequests.set(sessionId, managedRequest);
+              },
+              (sessionId) => {
+                persistentRequests.delete(sessionId);
+              },
+            ),
+            persistentRequests,
+          }
+        : undefined,
     );
 
     if (resolution.status !== "ready") {
@@ -542,9 +723,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     };
 
     try {
-      res.once("close", () => {
-        void cleanup();
-      });
+      if (resolution.cleanup) {
+        res.once("close", () => {
+          void cleanup();
+        });
+      }
       logHttpDebug("transport.handoff", {
         ...getRequestDebugDetails(req),
         ...getJsonRpcDebugDetails(parsedBody),
@@ -624,6 +807,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       }
 
       closed = true;
+      for (const managedRequest of new Set(persistentRequests.values())) {
+        await managedRequest.close();
+      }
       await closeNodeServer(server);
     },
   };

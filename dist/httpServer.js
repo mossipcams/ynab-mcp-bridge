@@ -1,13 +1,16 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import { decodeJwt } from "jose";
 import { hostHeaderValidation, localhostHostValidation, } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
 import { createOAuthBroker } from "./oauthBroker.js";
 import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
-import { createServer } from "./server.js";
+import { createServer, isPublicToolName } from "./server.js";
+import { createYnabApi } from "./ynabApi.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 function applyCloudflareAccessAuthorizationHeader(req) {
@@ -147,6 +150,26 @@ function getJsonRpcDebugDetails(parsedBody) {
     }
     return details;
 }
+function isPublicJsonRpcRequest(parsedBody) {
+    const messages = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
+    if (messages.length === 0) {
+        return false;
+    }
+    return messages.every((message) => {
+        if (!message || typeof message !== "object") {
+            return false;
+        }
+        const request = message;
+        if (request.method === "initialize" || request.method === "notifications/initialized" || request.method === "ping" || request.method === "tools/list") {
+            return true;
+        }
+        if (request.method !== "tools/call") {
+            return false;
+        }
+        const params = request.params;
+        return typeof params?.name === "string" && isPublicToolName(params.name);
+    });
+}
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (Array.isArray(sessionId)) {
@@ -173,14 +196,15 @@ function isPayloadTooLargeError(error) {
             ("status" in error && error.status === 413) ||
             ("statusCode" in error && error.statusCode === 413));
 }
-async function createManagedRequest(config) {
-    const mcpServer = createServer(config);
+async function createManagedRequest(config, auth) {
+    const mcpServer = createServer(config, createYnabApi(config), { auth });
     const transport = new StreamableHTTPServerTransport({
         enableJsonResponse: true,
         sessionIdGenerator: undefined,
     });
     await mcpServer.connect(transport);
     return {
+        persistent: false,
         transport,
         close: async () => {
             await transport.close();
@@ -188,21 +212,99 @@ async function createManagedRequest(config) {
         },
     };
 }
-async function resolveRequest(req, createRequest) {
+async function createPersistentManagedRequest(config, auth, onSessionInitialized, onSessionClosed) {
+    const mcpServer = createServer(config, createYnabApi(config), { auth });
+    let cleanedUp = false;
+    let currentSessionId;
+    const transport = new StreamableHTTPServerTransport({
+        enableJsonResponse: true,
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (sessionId) => {
+            currentSessionId = sessionId;
+            onSessionInitialized(sessionId, managedRequest);
+        },
+    });
+    const cleanup = async (closeTransport) => {
+        if (cleanedUp) {
+            return;
+        }
+        cleanedUp = true;
+        if (currentSessionId) {
+            onSessionClosed(currentSessionId);
+        }
+        if (closeTransport) {
+            await transport.close();
+        }
+        await mcpServer.close();
+    };
+    const managedRequest = {
+        persistent: true,
+        transport,
+        close: async () => {
+            await cleanup(true);
+        },
+    };
+    transport.onclose = () => {
+        void cleanup(false);
+    };
+    await mcpServer.connect(transport);
+    return managedRequest;
+}
+function isInitializeBody(parsedBody) {
+    if (Array.isArray(parsedBody)) {
+        return parsedBody.length === 1 && isInitializeRequest(parsedBody[0]);
+    }
+    if (!parsedBody || typeof parsedBody !== "object") {
+        return false;
+    }
+    return isInitializeRequest(parsedBody);
+}
+async function resolveRequest(req, parsedBody, createRequest, options) {
     if (hasMultipleSessionHeaderValues(req)) {
         return {
             status: "invalid-session-header",
         };
     }
+    const sessionId = getSessionId(req);
+    if (sessionId && options?.persistentRequests) {
+        const managedRequest = options?.persistentRequests?.get(sessionId);
+        if (!managedRequest) {
+            return {
+                status: "session-not-found",
+            };
+        }
+        return {
+            managedRequest,
+            status: "ready",
+        };
+    }
+    if (req.method !== "POST" && options?.createPersistentRequest) {
+        return {
+            status: "missing-session-header",
+        };
+    }
+    if (options?.createPersistentRequest && req.method === "POST" && isInitializeBody(parsedBody)) {
+        const managedRequest = await options.createPersistentRequest();
+        return {
+            managedRequest,
+            status: "ready",
+        };
+    }
     const managedRequest = await createRequest();
     return {
-        cleanup: managedRequest.close,
+        cleanup: managedRequest.persistent ? undefined : managedRequest.close,
         managedRequest,
         status: "ready",
     };
 }
 function writeRequestResolution(res, resolution) {
     switch (resolution.status) {
+        case "missing-session-header":
+            writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header is required");
+            return;
+        case "session-not-found":
+            writeJsonRpcError(res, 404, -32001, "Session not found");
+            return;
         case "invalid-session-header":
             writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single value");
             return;
@@ -232,6 +334,7 @@ export async function startHttpServer(options) {
     const port = options.port ?? 3000;
     const ynab = assertYnabConfig(options.ynab);
     const oauthBroker = auth.mode === "oauth" ? createOAuthBroker(auth) : undefined;
+    const persistentRequests = new Map();
     if (auth.mode === "oauth") {
         allowedOrigins.add(new URL(auth.publicUrl).origin);
     }
@@ -330,10 +433,15 @@ export async function startHttpServer(options) {
             verifier: oauthBroker.provider,
         });
         app.use((req, res, next) => {
-            if (getRequestPath(req) !== path || req.method !== "POST") {
+            if (getRequestPath(req) !== path || !["DELETE", "GET", "POST"].includes(req.method)) {
                 next();
                 return;
             }
+            if (isPublicJsonRpcRequest(req.body) || req.method === "GET" || req.method === "DELETE") {
+                next();
+                return;
+            }
+            applyCloudflareAccessAuthorizationHeader(req);
             if (isDirectUpstreamBearerToken(req, auth)) {
                 delete req.headers.authorization;
             }
@@ -354,16 +462,28 @@ export async function startHttpServer(options) {
             next();
             return;
         }
-        if (req.method !== "POST") {
+        const allowedMethods = auth.mode === "oauth"
+            ? ["DELETE", "GET", "POST"]
+            : HTTP_ALLOWED_METHODS;
+        if (!allowedMethods.includes(req.method)) {
             logHttpDebug("request.rejected", {
                 ...getRequestDebugDetails(req),
                 reason: "method-not-allowed",
             });
-            writeMethodNotAllowed(res, HTTP_ALLOWED_METHODS);
+            writeMethodNotAllowed(res, allowedMethods);
             return;
         }
         const parsedBody = req.body;
-        const resolution = await resolveRequest(req, () => createManagedRequest(ynab));
+        const resolution = await resolveRequest(req, parsedBody, () => createManagedRequest(ynab, auth), auth.mode === "oauth"
+            ? {
+                createPersistentRequest: () => createPersistentManagedRequest(ynab, auth, (sessionId, managedRequest) => {
+                    persistentRequests.set(sessionId, managedRequest);
+                }, (sessionId) => {
+                    persistentRequests.delete(sessionId);
+                }),
+                persistentRequests,
+            }
+            : undefined);
         if (resolution.status !== "ready") {
             logHttpDebug("request.rejected", {
                 ...getRequestDebugDetails(req),
@@ -381,9 +501,11 @@ export async function startHttpServer(options) {
             await resolution.cleanup?.();
         };
         try {
-            res.once("close", () => {
-                void cleanup();
-            });
+            if (resolution.cleanup) {
+                res.once("close", () => {
+                    void cleanup();
+                });
+            }
             logHttpDebug("transport.handoff", {
                 ...getRequestDebugDetails(req),
                 ...getJsonRpcDebugDetails(parsedBody),
@@ -450,6 +572,9 @@ export async function startHttpServer(options) {
                 return;
             }
             closed = true;
+            for (const managedRequest of new Set(persistentRequests.values())) {
+                await managedRequest.close();
+            }
             await closeNodeServer(server);
         },
     };
