@@ -9,7 +9,15 @@ describe("pure v4 refactor", () => {
   it("keeps only the final read-only tool modules in src/tools", () => {
     expect(readdirSync(toolsDir).sort()).toEqual([
       "GetAccountTool.ts",
+      "GetBudgetCleanupSummaryTool.ts",
+      "GetBudgetHealthSummaryTool.ts",
+      "GetBudgetRatioSummaryTool.ts",
+      "GetCashFlowSummaryTool.ts",
       "GetCategoryTool.ts",
+      "GetCategoryTrendSummaryTool.ts",
+      "GetFinancialSnapshotTool.ts",
+      "GetGoalProgressSummaryTool.ts",
+      "GetIncomeSummaryTool.ts",
       "GetMcpVersionTool.ts",
       "GetMoneyMovementGroupsByMonthTool.ts",
       "GetMoneyMovementGroupsTool.ts",
@@ -23,11 +31,13 @@ describe("pure v4 refactor", () => {
       "GetPlanMonthTool.ts",
       "GetPlanSettingsTool.ts",
       "GetScheduledTransactionTool.ts",
+      "GetSpendingSummaryTool.ts",
       "GetTransactionTool.ts",
       "GetTransactionsByAccountTool.ts",
       "GetTransactionsByCategoryTool.ts",
       "GetTransactionsByMonthTool.ts",
       "GetTransactionsByPayeeTool.ts",
+      "GetUpcomingObligationsTool.ts",
       "GetUserTool.ts",
       "ListAccountsTool.ts",
       "ListPayeeLocationsTool.ts",
@@ -38,6 +48,7 @@ describe("pure v4 refactor", () => {
       "ListScheduledTransactionsTool.ts",
       "ListTransactionsTool.ts",
       "errorUtils.ts",
+      "financeToolUtils.ts",
       "planToolUtils.ts",
     ]);
   });

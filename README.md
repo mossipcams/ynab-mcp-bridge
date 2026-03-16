@@ -69,6 +69,16 @@ The server exposes a read-only plan-based toolset:
 * `ynab_get_money_movements_by_month`
 * `ynab_get_money_movement_groups`
 * `ynab_get_money_movement_groups_by_month`
+* `ynab_get_financial_snapshot`
+* `ynab_get_spending_summary`
+* `ynab_get_cash_flow_summary`
+* `ynab_get_budget_health_summary`
+* `ynab_get_upcoming_obligations`
+* `ynab_get_goal_progress_summary`
+* `ynab_get_budget_cleanup_summary`
+* `ynab_get_income_summary`
+* `ynab_get_category_trend_summary`
+* `ynab_get_70_20_10_summary`
 
 ## Rate Limiting
 

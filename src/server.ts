@@ -5,7 +5,15 @@ import { assertYnabConfig, type YnabConfig } from "./config.js";
 import { getPackageInfo } from "./packageInfo.js";
 import { attachYnabApiRuntimeContext, createYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
+import * as GetBudgetCleanupSummaryTool from "./tools/GetBudgetCleanupSummaryTool.js";
+import * as GetBudgetRatioSummaryTool from "./tools/GetBudgetRatioSummaryTool.js";
+import * as GetBudgetHealthSummaryTool from "./tools/GetBudgetHealthSummaryTool.js";
+import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
 import * as GetCategoryTool from "./tools/GetCategoryTool.js";
+import * as GetCategoryTrendSummaryTool from "./tools/GetCategoryTrendSummaryTool.js";
+import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";
+import * as GetGoalProgressSummaryTool from "./tools/GetGoalProgressSummaryTool.js";
+import * as GetIncomeSummaryTool from "./tools/GetIncomeSummaryTool.js";
 import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
 import * as GetMoneyMovementGroupsTool from "./tools/GetMoneyMovementGroupsTool.js";
 import * as GetMoneyMovementGroupsByMonthTool from "./tools/GetMoneyMovementGroupsByMonthTool.js";
@@ -16,6 +24,7 @@ import * as GetPayeeLocationTool from "./tools/GetPayeeLocationTool.js";
 import * as GetPayeeLocationsByPayeeTool from "./tools/GetPayeeLocationsByPayeeTool.js";
 import * as GetPayeeTool from "./tools/GetPayeeTool.js";
 import * as GetScheduledTransactionTool from "./tools/GetScheduledTransactionTool.js";
+import * as GetSpendingSummaryTool from "./tools/GetSpendingSummaryTool.js";
 import * as GetPlanDetailsTool from "./tools/GetPlanDetailsTool.js";
 import * as GetPlanMonthTool from "./tools/GetPlanMonthTool.js";
 import * as GetPlanSettingsTool from "./tools/GetPlanSettingsTool.js";
@@ -24,6 +33,7 @@ import * as GetTransactionsByAccountTool from "./tools/GetTransactionsByAccountT
 import * as GetTransactionsByCategoryTool from "./tools/GetTransactionsByCategoryTool.js";
 import * as GetTransactionsByMonthTool from "./tools/GetTransactionsByMonthTool.js";
 import * as GetTransactionsByPayeeTool from "./tools/GetTransactionsByPayeeTool.js";
+import * as GetUpcomingObligationsTool from "./tools/GetUpcomingObligationsTool.js";
 import * as GetUserTool from "./tools/GetUserTool.js";
 import * as ListAccountsTool from "./tools/ListAccountsTool.js";
 import * as ListPayeeLocationsTool from "./tools/ListPayeeLocationsTool.js";
@@ -99,6 +109,16 @@ export const toolRegistrations: ToolRegistration[] = [
   { title: "Get Money Movements By Month", module: GetMoneyMovementsByMonthTool },
   { title: "Get Money Movement Groups", module: GetMoneyMovementGroupsTool },
   { title: "Get Money Movement Groups By Month", module: GetMoneyMovementGroupsByMonthTool },
+  { title: "Get Financial Snapshot", module: GetFinancialSnapshotTool },
+  { title: "Get Spending Summary", module: GetSpendingSummaryTool },
+  { title: "Get Cash Flow Summary", module: GetCashFlowSummaryTool },
+  { title: "Get Budget Health Summary", module: GetBudgetHealthSummaryTool },
+  { title: "Get Upcoming Obligations", module: GetUpcomingObligationsTool },
+  { title: "Get Goal Progress Summary", module: GetGoalProgressSummaryTool },
+  { title: "Get Budget Cleanup Summary", module: GetBudgetCleanupSummaryTool },
+  { title: "Get Income Summary", module: GetIncomeSummaryTool },
+  { title: "Get Category Trend Summary", module: GetCategoryTrendSummaryTool },
+  { title: "Get 70/20/10 Summary", module: GetBudgetRatioSummaryTool },
 ];
 
 export function registerServerTools(registrar: ToolRegistrar, api: ynab.API) {
