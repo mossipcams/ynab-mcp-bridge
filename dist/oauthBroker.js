@@ -1,7 +1,15 @@
 import crypto from "node:crypto";
 import { SignJWT, createRemoteJWKSet, errors, jwtVerify } from "jose";
-import { InvalidGrantError, InvalidRequestError, InvalidScopeError, InvalidTokenError, ServerError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { InvalidRequestError, InvalidTokenError, ServerError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { createOAuthCore } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
+const CONSENT_PAGE_HEADERS = {
+    "cache-control": "no-store",
+    "content-security-policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    pragma: "no-cache",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+};
 function parseScopes(scopeClaim) {
     if (typeof scopeClaim !== "string") {
         return [];
@@ -35,22 +43,16 @@ function getAudienceValue(payload) {
     }
     return undefined;
 }
-function createErrorRedirect(redirectUri, params) {
-    const url = new URL(redirectUri);
-    for (const [name, value] of Object.entries(params)) {
-        if (value) {
-            url.searchParams.set(name, value);
-        }
-    }
-    return url.href;
+function escapeHtml(value) {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#39;");
 }
 export function createOAuthBroker(config) {
     const store = createOAuthStore(config.storePath);
-    const clients = new Map();
-    const pendingConsents = new Map();
-    const pendingAuthorizations = new Map();
-    const authorizationCodes = new Map();
-    const refreshTokens = new Map();
     const resourceUrl = new URL(config.publicUrl);
     const issuerUrl = new URL(resourceUrl.origin);
     const callbackUrl = new URL(config.callbackPath, issuerUrl).href;
@@ -173,26 +175,38 @@ export function createOAuthBroker(config) {
         return await response.json();
     }
     function buildUpstreamAuthorizationUrl(pending) {
-        const upstreamState = crypto.randomBytes(24).toString("base64url");
-        pendingAuthorizations.set(upstreamState, pending);
-        store.savePendingAuthorization(upstreamState, {
-            ...pending,
-            expiresAt: Date.now() + 10 * 60 * 1000,
-        });
         const upstreamAuthorizationUrl = new URL(config.authorizationUrl);
         upstreamAuthorizationUrl.searchParams.set("client_id", config.clientId);
         upstreamAuthorizationUrl.searchParams.set("redirect_uri", callbackUrl);
         upstreamAuthorizationUrl.searchParams.set("response_type", "code");
-        upstreamAuthorizationUrl.searchParams.set("state", upstreamState);
+        upstreamAuthorizationUrl.searchParams.set("state", pending.upstreamState);
         if (pending.scopes.length > 0) {
             upstreamAuthorizationUrl.searchParams.set("scope", pending.scopes.join(" "));
         }
         upstreamAuthorizationUrl.searchParams.set("resource", pending.resource);
         return upstreamAuthorizationUrl;
     }
+    const core = createOAuthCore({
+        config: {
+            callbackUrl,
+            defaultResource: config.publicUrl,
+            defaultScopes: config.scopes,
+        },
+        dependencies: {
+            createId: () => crypto.randomBytes(24).toString("base64url"),
+            createUpstreamAuthorizationUrl: (pending) => buildUpstreamAuthorizationUrl(pending).href,
+            exchangeUpstreamAuthorizationCode,
+            exchangeUpstreamRefreshToken,
+            mintAccessToken,
+            now: () => Date.now(),
+        },
+        store,
+    });
     function renderConsentPage(consentChallenge, pending) {
-        const clientName = pending.clientName ?? pending.clientId;
-        const scopes = pending.scopes.length > 0 ? pending.scopes.join(", ") : "default scopes";
+        const clientName = escapeHtml(pending.clientName ?? pending.clientId);
+        const resource = escapeHtml(pending.resource);
+        const scopes = escapeHtml(pending.scopes.length > 0 ? pending.scopes.join(", ") : "default scopes");
+        const escapedConsentChallenge = escapeHtml(consentChallenge);
         return `<!doctype html>
 <html lang="en">
   <head>
@@ -201,187 +215,49 @@ export function createOAuthBroker(config) {
   </head>
   <body>
     <h1>Approve MCP client access</h1>
-    <p><strong>${clientName}</strong> is requesting access to ${pending.resource}.</p>
+    <p><strong>${clientName}</strong> is requesting access to ${resource}.</p>
     <p>Requested scopes: ${scopes}</p>
     <form method="post" action="/authorize/consent">
-      <input type="hidden" name="consent_challenge" value="${consentChallenge}">
+      <input type="hidden" name="consent_challenge" value="${escapedConsentChallenge}">
       <button type="submit" name="action" value="approve">Approve</button>
       <button type="submit" name="action" value="deny">Deny</button>
     </form>
   </body>
 </html>`;
     }
+    function sendConsentPage(res, consentChallenge, pending) {
+        for (const [name, value] of Object.entries(CONSENT_PAGE_HEADERS)) {
+            res.setHeader(name, value);
+        }
+        res.status(200)
+            .type("html")
+            .send(renderConsentPage(consentChallenge, pending));
+    }
     const provider = {
         clientsStore: {
             getClient(clientId) {
-                return clients.get(clientId) ?? store.getClient(clientId);
+                return core.getClient(clientId);
             },
             registerClient(client) {
-                const clientId = crypto.randomUUID();
-                const registeredClient = {
-                    ...client,
-                    client_id: clientId,
-                    client_id_issued_at: Math.floor(Date.now() / 1000),
-                };
-                clients.set(clientId, registeredClient);
-                store.saveClient(registeredClient);
-                return registeredClient;
+                return core.registerClient(client);
             },
         },
         async authorize(client, params, res) {
-            const scopes = params.scopes && params.scopes.length > 0 ? params.scopes : config.scopes;
-            const resource = params.resource?.href ?? config.publicUrl;
-            if (store.isClientApproved({
-                clientId: client.client_id,
-                resource,
-                scopes,
-            })) {
-                res.redirect(302, buildUpstreamAuthorizationUrl({
-                    clientId: client.client_id,
-                    redirectUri: params.redirectUri,
-                    resource,
-                    scopes,
-                    state: params.state,
-                    codeChallenge: params.codeChallenge,
-                }).href);
+            const result = await core.startAuthorization(client, params);
+            if (result.type === "redirect") {
+                res.redirect(302, result.location);
                 return;
             }
-            const consentChallenge = crypto.randomBytes(24).toString("base64url");
-            const expiresAt = Date.now() + 10 * 60 * 1000;
-            pendingConsents.set(consentChallenge, {
-                clientId: client.client_id,
-                clientName: client.client_name,
-                expiresAt,
-                redirectUri: params.redirectUri,
-                resource,
-                scopes,
-                state: params.state,
-                codeChallenge: params.codeChallenge,
-            });
-            store.savePendingConsent(consentChallenge, {
-                clientId: client.client_id,
-                clientName: client.client_name,
-                expiresAt,
-                redirectUri: params.redirectUri,
-                resource,
-                scopes,
-                state: params.state,
-                codeChallenge: params.codeChallenge,
-            });
-            res.status(200)
-                .type("html")
-                .send(renderConsentPage(consentChallenge, pendingConsents.get(consentChallenge)));
+            sendConsentPage(res, result.consentChallenge, result.pending);
         },
         async challengeForAuthorizationCode(client, authorizationCode) {
-            const record = authorizationCodes.get(authorizationCode) ?? store.getAuthorizationCode(authorizationCode);
-            if (!record || record.clientId !== client.client_id) {
-                throw new InvalidGrantError("Unknown authorization code.");
-            }
-            if (record.expiresAt <= Date.now()) {
-                authorizationCodes.delete(authorizationCode);
-                throw new InvalidGrantError("Authorization code has expired.");
-            }
-            return record.codeChallenge;
+            return await core.getAuthorizationCodeChallenge(client, authorizationCode);
         },
         async exchangeAuthorizationCode(client, authorizationCode, _codeVerifier, redirectUri, resource) {
-            const record = authorizationCodes.get(authorizationCode) ?? store.getAuthorizationCode(authorizationCode);
-            if (!record || record.clientId !== client.client_id) {
-                throw new InvalidGrantError("Unknown authorization code.");
-            }
-            if (record.expiresAt <= Date.now()) {
-                authorizationCodes.delete(authorizationCode);
-                store.deleteAuthorizationCode(authorizationCode);
-                throw new InvalidGrantError("Authorization code has expired.");
-            }
-            if (redirectUri && redirectUri !== record.redirectUri) {
-                throw new InvalidGrantError("redirect_uri does not match the authorization request.");
-            }
-            if (resource?.href && resource.href !== record.resource) {
-                throw new InvalidGrantError("resource does not match the authorization request.");
-            }
-            authorizationCodes.delete(authorizationCode);
-            store.deleteAuthorizationCode(authorizationCode);
-            const expiresInSeconds = Math.max(60, Math.min(record.upstreamTokens.expires_in ?? 3600, 3600));
-            const accessToken = await mintAccessToken({
-                clientId: record.clientId,
-                expiresInSeconds,
-                resource: record.resource,
-                scopes: record.scopes,
-                subject: record.subject,
-            });
-            const refreshToken = crypto.randomBytes(32).toString("base64url");
-            refreshTokens.set(refreshToken, {
-                clientId: record.clientId,
-                expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-                resource: record.resource,
-                scopes: record.scopes,
-                subject: record.subject,
-                upstreamTokens: record.upstreamTokens,
-            });
-            store.saveRefreshToken(refreshToken, {
-                clientId: record.clientId,
-                expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-                resource: record.resource,
-                scopes: record.scopes,
-                subject: record.subject,
-                upstreamTokens: record.upstreamTokens,
-            });
-            return {
-                access_token: accessToken,
-                expires_in: expiresInSeconds,
-                refresh_token: refreshToken,
-                scope: record.scopes.join(" "),
-                token_type: "Bearer",
-            };
+            return await core.exchangeAuthorizationCode(client, authorizationCode, redirectUri, resource);
         },
         async exchangeRefreshToken(client, refreshToken, scopes, resource) {
-            const record = refreshTokens.get(refreshToken) ?? store.getRefreshToken(refreshToken);
-            if (!record || record.clientId !== client.client_id) {
-                throw new InvalidGrantError("Unknown refresh token.");
-            }
-            if (record.expiresAt <= Date.now()) {
-                refreshTokens.delete(refreshToken);
-                store.deleteRefreshToken(refreshToken);
-                throw new InvalidGrantError("Refresh token has expired.");
-            }
-            const grantedScopes = scopes && scopes.length > 0 ? scopes : record.scopes;
-            if (!grantedScopes.every((scope) => record.scopes.includes(scope))) {
-                throw new InvalidScopeError("Requested scope exceeds the original grant.");
-            }
-            if (resource?.href && resource.href !== record.resource) {
-                throw new InvalidGrantError("resource does not match the refresh token.");
-            }
-            const refreshedUpstreamTokens = await exchangeUpstreamRefreshToken(record.upstreamTokens.refresh_token ?? "");
-            const nextUpstreamTokens = {
-                ...record.upstreamTokens,
-                ...refreshedUpstreamTokens,
-                refresh_token: refreshedUpstreamTokens.refresh_token ?? record.upstreamTokens.refresh_token,
-            };
-            const expiresInSeconds = Math.max(60, Math.min(nextUpstreamTokens.expires_in ?? 3600, 3600));
-            const accessToken = await mintAccessToken({
-                clientId: record.clientId,
-                expiresInSeconds,
-                resource: record.resource,
-                scopes: grantedScopes,
-                subject: record.subject,
-            });
-            const nextRefreshRecord = {
-                clientId: record.clientId,
-                expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-                resource: record.resource,
-                scopes: record.scopes,
-                subject: record.subject,
-                upstreamTokens: nextUpstreamTokens,
-            };
-            refreshTokens.set(refreshToken, nextRefreshRecord);
-            store.saveRefreshToken(refreshToken, nextRefreshRecord);
-            return {
-                access_token: accessToken,
-                expires_in: expiresInSeconds,
-                refresh_token: refreshToken,
-                scope: grantedScopes.join(" "),
-                token_type: "Bearer",
-            };
+            return await core.exchangeRefreshToken(client, refreshToken, scopes, resource);
         },
         verifyAccessToken,
     };
@@ -392,33 +268,8 @@ export function createOAuthBroker(config) {
             if (!consentChallenge) {
                 throw new InvalidRequestError("Missing consent challenge.");
             }
-            const pending = pendingConsents.get(consentChallenge) ?? store.getPendingConsent(consentChallenge);
-            if (!pending) {
-                throw new InvalidRequestError("Unknown consent challenge.");
-            }
-            pendingConsents.delete(consentChallenge);
-            store.deletePendingConsent(consentChallenge);
-            if (action !== "approve") {
-                res.redirect(302, createErrorRedirect(pending.redirectUri, {
-                    error: "access_denied",
-                    error_description: "The user denied access to the MCP client.",
-                    state: pending.state,
-                }));
-                return;
-            }
-            store.approveClient({
-                clientId: pending.clientId,
-                resource: pending.resource,
-                scopes: pending.scopes,
-            });
-            res.redirect(302, buildUpstreamAuthorizationUrl({
-                clientId: pending.clientId,
-                redirectUri: pending.redirectUri,
-                resource: pending.resource,
-                scopes: pending.scopes,
-                state: pending.state,
-                codeChallenge: pending.codeChallenge,
-            }).href);
+            const result = await core.approveConsent(consentChallenge, action ?? "");
+            res.redirect(302, result.location);
         }
         catch (error) {
             if (error instanceof InvalidRequestError) {
@@ -434,45 +285,13 @@ export function createOAuthBroker(config) {
             if (!upstreamState) {
                 throw new InvalidRequestError("Missing upstream OAuth state.");
             }
-            const pending = pendingAuthorizations.get(upstreamState);
-            const storedPending = store.getPendingAuthorization(upstreamState);
-            if (!pending && !storedPending) {
-                throw new InvalidRequestError("Unknown upstream OAuth state.");
-            }
-            const resolvedPending = pending ?? storedPending;
-            pendingAuthorizations.delete(upstreamState);
-            store.deletePendingAuthorization(upstreamState);
-            if (typeof req.query.error === "string") {
-                res.redirect(302, createErrorRedirect(resolvedPending.redirectUri, {
-                    error: req.query.error,
-                    error_description: typeof req.query.error_description === "string" ? req.query.error_description : undefined,
-                    state: resolvedPending.state,
-                }));
-                return;
-            }
-            if (typeof req.query.code !== "string" || req.query.code.length === 0) {
-                throw new InvalidRequestError("Missing upstream OAuth code.");
-            }
-            const upstreamTokens = await exchangeUpstreamAuthorizationCode(req.query.code);
-            const authorizationCode = crypto.randomBytes(24).toString("base64url");
-            authorizationCodes.set(authorizationCode, {
-                ...resolvedPending,
-                expiresAt: Date.now() + 5 * 60 * 1000,
-                subject: resolvedPending.clientId,
-                upstreamTokens,
+            const result = await core.handleCallback({
+                code: typeof req.query.code === "string" && req.query.code.length > 0 ? req.query.code : undefined,
+                error: typeof req.query.error === "string" ? req.query.error : undefined,
+                errorDescription: typeof req.query.error_description === "string" ? req.query.error_description : undefined,
+                upstreamState,
             });
-            store.saveAuthorizationCode(authorizationCode, {
-                ...resolvedPending,
-                expiresAt: Date.now() + 5 * 60 * 1000,
-                subject: resolvedPending.clientId,
-                upstreamTokens,
-            });
-            const redirectUrl = new URL(resolvedPending.redirectUri);
-            redirectUrl.searchParams.set("code", authorizationCode);
-            if (resolvedPending.state) {
-                redirectUrl.searchParams.set("state", resolvedPending.state);
-            }
-            res.redirect(302, redirectUrl.href);
+            res.redirect(302, result.location);
         }
         catch (error) {
             if (error instanceof InvalidRequestError) {

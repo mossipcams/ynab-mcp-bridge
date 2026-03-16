@@ -1,163 +1,23 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createHash } from "node:crypto";
-import { createServer as createNodeHttpServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { startHttpServer } from "./httpServer.js";
+import {
+  approveAuthorizationConsent,
+  createCloudflareOAuthAuth,
+  createCodeChallenge,
+  registerOAuthClient,
+  startAuthorization,
+  startUpstreamOAuthServer,
+} from "./oauthTestHelpers.js";
 
 describe("oauth broker persistence", () => {
   const cleanups: Array<() => Promise<void>> = [];
   const ynab = {
     apiToken: "test-token",
   } as const;
-
-  async function startUpstreamOAuthServer() {
-    const server = createNodeHttpServer((req, res) => {
-      const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
-
-      if (requestUrl.pathname === "/authorize") {
-        res.statusCode = 200;
-        res.end("ok");
-        return;
-      }
-
-      if (requestUrl.pathname === "/jwks") {
-        res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ keys: [] }));
-        return;
-      }
-
-      if (requestUrl.pathname === "/token" && req.method === "POST") {
-        res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({
-          access_token: "upstream-access-token",
-          expires_in: 3600,
-          refresh_token: "upstream-refresh-token",
-          scope: "openid profile",
-          token_type: "Bearer",
-        }));
-        return;
-      }
-
-      res.statusCode = 404;
-      res.end();
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => {
-        server.off("error", reject);
-        resolve();
-      });
-    });
-
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Upstream OAuth test server did not expose a TCP address");
-    }
-
-    const origin = `http://127.0.0.1:${address.port}`;
-    cleanups.push(async () => {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve();
-        });
-      });
-    });
-
-    return {
-      authorizationUrl: `${origin}/authorize`,
-      issuer: origin,
-      jwksUrl: `${origin}/jwks`,
-      tokenUrl: `${origin}/token`,
-    };
-  }
-
-  function createCloudflareOAuthAuth(storePath: string, overrides: Record<string, string> = {}) {
-    return {
-      audience: "https://mcp.example.com/mcp",
-      authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
-      callbackPath: "/oauth/callback",
-      clientId: "cloudflare-client-id",
-      clientSecret: "cloudflare-client-secret",
-      issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
-      jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
-      mode: "oauth" as const,
-      publicUrl: "https://mcp.example.com/mcp",
-      scopes: ["openid", "profile"],
-      storePath,
-      tokenSigningSecret: "test-oauth-signing-secret",
-      tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
-      ...overrides,
-    };
-  }
-
-  function createCodeChallenge(codeVerifier: string) {
-    return createHash("sha256")
-      .update(codeVerifier)
-      .digest("base64url");
-  }
-
-  async function registerOAuthClient(httpServerUrl: string) {
-    const registrationResponse = await fetch(new URL("/register", httpServerUrl), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-      },
-      body: JSON.stringify({
-        client_name: "Claude Web",
-        grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://claude.ai/oauth/callback"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-      }),
-    });
-
-    expect(registrationResponse.status).toBe(201);
-    return await registrationResponse.json() as {
-      client_id: string;
-    };
-  }
-
-  async function startAuthorization(httpServerUrl: string, clientId: string, codeChallenge = "test-challenge") {
-    return await fetch(new URL(
-      `/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent("https://claude.ai/oauth/callback")}&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
-      httpServerUrl,
-    ), {
-      redirect: "manual",
-      headers: {
-        Origin: "https://claude.ai",
-      },
-    });
-  }
-
-  async function approveAuthorizationConsent(httpServerUrl: string, consentBody: string) {
-    const challengeMatch = consentBody.match(/name="consent_challenge" value="([^"]+)"/);
-
-    expect(challengeMatch?.[1]).toBeTruthy();
-
-    return await fetch(new URL("/authorize/consent", httpServerUrl), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Origin: "https://claude.ai",
-      },
-      body: new URLSearchParams({
-        action: "approve",
-        consent_challenge: challengeMatch![1],
-      }),
-      redirect: "manual",
-    });
-  }
 
   afterEach(async () => {
     while (cleanups.length > 0) {
@@ -173,10 +33,14 @@ describe("oauth broker persistence", () => {
       await rm(tempDir, { force: true, recursive: true });
     });
 
-    const upstream = await startUpstreamOAuthServer();
+    const upstream = await startUpstreamOAuthServer(cleanups);
     let httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth(storePath, upstream),
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        storePath,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -196,7 +60,11 @@ describe("oauth broker persistence", () => {
 
     httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth(storePath, upstream),
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        storePath,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -217,10 +85,14 @@ describe("oauth broker persistence", () => {
       await rm(tempDir, { force: true, recursive: true });
     });
 
-    const upstream = await startUpstreamOAuthServer();
+    const upstream = await startUpstreamOAuthServer(cleanups);
     let httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth(storePath, upstream),
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        storePath,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -235,7 +107,11 @@ describe("oauth broker persistence", () => {
 
     httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth(storePath, upstream),
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        storePath,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -256,12 +132,16 @@ describe("oauth broker persistence", () => {
       await rm(tempDir, { force: true, recursive: true });
     });
 
-    const upstream = await startUpstreamOAuthServer();
+    const upstream = await startUpstreamOAuthServer(cleanups);
     const codeVerifier = "test-code-verifier-123456789";
     const codeChallenge = createCodeChallenge(codeVerifier);
     let httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth(storePath, upstream),
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        storePath,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -281,7 +161,11 @@ describe("oauth broker persistence", () => {
 
     httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth(storePath, upstream),
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        storePath,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -307,7 +191,11 @@ describe("oauth broker persistence", () => {
 
     httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth(storePath, upstream),
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        storePath,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -344,7 +232,11 @@ describe("oauth broker persistence", () => {
 
     httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth(storePath, upstream),
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        storePath,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
