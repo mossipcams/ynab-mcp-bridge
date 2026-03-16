@@ -247,6 +247,7 @@ export async function startHttpServer(options) {
     const jsonParser = express.json();
     const urlencodedParser = express.urlencoded({ extended: false });
     app.disable("x-powered-by");
+    app.set("trust proxy", 1);
     app.use((req, _res, next) => {
         logHttpDebug("request.received", getRequestDebugDetails(req));
         next();
@@ -272,6 +273,7 @@ export async function startHttpServer(options) {
         const resolution = resolveOriginPolicy({
             allowedOrigins,
             headers: req.headers,
+            path: getRequestPath(req),
         });
         if (!resolution.allowed) {
             logHttpDebug("request.rejected", {

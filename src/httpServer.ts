@@ -373,6 +373,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const urlencodedParser = express.urlencoded({ extended: false });
 
   app.disable("x-powered-by");
+  app.set("trust proxy", 1);
 
   app.use((req, _res, next) => {
     logHttpDebug("request.received", getRequestDebugDetails(req));
@@ -406,6 +407,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     const resolution = resolveOriginPolicy({
       allowedOrigins,
       headers: req.headers,
+      path: getRequestPath(req),
     });
 
     if (!resolution.allowed) {

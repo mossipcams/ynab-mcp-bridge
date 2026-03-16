@@ -1608,6 +1608,36 @@ describe("startHttpServer", () => {
     expect(authorizeResponse.headers.get("cache-control")).toContain("no-store");
   });
 
+  it("accepts oauth consent posts from null origins used by popup auth flows", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai", "https://chatgpt.com"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+
+    expect(authorizeResponse.status).toBe(200);
+
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
+      origin: "null",
+    });
+
+    expect(consentResponse.status).toBe(302);
+    expect(consentResponse.headers.get("location")).toContain("/authorize");
+  });
+
   it("exchanges upstream callback codes and redirects back to the registered client", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
@@ -1874,6 +1904,77 @@ describe("startHttpServer", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
+  });
+
+  it("still rejects null origins on non-oauth MCP requests", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai", "https://chatgpt.com"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "null",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Forbidden origin",
+    });
+  });
+
+  it("trusts a single proxy hop so forwarded oauth requests do not trigger rate-limit validation errors", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        jwksUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "X-Forwarded-For": "203.0.113.10",
+      },
+      body: JSON.stringify({
+        client_name: "Claude Web",
+        grant_types: ["authorization_code", "refresh_token"],
+        redirect_uris: ["https://claude.ai/oauth/callback"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(consoleErrorSpy.mock.calls.some(([message]) => (
+      typeof message === "string" &&
+      message.includes("ERR_ERL_UNEXPECTED_X_FORWARDED_FOR")
+    ))).toBe(false);
   });
 
   it("accepts Cloudflare Access JWT assertion headers when authorization is absent", async () => {

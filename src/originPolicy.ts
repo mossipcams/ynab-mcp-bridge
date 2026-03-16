@@ -44,10 +44,18 @@ export function normalizeOrigin(origin: string) {
 export function resolveOriginPolicy(input: {
   allowedOrigins: Set<string>;
   headers: Record<string, string | string[] | undefined>;
+  path?: string;
 }) {
   const originHeader = getFirstHeaderValue(input.headers.origin);
 
   if (!originHeader) {
+    return {
+      allowed: true,
+      responseOrigin: undefined,
+    };
+  }
+
+  if (originHeader === "null" && input.path === "/authorize/consent") {
     return {
       allowed: true,
       responseOrigin: undefined,
