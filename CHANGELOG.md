@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.3...ynab-mcp-bridge-v0.6.4) (2026-03-16)
+
+
+### Bug Fixes
+
+* harden Claude OAuth consent redirects ([#53](https://github.com/mossipcams/ynab-mcp-bridge/issues/53)) ([3d2d236](https://github.com/mossipcams/ynab-mcp-bridge/commit/3d2d236adceacab823ac4bf36a5a60d186016d3a))
+
 ## [0.6.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.2...ynab-mcp-bridge-v0.6.3) (2026-03-16)
 
 
