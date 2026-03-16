@@ -25,28 +25,36 @@ describe("oauth store", () => {
 
     const expiredAt = Date.now() - 1_000;
     const store = createOAuthStore(storePath);
-    store.savePendingConsent("consent-1", {
+    store.saveGrant({
+      grantId: "grant-consent",
       clientId: "client-1",
       codeChallenge: "challenge",
-      expiresAt: expiredAt,
       redirectUri: "https://claude.ai/oauth/callback",
       resource: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile"],
       state: "client-state",
+      consent: {
+        challenge: "consent-1",
+        expiresAt: expiredAt,
+      },
     });
-    store.savePendingAuthorization("state-1", {
+    store.saveGrant({
+      grantId: "grant-authorization",
       clientId: "client-1",
       codeChallenge: "challenge",
-      expiresAt: expiredAt,
       redirectUri: "https://claude.ai/oauth/callback",
       resource: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile"],
       state: "client-state",
+      pendingAuthorization: {
+        stateId: "state-1",
+        expiresAt: expiredAt,
+      },
     });
-    store.saveAuthorizationCode("code-1", {
+    store.saveGrant({
+      grantId: "grant-code",
       clientId: "client-1",
       codeChallenge: "challenge",
-      expiresAt: expiredAt,
       redirectUri: "https://claude.ai/oauth/callback",
       resource: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile"],
@@ -56,25 +64,35 @@ describe("oauth store", () => {
         access_token: "upstream-token",
         token_type: "Bearer",
       },
+      authorizationCode: {
+        code: "code-1",
+        expiresAt: expiredAt,
+      },
     });
-    store.saveRefreshToken("refresh-1", {
+    store.saveGrant({
+      grantId: "grant-refresh",
       clientId: "client-1",
-      expiresAt: expiredAt,
+      codeChallenge: "",
+      redirectUri: "",
       resource: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile"],
       subject: "client-1",
       upstreamTokens: {
         access_token: "upstream-token",
         token_type: "Bearer",
+      },
+      refreshToken: {
+        token: "refresh-1",
+        expiresAt: expiredAt,
       },
     });
 
     const reloadedStore = createOAuthStore(storePath);
 
-    expect(reloadedStore.getPendingConsent("consent-1")).toBeUndefined();
-    expect(reloadedStore.getPendingAuthorization("state-1")).toBeUndefined();
-    expect(reloadedStore.getAuthorizationCode("code-1")).toBeUndefined();
-    expect(reloadedStore.getRefreshToken("refresh-1")).toBeUndefined();
+    expect(reloadedStore.getPendingConsentGrant("consent-1")).toBeUndefined();
+    expect(reloadedStore.getPendingAuthorizationGrant("state-1")).toBeUndefined();
+    expect(reloadedStore.getAuthorizationCodeGrant("code-1")).toBeUndefined();
+    expect(reloadedStore.getRefreshTokenGrant("refresh-1")).toBeUndefined();
 
     const persistedState = JSON.parse(await readFile(storePath, "utf8")) as {
       grants: Record<string, unknown>;

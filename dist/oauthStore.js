@@ -239,64 +239,6 @@ function loadState(storePath) {
         throw error;
     }
 }
-function toPendingConsentRecord(grant) {
-    if (!grant.consent) {
-        return undefined;
-    }
-    return {
-        clientId: grant.clientId,
-        clientName: grant.clientName,
-        codeChallenge: grant.codeChallenge,
-        expiresAt: grant.consent.expiresAt,
-        redirectUri: grant.redirectUri,
-        resource: grant.resource,
-        scopes: grant.scopes,
-        state: grant.state,
-    };
-}
-function toPendingAuthorizationRecord(grant) {
-    if (!grant.pendingAuthorization) {
-        return undefined;
-    }
-    return {
-        clientId: grant.clientId,
-        codeChallenge: grant.codeChallenge,
-        expiresAt: grant.pendingAuthorization.expiresAt,
-        redirectUri: grant.redirectUri,
-        resource: grant.resource,
-        scopes: grant.scopes,
-        state: grant.state,
-    };
-}
-function toAuthorizationCodeRecord(grant) {
-    if (!grant.authorizationCode || !grant.subject || !grant.upstreamTokens) {
-        return undefined;
-    }
-    return {
-        clientId: grant.clientId,
-        codeChallenge: grant.codeChallenge,
-        expiresAt: grant.authorizationCode.expiresAt,
-        redirectUri: grant.redirectUri,
-        resource: grant.resource,
-        scopes: grant.scopes,
-        state: grant.state,
-        subject: grant.subject,
-        upstreamTokens: grant.upstreamTokens,
-    };
-}
-function toRefreshTokenRecord(grant) {
-    if (!grant.refreshToken || !grant.subject || !grant.upstreamTokens) {
-        return undefined;
-    }
-    return {
-        clientId: grant.clientId,
-        expiresAt: grant.refreshToken.expiresAt,
-        resource: grant.resource,
-        scopes: grant.scopes,
-        subject: grant.subject,
-        upstreamTokens: grant.upstreamTokens,
-    };
-}
 export function createOAuthStore(storePath) {
     let state = pruneExpiredEntries(loadState(storePath));
     function persist() {
@@ -350,72 +292,19 @@ export function createOAuthStore(storePath) {
                 persist();
             }
         },
-        deleteAuthorizationCode(code) {
-            const grant = findGrant((candidate) => candidate.authorizationCode?.code === code);
-            if (grant) {
-                deleteGrant(grant.grantId);
-            }
-        },
         deleteGrant,
-        deletePendingAuthorization(stateId) {
-            const grant = findGrant((candidate) => candidate.pendingAuthorization?.stateId === stateId);
-            if (grant) {
-                deleteGrant(grant.grantId);
-            }
-        },
-        deletePendingConsent(consentId) {
-            const grant = findGrant((candidate) => candidate.consent?.challenge === consentId);
-            if (grant) {
-                deleteGrant(grant.grantId);
-            }
-        },
-        deleteRefreshToken(refreshToken) {
-            const grant = findGrant((candidate) => candidate.refreshToken?.token === refreshToken);
-            if (grant) {
-                deleteGrant(grant.grantId);
-            }
-        },
-        getAuthorizationCode(code) {
-            const grant = findGrant((candidate) => candidate.authorizationCode?.code === code);
-            return grant ? toAuthorizationCodeRecord(grant) : undefined;
-        },
         getAuthorizationCodeGrant(code) {
             return findGrant((candidate) => candidate.authorizationCode?.code === code);
         },
         getClient(clientId) {
             return state.clients[clientId];
         },
-        getGrant(grantId) {
-            const grant = state.grants[grantId];
-            if (!grant) {
-                return undefined;
-            }
-            const expiresAt = getGrantExpiry(grant);
-            if (expiresAt !== undefined && expiresAt <= Date.now()) {
-                deleteGrant(grantId);
-                return undefined;
-            }
-            return grant;
-        },
-        getPendingAuthorization(stateId) {
-            const grant = findGrant((candidate) => candidate.pendingAuthorization?.stateId === stateId);
-            return grant ? toPendingAuthorizationRecord(grant) : undefined;
-        },
         getPendingAuthorizationGrant(stateId) {
             return findGrant((candidate) => candidate.pendingAuthorization?.stateId === stateId);
-        },
-        getPendingConsent(consentId) {
-            const grant = findGrant((candidate) => (candidate.consent?.challenge === consentId ||
-                candidate.consentApprovalReplay?.challenge === consentId));
-            return grant ? toPendingConsentRecord(grant) : undefined;
         },
         getPendingConsentGrant(consentId) {
             return findGrant((candidate) => (candidate.consent?.challenge === consentId ||
                 candidate.consentApprovalReplay?.challenge === consentId));
-        },
-        getRefreshToken(refreshToken) {
-            const grant = findGrant((candidate) => candidate.refreshToken?.token === refreshToken);
-            return grant ? toRefreshTokenRecord(grant) : undefined;
         },
         getRefreshTokenGrant(refreshToken) {
             return findGrant((candidate) => candidate.refreshToken?.token === refreshToken);
@@ -425,30 +314,6 @@ export function createOAuthStore(storePath) {
             return state.approvals.some((approval) => (approval.clientId === record.clientId &&
                 approval.resource === record.resource &&
                 approval.scopes.join(" ") === normalizedScopes.join(" ")));
-        },
-        saveAuthorizationCode(code, record) {
-            state = {
-                ...state,
-                grants: {
-                    ...state.grants,
-                    [`compat-code:${code}`]: normalizeGrant({
-                        authorizationCode: {
-                            code,
-                            expiresAt: record.expiresAt,
-                        },
-                        clientId: record.clientId,
-                        codeChallenge: record.codeChallenge,
-                        grantId: `compat-code:${code}`,
-                        redirectUri: record.redirectUri,
-                        resource: record.resource,
-                        scopes: record.scopes,
-                        state: record.state,
-                        subject: record.subject,
-                        upstreamTokens: record.upstreamTokens,
-                    }),
-                },
-            };
-            persist();
         },
         saveClient(client) {
             state = {
@@ -466,74 +331,6 @@ export function createOAuthStore(storePath) {
                 grants: {
                     ...state.grants,
                     [grant.grantId]: normalizeGrant(grant),
-                },
-            };
-            persist();
-        },
-        savePendingAuthorization(stateId, record) {
-            state = {
-                ...state,
-                grants: {
-                    ...state.grants,
-                    [`compat-authorization:${stateId}`]: normalizeGrant({
-                        clientId: record.clientId,
-                        codeChallenge: record.codeChallenge,
-                        grantId: `compat-authorization:${stateId}`,
-                        pendingAuthorization: {
-                            expiresAt: record.expiresAt,
-                            stateId,
-                        },
-                        redirectUri: record.redirectUri,
-                        resource: record.resource,
-                        scopes: record.scopes,
-                        state: record.state,
-                    }),
-                },
-            };
-            persist();
-        },
-        savePendingConsent(consentId, record) {
-            state = {
-                ...state,
-                grants: {
-                    ...state.grants,
-                    [`compat-consent:${consentId}`]: normalizeGrant({
-                        clientId: record.clientId,
-                        clientName: record.clientName,
-                        codeChallenge: record.codeChallenge,
-                        consent: {
-                            challenge: consentId,
-                            expiresAt: record.expiresAt,
-                        },
-                        grantId: `compat-consent:${consentId}`,
-                        redirectUri: record.redirectUri,
-                        resource: record.resource,
-                        scopes: record.scopes,
-                        state: record.state,
-                    }),
-                },
-            };
-            persist();
-        },
-        saveRefreshToken(refreshToken, record) {
-            state = {
-                ...state,
-                grants: {
-                    ...state.grants,
-                    [`compat-refresh:${refreshToken}`]: normalizeGrant({
-                        clientId: record.clientId,
-                        codeChallenge: "",
-                        grantId: `compat-refresh:${refreshToken}`,
-                        redirectUri: "",
-                        refreshToken: {
-                            expiresAt: record.expiresAt,
-                            token: refreshToken,
-                        },
-                        resource: record.resource,
-                        scopes: record.scopes,
-                        subject: record.subject,
-                        upstreamTokens: record.upstreamTokens,
-                    }),
                 },
             };
             persist();

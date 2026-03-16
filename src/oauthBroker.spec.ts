@@ -11,7 +11,7 @@ import {
   registerOAuthClient,
   startAuthorization,
   startUpstreamOAuthServer,
-} from "./oauthTestHelpers.js";
+} from "./__test__/oauthTestHelpers.js";
 
 describe("oauth broker persistence", () => {
   const cleanups: Array<() => Promise<void>> = [];

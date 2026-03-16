@@ -6,7 +6,7 @@ const CORS_HEADERS = {
   "access-control-expose-headers": "Mcp-Session-Id",
 } as const;
 
-function getFirstHeaderValue(value: string | string[] | undefined) {
+export function getFirstHeaderValue(value: string | string[] | undefined) {
   if (typeof value === "string") {
     return value.split(",")[0]?.trim();
   }
@@ -26,7 +26,7 @@ function parseHostName(host: string | undefined) {
   }
 }
 
-function isLoopbackHostname(hostname: string | undefined) {
+export function isLoopbackHostname(hostname: string | undefined) {
   return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
 }
 

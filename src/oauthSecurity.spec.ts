@@ -11,7 +11,7 @@ import {
   registerOAuthClient,
   startAuthorization,
   startUpstreamOAuthServer,
-} from "./oauthTestHelpers.js";
+} from "./__test__/oauthTestHelpers.js";
 
 describe("oauth security regressions", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -79,7 +79,7 @@ describe("oauth security regressions", () => {
         kid: "oauth-security-test-key",
       })
       .setIssuedAt()
-      .setIssuer("https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123")
+      .setIssuer("https://id.example.com")
       .setAudience("https://mcp.example.com/mcp")
       .setExpirationTime("5 minutes")
       .setSubject("user-123")

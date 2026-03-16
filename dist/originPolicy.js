@@ -3,7 +3,7 @@ const CORS_HEADERS = {
     "access-control-allow-methods": "OPTIONS, POST",
     "access-control-expose-headers": "Mcp-Session-Id",
 };
-function getFirstHeaderValue(value) {
+export function getFirstHeaderValue(value) {
     if (typeof value === "string") {
         return value.split(",")[0]?.trim();
     }
@@ -20,7 +20,7 @@ function parseHostName(host) {
         return undefined;
     }
 }
-function isLoopbackHostname(hostname) {
+export function isLoopbackHostname(hostname) {
     return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
 }
 function getRequestHostName(headers) {
