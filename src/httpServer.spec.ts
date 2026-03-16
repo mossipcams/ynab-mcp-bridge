@@ -1560,6 +1560,36 @@ describe("startHttpServer", () => {
     expect(redirectUrl.searchParams.get("state")).toBeTruthy();
   });
 
+  it("accepts oauth consent posts from null origins used by popup auth flows", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai", "https://chatgpt.com"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+
+    expect(authorizeResponse.status).toBe(200);
+
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
+      origin: "null",
+    });
+
+    expect(consentResponse.status).toBe(302);
+    expect(consentResponse.headers.get("location")).toContain("/authorize");
+  });
+
   it("escapes client metadata and sends hardened headers on the consent page", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
@@ -1601,8 +1631,12 @@ describe("startHttpServer", () => {
     expect(authorizeResponse.status).toBe(200);
     expect(consentBody).toContain("&lt;img src=x onerror=alert(&#39;boom&#39;)&gt;");
     expect(consentBody).not.toContain("<img src=x onerror=alert('boom')>");
+    expect(consentBody).toContain("After you approve, this window may take a moment to continue.");
+    expect(consentBody).toContain("Continuing...");
+    expect(consentBody).toContain("button.disabled = true");
     expect(authorizeResponse.headers.get("content-security-policy")).toContain("default-src 'none'");
     expect(authorizeResponse.headers.get("content-security-policy")).toContain("form-action 'self'");
+    expect(authorizeResponse.headers.get("content-security-policy")).toContain("script-src 'nonce-");
     expect(authorizeResponse.headers.get("x-content-type-options")).toBe("nosniff");
     expect(authorizeResponse.headers.get("referrer-policy")).toBe("no-referrer");
     expect(authorizeResponse.headers.get("cache-control")).toContain("no-store");
@@ -1937,7 +1971,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("trusts a single proxy hop so forwarded oauth requests do not trigger rate-limit validation errors", async () => {
+  it("trusts proxy forwarding on oauth routes so forwarded headers do not trigger rate-limit validation errors", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({

@@ -287,10 +287,27 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
   async function approveConsent(consentChallenge: string, action: string) {
     const grant = store.getPendingConsentGrant(consentChallenge);
 
-    if (!grant || isExpired(grant.consent?.expiresAt, dependencies.now())) {
-      if (grant) {
-        store.deleteGrant(grant.grantId);
+    if (!grant) {
+      throw new InvalidRequestError("Unknown consent challenge.");
+    }
+
+    if (!grant.consent) {
+      if (
+        action === "approve" &&
+        grant.consentApprovalReplay?.challenge === consentChallenge &&
+        !isExpired(grant.consentApprovalReplay.expiresAt, dependencies.now())
+      ) {
+        return {
+          type: "redirect" as const,
+          location: grant.consentApprovalReplay.location,
+        };
       }
+
+      throw new InvalidRequestError("Unknown consent challenge.");
+    }
+
+    if (isExpired(grant.consent.expiresAt, dependencies.now())) {
+      store.deleteGrant(grant.grantId);
       throw new InvalidRequestError("Unknown consent challenge.");
     }
 
@@ -314,9 +331,20 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     });
 
     const upstreamState = dependencies.createId();
+    const location = dependencies.createUpstreamAuthorizationUrl({
+      resource: grant.resource,
+      scopes: grant.scopes,
+      upstreamState,
+    });
+
     store.saveGrant({
       ...grant,
       consent: undefined,
+      consentApprovalReplay: {
+        challenge: consentChallenge,
+        expiresAt: dependencies.now() + 30 * 1000,
+        location,
+      },
       pendingAuthorization: {
         expiresAt: dependencies.now() + 10 * 60 * 1000,
         stateId: upstreamState,
@@ -325,11 +353,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
 
     return {
       type: "redirect" as const,
-      location: dependencies.createUpstreamAuthorizationUrl({
-        resource: grant.resource,
-        scopes: grant.scopes,
-        upstreamState,
-      }),
+      location,
     };
   }
 
@@ -369,6 +393,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
         code: authorizationCode,
         expiresAt: dependencies.now() + 5 * 60 * 1000,
       },
+      consentApprovalReplay: undefined,
       pendingAuthorization: undefined,
       subject: grant.clientId,
       upstreamTokens,

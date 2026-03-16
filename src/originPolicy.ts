@@ -44,7 +44,7 @@ export function normalizeOrigin(origin: string) {
 export function resolveOriginPolicy(input: {
   allowedOrigins: Set<string>;
   headers: Record<string, string | string[] | undefined>;
-  path?: string;
+  path: string;
 }) {
   const originHeader = getFirstHeaderValue(input.headers.origin);
 

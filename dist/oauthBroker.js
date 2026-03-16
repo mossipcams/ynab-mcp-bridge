@@ -5,7 +5,6 @@ import { createOAuthCore } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
 const CONSENT_PAGE_HEADERS = {
     "cache-control": "no-store",
-    "content-security-policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
     pragma: "no-cache",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
@@ -50,6 +49,12 @@ function escapeHtml(value) {
         .replaceAll(">", "&gt;")
         .replaceAll("\"", "&quot;")
         .replaceAll("'", "&#39;");
+}
+function buildConsentPageHeaders(scriptNonce) {
+    return {
+        ...CONSENT_PAGE_HEADERS,
+        "content-security-policy": `default-src 'none'; script-src 'nonce-${scriptNonce}'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+    };
 }
 export function createOAuthBroker(config) {
     const store = createOAuthStore(config.storePath);
@@ -202,7 +207,7 @@ export function createOAuthBroker(config) {
         },
         store,
     });
-    function renderConsentPage(consentChallenge, pending) {
+    function renderConsentPage(consentChallenge, pending, scriptNonce) {
         const clientName = escapeHtml(pending.clientName ?? pending.clientId);
         const resource = escapeHtml(pending.resource);
         const scopes = escapeHtml(pending.scopes.length > 0 ? pending.scopes.join(", ") : "default scopes");
@@ -217,21 +222,52 @@ export function createOAuthBroker(config) {
     <h1>Approve MCP client access</h1>
     <p><strong>${clientName}</strong> is requesting access to ${resource}.</p>
     <p>Requested scopes: ${scopes}</p>
-    <form method="post" action="/authorize/consent">
+    <p>After you approve, this window may take a moment to continue.</p>
+    <p id="consent-status" hidden>Continuing...</p>
+    <form id="consent-form" method="post" action="/authorize/consent">
       <input type="hidden" name="consent_challenge" value="${escapedConsentChallenge}">
       <button type="submit" name="action" value="approve">Approve</button>
       <button type="submit" name="action" value="deny">Deny</button>
     </form>
+    <script nonce="${scriptNonce}">
+      const form = document.getElementById("consent-form");
+      const status = document.getElementById("consent-status");
+
+      if (form instanceof HTMLFormElement) {
+        form.addEventListener("submit", (event) => {
+          if (form.dataset.submitted === "true") {
+            event.preventDefault();
+            return;
+          }
+
+          form.dataset.submitted = "true";
+
+          for (const button of form.querySelectorAll("button")) {
+            button.disabled = true;
+          }
+
+          const submitter = event.submitter;
+          if (submitter instanceof HTMLButtonElement) {
+            submitter.textContent = submitter.value === "deny" ? "Denying..." : "Continuing...";
+          }
+
+          if (status instanceof HTMLElement) {
+            status.hidden = false;
+          }
+        });
+      }
+    </script>
   </body>
 </html>`;
     }
     function sendConsentPage(res, consentChallenge, pending) {
-        for (const [name, value] of Object.entries(CONSENT_PAGE_HEADERS)) {
+        const scriptNonce = crypto.randomBytes(16).toString("base64url");
+        for (const [name, value] of Object.entries(buildConsentPageHeaders(scriptNonce))) {
             res.setHeader(name, value);
         }
         res.status(200)
             .type("html")
-            .send(renderConsentPage(consentChallenge, pending));
+            .send(renderConsentPage(consentChallenge, pending, scriptNonce));
     }
     const provider = {
         clientsStore: {

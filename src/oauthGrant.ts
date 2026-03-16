@@ -12,6 +12,11 @@ export type OAuthGrant = {
     challenge: string;
     expiresAt: number;
   };
+  consentApprovalReplay?: {
+    challenge: string;
+    expiresAt: number;
+    location: string;
+  };
   grantId: string;
   pendingAuthorization?: {
     expiresAt: number;

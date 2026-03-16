@@ -35,7 +35,10 @@ describe("createOAuthCore", () => {
         return findGrant((grant) => grant.pendingAuthorization?.stateId === stateId);
       },
       getPendingConsentGrant(consentId: string) {
-        return findGrant((grant) => grant.consent?.challenge === consentId);
+        return findGrant((grant) => (
+          grant.consent?.challenge === consentId ||
+          grant.consentApprovalReplay?.challenge === consentId
+        ));
       },
       getRefreshTokenGrant(refreshToken: string) {
         return findGrant((grant) => grant.refreshToken?.token === refreshToken);
@@ -274,6 +277,36 @@ describe("createOAuthCore", () => {
     expect(store.state.grants.size).toBe(1);
   });
 
+  it("replays the same upstream redirect when an approval is submitted twice", async () => {
+    const { core } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    const firstApproval = await core.approveConsent(consentResult.consentChallenge, "approve");
+    const secondApproval = await core.approveConsent(consentResult.consentChallenge, "approve");
+
+    expect(firstApproval).toMatchObject({
+      type: "redirect",
+    });
+    expect(secondApproval).toEqual(firstApproval);
+  });
+
   it("refreshes local tokens against the upstream provider and rejects mismatched redirect or resource values", async () => {
     const { core, upstreamRefreshExchanges } = createCore();
     const client = await core.registerClient({
@@ -392,5 +425,35 @@ describe("createOAuthCore", () => {
       code: "upstream-code-123",
       upstreamState: "missing-state",
     })).rejects.toThrow(InvalidRequestError);
+  });
+
+  it("still rejects duplicate denied consent submissions", async () => {
+    const { core } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    const denialResult = await core.approveConsent(consentResult.consentChallenge, "deny");
+
+    expect(denialResult).toMatchObject({
+      type: "redirect",
+    });
+
+    await expect(core.approveConsent(consentResult.consentChallenge, "deny")).rejects.toThrow(InvalidRequestError);
   });
 });
