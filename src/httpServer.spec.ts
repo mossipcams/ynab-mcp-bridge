@@ -1707,6 +1707,46 @@ describe("startHttpServer", () => {
     expect(consentResponse.headers.get("location")).toContain("/authorize");
   });
 
+  it("treats consent submits without a button action as approval", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    const consentBody = await authorizeResponse.text();
+    const challengeMatch = consentBody.match(/name="consent_challenge" value="([^"]+)"/);
+
+    expect(authorizeResponse.status).toBe(200);
+    expect(challengeMatch?.[1]).toBeTruthy();
+
+    const consentResponse = await fetch(new URL("/authorize/consent", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        consent_challenge: challengeMatch![1],
+      }),
+      redirect: "manual",
+    });
+
+    expect(consentResponse.status).toBe(302);
+    expect(consentResponse.headers.get("location")).toContain("/authorize");
+  });
   it("escapes client metadata and sends hardened headers on the consent page", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
@@ -1750,9 +1790,13 @@ describe("startHttpServer", () => {
     expect(consentBody).not.toContain("<img src=x onerror=alert('boom')>");
     expect(consentBody).toContain("After you approve, this window may take a moment to continue.");
     expect(consentBody).toContain("Continuing...");
-    expect(consentBody).toContain("button.disabled = true");
+    expect(consentBody).toContain("approveButton.disabled = true");
+    expect(consentBody).toContain("denyButton.disabled = true");
     expect(authorizeResponse.headers.get("content-security-policy")).toContain("default-src 'none'");
-    expect(authorizeResponse.headers.get("content-security-policy")).toContain("form-action 'self'");
+    expect(authorizeResponse.headers.get("content-security-policy")).toContain("connect-src 'self'");
+    expect(authorizeResponse.headers.get("content-security-policy")).toContain(
+      `form-action 'self' https://claude.ai ${new URL(upstream.authorizationUrl).origin}`,
+    );
     expect(authorizeResponse.headers.get("content-security-policy")).toContain("script-src 'nonce-");
     expect(authorizeResponse.headers.get("x-content-type-options")).toBe("nosniff");
     expect(authorizeResponse.headers.get("referrer-policy")).toBe("no-referrer");
