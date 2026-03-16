@@ -96,6 +96,9 @@ function isOriginAllowed(req, allowedOrigins) {
     if (!originHeader) {
         return true;
     }
+    if (originHeader === "null" && getRequestPath(req) === "/authorize/consent") {
+        return true;
+    }
     try {
         const normalizedOrigin = normalizeOrigin(originHeader);
         if (allowedOrigins.has(normalizedOrigin)) {
@@ -291,6 +294,7 @@ export async function startHttpServer(options) {
     const jsonParser = express.json();
     const urlencodedParser = express.urlencoded({ extended: false });
     app.disable("x-powered-by");
+    app.set("trust proxy", 1);
     app.use((req, _res, next) => {
         logHttpDebug("request.received", getRequestDebugDetails(req));
         next();

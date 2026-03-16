@@ -171,10 +171,14 @@ function normalizeOrigin(origin: string) {
   return new URL(origin).origin;
 }
 
-function isOriginAllowed(req: Pick<Request, "headers">, allowedOrigins: Set<string>) {
+function isOriginAllowed(req: Pick<Request, "headers" | "path" | "url">, allowedOrigins: Set<string>) {
   const originHeader = getFirstHeaderValue(req.headers.origin);
 
   if (!originHeader) {
+    return true;
+  }
+
+  if (originHeader === "null" && getRequestPath(req) === "/authorize/consent") {
     return true;
   }
 
@@ -427,6 +431,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const urlencodedParser = express.urlencoded({ extended: false });
 
   app.disable("x-powered-by");
+  app.set("trust proxy", 1);
 
   app.use((req, _res, next) => {
     logHttpDebug("request.received", getRequestDebugDetails(req));
