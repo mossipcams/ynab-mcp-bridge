@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.1...ynab-mcp-bridge-v0.6.2) (2026-03-16)
+
+
+### Bug Fixes
+
+* harden oauth popup consent flow ([#49](https://github.com/mossipcams/ynab-mcp-bridge/issues/49)) ([554ba13](https://github.com/mossipcams/ynab-mcp-bridge/commit/554ba130784cea2893907cf19a5cfc9af078275d))
+
 ## [0.6.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.0...ynab-mcp-bridge-v0.6.1) (2026-03-16)
 
 
