@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.5.0...ynab-mcp-bridge-v0.6.0) (2026-03-16)
+
+
+### Features
+
+* add AI-friendly finance summary tools ([#45](https://github.com/mossipcams/ynab-mcp-bridge/issues/45)) ([baaa1a8](https://github.com/mossipcams/ynab-mcp-bridge/commit/baaa1a84df7ed4fed7a46ef7dc7e58bfb7f26abe))
+* simplify oauth bridge setup ([#44](https://github.com/mossipcams/ynab-mcp-bridge/issues/44)) ([56b7e64](https://github.com/mossipcams/ynab-mcp-bridge/commit/56b7e6447ad9d839dbef62c2eff7e08a9ffbbee9))
+
 ## [0.5.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.4.0...ynab-mcp-bridge-v0.5.0) (2026-03-14)
 
 
