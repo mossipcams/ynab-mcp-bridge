@@ -9,6 +9,7 @@ import { startHttpServer } from "./httpServer.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
+  createGenericOAuthAuth,
   createCodeChallenge,
   registerOAuthClient,
   startAuthorization,
@@ -1263,7 +1264,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      auth: createGenericOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1290,7 +1291,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      auth: createGenericOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1336,7 +1337,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({
+      auth: createGenericOAuthAuth({
         jwksUrl,
         scopes: ["openid"],
       }),
@@ -1373,7 +1374,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      auth: createGenericOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1428,7 +1429,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      auth: createGenericOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1485,7 +1486,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      auth: createGenericOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1513,7 +1514,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      auth: createGenericOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1536,7 +1537,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      auth: createGenericOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1569,7 +1570,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      auth: createGenericOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -2167,10 +2168,12 @@ describe("startHttpServer", () => {
 
   it("rejects upstream OAuth bearer tokens passed directly on protected MCP tool calls", async () => {
     const { jwksUrl, privateKey } = await startJwksServer();
-    const token = await createOAuthTestToken(privateKey);
+    const token = await createOAuthTestToken(privateKey, {
+      iss: "https://id.example.com",
+    });
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({
+      auth: createGenericOAuthAuth({
         jwksUrl,
         scopes: ["openid"],
       }),
@@ -2240,7 +2243,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({
+      auth: createGenericOAuthAuth({
         jwksUrl,
       }),
       allowedOrigins: ["https://claude.ai"],
@@ -2275,12 +2278,14 @@ describe("startHttpServer", () => {
     ))).toBe(false);
   });
 
-  it("accepts Cloudflare Access JWT assertion headers when authorization is absent", async () => {
+  it("rejects Cloudflare Access JWT assertion headers on protected MCP tool calls", async () => {
     const { jwksUrl, privateKey } = await startJwksServer();
-    const token = await createOAuthTestToken(privateKey);
+    const token = await createOAuthTestToken(privateKey, {
+      iss: "https://id.example.com",
+    });
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({
+      auth: createGenericOAuthAuth({
         jwksUrl,
         scopes: ["openid"],
       }),
@@ -2302,22 +2307,16 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/list",
-        params: {},
+        method: "tools/call",
+        params: {
+          arguments: {},
+          name: "ynab_get_user",
+        },
       }),
     });
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      jsonrpc: "2.0",
-      result: {
-        tools: expect.arrayContaining([
-          expect.objectContaining({
-            name: "ynab_list_plans",
-          }),
-        ]),
-      },
-    });
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
   });
 
   it("logs oauth auth failures for protected tool calls without leaking token material", async () => {
@@ -2325,7 +2324,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createCloudflareOAuthAuth({
+      auth: createGenericOAuthAuth({
         jwksUrl,
         scopes: ["openid"],
       }),

@@ -297,15 +297,19 @@ export function createOAuthCore({ config, dependencies, store }) {
             scopes: grant.scopes,
             subject: grant.subject,
         });
-        const refreshToken = dependencies.createId();
-        store.saveGrant({
-            ...grant,
-            authorizationCode: undefined,
-            refreshToken: {
-                expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
-                token: refreshToken,
-            },
-        });
+        const refreshToken = grant.upstreamTokens.refresh_token
+            ? dependencies.createId()
+            : undefined;
+        if (refreshToken) {
+            store.saveGrant({
+                ...grant,
+                authorizationCode: undefined,
+                refreshToken: {
+                    expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
+                    token: refreshToken,
+                },
+            });
+        }
         return {
             access_token: accessToken,
             expires_in: expiresInSeconds,
@@ -330,7 +334,11 @@ export function createOAuthCore({ config, dependencies, store }) {
         if (resource?.href && resource.href !== grant.resource) {
             throw new InvalidGrantError("resource does not match the refresh token.");
         }
-        const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(grant.upstreamTokens?.refresh_token ?? "");
+        const upstreamRefreshToken = grant.upstreamTokens?.refresh_token;
+        if (!upstreamRefreshToken) {
+            throw new InvalidGrantError("Refresh token is missing upstream refresh context.");
+        }
+        const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(upstreamRefreshToken);
         const nextUpstreamTokens = {
             ...grant.upstreamTokens,
             ...refreshedUpstreamTokens,
