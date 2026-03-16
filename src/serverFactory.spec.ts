@@ -18,7 +18,7 @@ describe("createServer", () => {
     });
     const registeredTools = Object.keys((server as any)._registeredTools);
 
-    expect(registeredTools).toHaveLength(29);
+    expect(registeredTools).toHaveLength(39);
     expect(registeredTools).toEqual(
       expect.arrayContaining([
         "ynab_get_mcp_version",
@@ -50,6 +50,16 @@ describe("createServer", () => {
         "ynab_get_money_movements_by_month",
         "ynab_get_money_movement_groups",
         "ynab_get_money_movement_groups_by_month",
+        "ynab_get_financial_snapshot",
+        "ynab_get_spending_summary",
+        "ynab_get_cash_flow_summary",
+        "ynab_get_budget_health_summary",
+        "ynab_get_upcoming_obligations",
+        "ynab_get_goal_progress_summary",
+        "ynab_get_budget_cleanup_summary",
+        "ynab_get_income_summary",
+        "ynab_get_category_trend_summary",
+        "ynab_get_70_20_10_summary",
       ]),
     );
   });
@@ -64,7 +74,7 @@ describe("createServer", () => {
       {} as any,
     );
 
-    expect(registeredToolNames).toHaveLength(29);
+    expect(registeredToolNames).toHaveLength(39);
     expect(registeredToolNames).toEqual([
       "ynab_get_mcp_version",
       "ynab_get_user",
@@ -95,8 +105,18 @@ describe("createServer", () => {
       "ynab_get_money_movements_by_month",
       "ynab_get_money_movement_groups",
       "ynab_get_money_movement_groups_by_month",
+      "ynab_get_financial_snapshot",
+      "ynab_get_spending_summary",
+      "ynab_get_cash_flow_summary",
+      "ynab_get_budget_health_summary",
+      "ynab_get_upcoming_obligations",
+      "ynab_get_goal_progress_summary",
+      "ynab_get_budget_cleanup_summary",
+      "ynab_get_income_summary",
+      "ynab_get_category_trend_summary",
+      "ynab_get_70_20_10_summary",
     ]);
-    expect(registerTool).toHaveBeenCalledTimes(29);
+    expect(registerTool).toHaveBeenCalledTimes(39);
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_mcp_version",
       expect.objectContaining({
@@ -107,9 +127,9 @@ describe("createServer", () => {
       expect.any(Function),
     );
     expect(registerTool).toHaveBeenCalledWith(
-      "ynab_get_money_movement_groups_by_month",
+      "ynab_get_70_20_10_summary",
       expect.objectContaining({
-        title: "Get Money Movement Groups By Month",
+        title: "Get 70/20/10 Summary",
       }),
       expect.any(Function),
     );

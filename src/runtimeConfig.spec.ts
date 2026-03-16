@@ -261,7 +261,6 @@ describe("resolveRuntimeConfig", () => {
       },
     });
   });
-
   it("throws for invalid ports", () => {
     expect(() => resolveRuntimeConfig(["--port", "abc"], {})).toThrow(
       "Invalid port: abc",

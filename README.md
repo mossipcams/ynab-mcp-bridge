@@ -78,6 +78,16 @@ The server exposes a read-only plan-based toolset:
 * `ynab_get_money_movements_by_month`
 * `ynab_get_money_movement_groups`
 * `ynab_get_money_movement_groups_by_month`
+* `ynab_get_financial_snapshot`
+* `ynab_get_spending_summary`
+* `ynab_get_cash_flow_summary`
+* `ynab_get_budget_health_summary`
+* `ynab_get_upcoming_obligations`
+* `ynab_get_goal_progress_summary`
+* `ynab_get_budget_cleanup_summary`
+* `ynab_get_income_summary`
+* `ynab_get_category_trend_summary`
+* `ynab_get_70_20_10_summary`
 
 ## Rate Limiting
 
@@ -137,6 +147,11 @@ MCP_OAUTH_TOKEN_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc
 MCP_OAUTH_JWKS_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks \
 MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
 MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
+MCP_OAUTH_AUDIENCE=https://mcp.example.com/mcp \
+MCP_OAUTH_STORE_PATH=/var/lib/ynab-mcp-bridge/oauth-store.json \
+MCP_OAUTH_TOKEN_SIGNING_SECRET=replace-with-a-long-random-secret \
+MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
+MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
 MCP_OAUTH_SCOPES=openid,profile \
 npm run start:http
 ```
@@ -189,6 +204,15 @@ node dist/index.js \
   --deployment-mode oauth-single-tenant \
   --public-url https://mcp.example.com/mcp \
   --oauth-cloudflare-domain example.cloudflareaccess.com \
+  --oauth-client-id cloudflare-access-client-id \
+  --oauth-client-secret cloudflare-access-client-secret \
+  --oauth-issuer https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123 \
+  --oauth-authorization-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization \
+  --oauth-token-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token \
+  --oauth-jwks-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks \
+  --oauth-audience https://mcp.example.com/mcp \
+  --oauth-store-path /var/lib/ynab-mcp-bridge/oauth-store.json \
+  --oauth-token-signing-secret replace-with-a-long-random-secret \
   --oauth-client-id cloudflare-access-client-id \
   --oauth-client-secret cloudflare-access-client-secret \
   --oauth-scopes openid,profile
