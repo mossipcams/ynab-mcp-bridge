@@ -14,6 +14,16 @@ import { createYnabApi } from "./ynabApi.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
 const OAUTH_HTTP_ALLOWED_METHODS = ["DELETE", "GET", "POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
+function getPathBasedMetadataAliases(path) {
+    if (path === "/") {
+        return ["/.well-known/openid-configuration"];
+    }
+    return [
+        `/.well-known/oauth-authorization-server${path}`,
+        `/.well-known/openid-configuration${path}`,
+        `${path}/.well-known/openid-configuration`,
+    ];
+}
 function applyCloudflareAccessAuthorizationHeader(req) {
     const existingAuthorization = getFirstHeaderValue(req.headers.authorization);
     if (existingAuthorization) {
@@ -309,11 +319,7 @@ export async function startHttpServer(options) {
         allowedOrigins.add(new URL(auth.publicUrl).origin);
     }
     const app = express();
-    const jsonParser = express.json({
-        // Some browser-hosted MCP clients send valid JSON-RPC discovery bodies
-        // before they attach the usual application/json content type.
-        type: () => true,
-    });
+    const jsonParser = express.json();
     const urlencodedParser = express.urlencoded({ extended: false });
     app.disable("x-powered-by");
     app.set("trust proxy", 1);
@@ -367,11 +373,17 @@ export async function startHttpServer(options) {
             provider: oauthBroker.provider,
             scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
         });
+        const metadataAliasPaths = new Set([
+            "/.well-known/openid-configuration",
+            ...getPathBasedMetadataAliases(path),
+        ]);
         app.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
         app.post(CONSENT_PATH, urlencodedParser, oauthBroker.handleConsent);
-        app.get("/.well-known/openid-configuration", (_req, res) => {
-            res.status(200).json(oauthMetadata);
-        });
+        for (const metadataPath of metadataAliasPaths) {
+            app.get(metadataPath, (_req, res) => {
+                res.status(200).json(oauthMetadata);
+            });
+        }
         app.use(mcpAuthRouter({
             baseUrl: oauthBroker.getIssuerUrl(),
             issuerUrl: oauthBroker.getIssuerUrl(),
@@ -395,13 +407,7 @@ export async function startHttpServer(options) {
             if (auth.mode === "oauth") {
                 applyCloudflareAccessAuthorizationHeader(req);
             }
-            jsonParser(req, res, (error) => {
-                if (!error && getFirstHeaderValue(req.headers["content-type"]) === undefined) {
-                    req.headers["content-type"] = "application/json";
-                    req.rawHeaders.push("Content-Type", "application/json");
-                }
-                next(error);
-            });
+            jsonParser(req, res, next);
             return;
         }
         next();
