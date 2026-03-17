@@ -7,6 +7,7 @@ import { startHttpServer } from "./httpServer.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
+  createGenericOAuthAuth,
   createCodeChallenge,
   registerOAuthClient,
   startAuthorization,
@@ -62,6 +63,60 @@ describe("oauth broker persistence", () => {
       ynab,
       auth: createCloudflareOAuthAuth({
         ...upstream,
+        storePath,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const secondAuthorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+
+    expect(secondAuthorizeResponse.status).toBe(302);
+    expect(secondAuthorizeResponse.headers.get("location")).toContain("/authorize");
+  });
+
+  it("persists approved clients across restart when provider metadata is discovered from the issuer", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
+    const storePath = path.join(tempDir, "oauth-store.json");
+    cleanups.push(async () => {
+      await rm(tempDir, { force: true, recursive: true });
+    });
+
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    let httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({
+        issuer: upstream.issuer,
+        metadataMode: "discovery",
+        storePath,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const firstAuthorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    expect(firstAuthorizeResponse.status).toBe(200);
+
+    const approveResponse = await approveAuthorizationConsent(httpServer.url, await firstAuthorizeResponse.text());
+    expect(approveResponse.status).toBe(302);
+
+    await httpServer.close();
+    cleanups.pop();
+
+    httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({
+        issuer: upstream.issuer,
+        metadataMode: "discovery",
         storePath,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),

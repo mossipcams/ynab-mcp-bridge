@@ -116,11 +116,10 @@ export function registerServerTools(registrar, api, options = {
     authMode: "none",
 }) {
     const registeredToolNames = [];
-    for (const { title, module } of toolRegistrations) {
+    for (const { module } of toolRegistrations) {
         const metadata = buildToolMetadata(module.name, options);
         registrar.registerTool(module.name, {
             ...metadata,
-            title,
             description: module.description,
             inputSchema: module.inputSchema,
         }, async (input) => module.execute(input, api));

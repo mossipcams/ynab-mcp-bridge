@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { createOAuthCore } from "./oauthCore.js";
 import type { OAuthGrant } from "./oauthGrant.js";
+import type { ProviderAuthorizationResponse } from "./providerClient.js";
 
 describe("createOAuthCore", () => {
   function createStore() {
@@ -65,7 +66,9 @@ describe("createOAuthCore", () => {
   }
 
   function createCore(overrides: {
-    exchangeUpstreamAuthorizationCode?: (code: string) => Promise<OAuthTokens>;
+    exchangeUpstreamAuthorizationResponse?: (
+      response: Extract<ProviderAuthorizationResponse, { type: "success" }>,
+    ) => Promise<OAuthTokens>;
     exchangeUpstreamRefreshToken?: (refreshToken: string) => Promise<OAuthTokens>;
   } = {}) {
     const store = createStore();
@@ -96,8 +99,8 @@ describe("createOAuthCore", () => {
           url.searchParams.set("scope", pending.scopes.join(" "));
           return url.href;
         },
-        exchangeUpstreamAuthorizationCode: overrides.exchangeUpstreamAuthorizationCode ?? (async (code) => {
-          upstreamCodeExchanges.push(code);
+        exchangeUpstreamAuthorizationResponse: overrides.exchangeUpstreamAuthorizationResponse ?? (async (response) => {
+          upstreamCodeExchanges.push(response.currentUrl.searchParams.get("code") ?? "");
           return {
             access_token: "upstream-access-token",
             expires_in: 1800,
@@ -229,7 +232,8 @@ describe("createOAuthCore", () => {
 
     const upstreamState = new URL(approvalResult.location).searchParams.get("state");
     const callbackResult = await core.handleCallback({
-      code: "upstream-code-123",
+      currentUrl: new URL(`https://mcp.example.com/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`),
+      type: "success",
       upstreamState: upstreamState!,
     });
 
@@ -339,7 +343,8 @@ describe("createOAuthCore", () => {
 
     const upstreamState = new URL(approvalResult.location).searchParams.get("state");
     const callbackResult = await core.handleCallback({
-      code: "upstream-code-123",
+      currentUrl: new URL(`https://mcp.example.com/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`),
+      type: "success",
       upstreamState: upstreamState!,
     });
 
@@ -393,8 +398,8 @@ describe("createOAuthCore", () => {
 
   it("does not mint a local refresh token when the upstream provider does not issue one", async () => {
     const { core, mintedAccessTokens, store, upstreamCodeExchanges } = createCore({
-      exchangeUpstreamAuthorizationCode: async (code) => {
-        upstreamCodeExchanges.push(code);
+      exchangeUpstreamAuthorizationResponse: async (response) => {
+        upstreamCodeExchanges.push(response.currentUrl.searchParams.get("code") ?? "");
         return {
           access_token: "upstream-access-token",
           expires_in: 1800,
@@ -429,7 +434,8 @@ describe("createOAuthCore", () => {
 
     const upstreamState = new URL(approvalResult.location).searchParams.get("state");
     const callbackResult = await core.handleCallback({
-      code: "upstream-code-123",
+      currentUrl: new URL(`https://mcp.example.com/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`),
+      type: "success",
       upstreamState: upstreamState!,
     });
 
@@ -533,9 +539,211 @@ describe("createOAuthCore", () => {
     expect(denialUrl.searchParams.get("state")).toBe("client-state");
 
     await expect(core.handleCallback({
-      code: "upstream-code-123",
+      currentUrl: new URL("https://mcp.example.com/oauth/callback?code=upstream-code-123&state=missing-state"),
+      type: "success",
       upstreamState: "missing-state",
     })).rejects.toThrow(InvalidRequestError);
+  });
+
+  it("redirects upstream callback errors back to the client", async () => {
+    const { core } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    const approvalResult = await core.approveConsent(consentResult.consentChallenge, "approve");
+
+    if (approvalResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const upstreamState = new URL(approvalResult.location).searchParams.get("state");
+    const callbackResult = await core.handleCallback({
+      error: "access_denied",
+      errorDescription: "Upstream denied access.",
+      type: "error",
+      upstreamState: upstreamState!,
+    });
+
+    expect(callbackResult).toMatchObject({
+      type: "redirect",
+    });
+    if (callbackResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const callbackUrl = new URL(callbackResult.location);
+    expect(callbackUrl.searchParams.get("error")).toBe("access_denied");
+    expect(callbackUrl.searchParams.get("error_description")).toBe("Upstream denied access.");
+    expect(callbackUrl.searchParams.get("state")).toBe("client-state");
+  });
+
+  it("rejects expired authorization codes and expired refresh tokens", async () => {
+    const { core, store } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+
+    store.saveGrant({
+      authorizationCode: {
+        code: "expired-code",
+        expiresAt: 1_700_000_000_000 - 1,
+      },
+      clientId: client.client_id,
+      codeChallenge: "pkce-challenge",
+      grantId: "expired-code-grant",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid"],
+      subject: client.client_id,
+      upstreamTokens: {
+        access_token: "upstream-access-token",
+        expires_in: 1800,
+        refresh_token: "upstream-refresh-token",
+        token_type: "Bearer",
+      },
+    });
+
+    store.saveGrant({
+      clientId: client.client_id,
+      codeChallenge: "pkce-challenge",
+      grantId: "expired-refresh-grant",
+      redirectUri: "https://claude.ai/oauth/callback",
+      refreshToken: {
+        expiresAt: 1_700_000_000_000 - 1,
+        token: "expired-refresh-token",
+      },
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid"],
+      subject: client.client_id,
+      upstreamTokens: {
+        access_token: "upstream-access-token",
+        expires_in: 1800,
+        refresh_token: "upstream-refresh-token",
+        token_type: "Bearer",
+      },
+    });
+
+    await expect(core.exchangeAuthorizationCode(
+      client,
+      "expired-code",
+      "https://claude.ai/oauth/callback",
+      new URL("https://mcp.example.com/mcp"),
+    )).rejects.toThrow("Authorization code has expired.");
+
+    await expect(core.exchangeRefreshToken(
+      client,
+      "expired-refresh-token",
+      ["openid"],
+      new URL("https://mcp.example.com/mcp"),
+    )).rejects.toThrow("Refresh token has expired.");
+  });
+
+  it("serializes concurrent refresh attempts so only one exchange succeeds", async () => {
+    let refreshCallCount = 0;
+    let resolveRefresh: ((tokens: OAuthTokens) => void) | undefined;
+    const refreshGate = new Promise<OAuthTokens>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const { core } = createCore({
+      exchangeUpstreamRefreshToken: async () => {
+        refreshCallCount += 1;
+        return await refreshGate;
+      },
+    });
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    const approvalResult = await core.approveConsent(consentResult.consentChallenge, "approve");
+
+    if (approvalResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const upstreamState = new URL(approvalResult.location).searchParams.get("state");
+    const callbackResult = await core.handleCallback({
+      currentUrl: new URL(`https://mcp.example.com/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`),
+      type: "success",
+      upstreamState: upstreamState!,
+    });
+
+    if (callbackResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const authorizationCode = new URL(callbackResult.location).searchParams.get("code");
+    const initialTokens = await core.exchangeAuthorizationCode(
+      client,
+      authorizationCode!,
+      "https://claude.ai/oauth/callback",
+      new URL("https://mcp.example.com/mcp"),
+    );
+
+    const firstRefresh = core.exchangeRefreshToken(
+      client,
+      initialTokens.refresh_token!,
+      ["openid"],
+      new URL("https://mcp.example.com/mcp"),
+    );
+    const secondRefresh = core.exchangeRefreshToken(
+      client,
+      initialTokens.refresh_token!,
+      ["openid"],
+      new URL("https://mcp.example.com/mcp"),
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(refreshCallCount).toBe(1);
+
+    resolveRefresh?.({
+      access_token: "upstream-refreshed-access-token",
+      expires_in: 1200,
+      refresh_token: "upstream-refresh-token-rotated",
+      token_type: "Bearer",
+    });
+
+    await expect(firstRefresh).resolves.toMatchObject({
+      access_token: "local-access-token-2",
+      refresh_token: "generated-6",
+    });
+    await expect(secondRefresh).rejects.toThrow("Unknown refresh token.");
   });
 
   it("still rejects duplicate denied consent submissions", async () => {

@@ -20,6 +20,7 @@ export function createCloudflareOAuthAuth(overrides = {}) {
         deployment: "oauth-single-tenant",
         issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
         jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+        metadataMode: "explicit",
         mode: "oauth",
         publicUrl: DEFAULT_RESOURCE,
         scopes: ["openid", "profile"],
@@ -37,6 +38,7 @@ export function createGenericOAuthAuth(overrides = {}) {
         deployment: "oauth-single-tenant",
         issuer: "https://id.example.com",
         jwksUrl: "https://id.example.com/.well-known/jwks.json",
+        metadataMode: "explicit",
         mode: "oauth",
         publicUrl: DEFAULT_RESOURCE,
         scopes: ["openid", "profile"],
@@ -44,7 +46,7 @@ export function createGenericOAuthAuth(overrides = {}) {
         ...overrides,
     };
 }
-export async function startUpstreamOAuthServer(cleanups) {
+export async function startUpstreamOAuthServer(cleanups, options = {}) {
     let lastTokenRequest;
     const server = createNodeHttpServer((req, res) => {
         const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -56,6 +58,17 @@ export async function startUpstreamOAuthServer(cleanups) {
         if (requestUrl.pathname === "/jwks") {
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify({ keys: [] }));
+            return;
+        }
+        if (requestUrl.pathname === "/.well-known/openid-configuration") {
+            res.statusCode = options.discoveryStatus ?? 200;
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify(options.discoveryDocument?.(origin) ?? {
+                authorization_endpoint: `${origin}/authorize`,
+                issuer: origin,
+                jwks_uri: `${origin}/jwks`,
+                token_endpoint: `${origin}/token`,
+            }));
             return;
         }
         if (requestUrl.pathname === "/token" && req.method === "POST") {

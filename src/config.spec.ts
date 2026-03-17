@@ -90,12 +90,87 @@ describe("config", () => {
       deployment: "oauth-single-tenant",
       issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
       jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      metadataMode: "explicit",
       mode: "oauth",
       publicUrl: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile", "email"],
       storePath: "/tmp/ynab-mcp-oauth-store.json",
       tokenSigningSecret: "test-signing-secret",
       tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+    });
+  });
+
+  it("reads OAuth discovery runtime settings from environment", () => {
+    const config = resolveAppConfig(
+      [],
+      {
+        MCP_AUTH_MODE: "oauth",
+        MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+        MCP_OAUTH_CLIENT_ID: "oauth-client-id",
+        MCP_OAUTH_CLIENT_SECRET: "oauth-client-secret",
+        MCP_OAUTH_DISCOVERY: "true",
+        MCP_OAUTH_ISSUER: "https://id.example.com",
+        MCP_OAUTH_SCOPES: "openid,profile,email",
+        MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+        MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+        MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+        YNAB_API_TOKEN: "token-1",
+      },
+    );
+
+    expect(config.runtime.auth).toEqual({
+      audience: "https://mcp.example.com",
+      callbackPath: "/oauth/callback",
+      clientId: "oauth-client-id",
+      clientSecret: "oauth-client-secret",
+      deployment: "oauth-single-tenant",
+      issuer: "https://id.example.com",
+      metadataMode: "discovery",
+      mode: "oauth",
+      publicUrl: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile", "email"],
+      storePath: "/tmp/ynab-mcp-oauth-store.json",
+      tokenSigningSecret: "test-signing-secret",
+    });
+  });
+
+  it("reads OAuth discovery settings with explicit fallback metadata from environment", () => {
+    const config = resolveAppConfig(
+      [],
+      {
+        MCP_AUTH_MODE: "oauth",
+        MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+        MCP_OAUTH_AUTHORIZATION_URL: "https://fallback.example.com/oauth/authorize",
+        MCP_OAUTH_CLIENT_ID: "oauth-client-id",
+        MCP_OAUTH_CLIENT_SECRET: "oauth-client-secret",
+        MCP_OAUTH_DISCOVERY: "true",
+        MCP_OAUTH_ISSUER: "https://id.example.com",
+        MCP_OAUTH_JWKS_URL: "https://fallback.example.com/.well-known/jwks.json",
+        MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+        MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+        MCP_OAUTH_TOKEN_URL: "https://fallback.example.com/oauth/token",
+        MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+        YNAB_API_TOKEN: "token-1",
+      },
+    );
+
+    expect(config.runtime.auth).toEqual({
+      audience: "https://mcp.example.com",
+      authorizationUrl: "https://fallback.example.com/oauth/authorize",
+      callbackPath: "/oauth/callback",
+      clientId: "oauth-client-id",
+      clientSecret: "oauth-client-secret",
+      deployment: "oauth-single-tenant",
+      fallbackToExplicit: true,
+      issuer: "https://id.example.com",
+      jwksUrl: "https://fallback.example.com/.well-known/jwks.json",
+      metadataMode: "discovery",
+      mode: "oauth",
+      publicUrl: "https://mcp.example.com/mcp",
+      scopes: [],
+      storePath: "/tmp/ynab-mcp-oauth-store.json",
+      tokenSigningSecret: "test-signing-secret",
+      tokenUrl: "https://fallback.example.com/oauth/token",
     });
   });
 
@@ -142,7 +217,21 @@ describe("config", () => {
       MCP_AUTH_MODE: "oauth",
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
       YNAB_API_TOKEN: "token-1",
-    })).toThrow("OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, and MCP_OAUTH_TOKEN_SIGNING_SECRET.");
+    })).toThrow("OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, MCP_OAUTH_TOKEN_SIGNING_SECRET, and either MCP_OAUTH_DISCOVERY=true or the explicit MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, and MCP_OAUTH_JWKS_URL settings.");
+  });
+
+  it("fails fast when discovery is enabled without an issuer", () => {
+    expect(() => resolveAppConfig([], {
+      MCP_AUTH_MODE: "oauth",
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_CLIENT_ID: "oauth-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "oauth-client-secret",
+      MCP_OAUTH_DISCOVERY: "true",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+      YNAB_API_TOKEN: "token-1",
+    })).toThrow("OAuth discovery mode requires MCP_OAUTH_ISSUER.");
   });
 
   it("accepts explicit deployment profiles and keeps MCP_AUTH_MODE as a compatibility shim", () => {
@@ -187,7 +276,7 @@ describe("config", () => {
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
       YNAB_API_TOKEN: "token-1",
     })).toThrow(
-      "OAuth deployment requires MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, and either MCP_OAUTH_CLOUDFLARE_DOMAIN or the explicit MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, and MCP_OAUTH_JWKS_URL settings. The callback URL to register upstream is https://mcp.example.com/oauth/callback.",
+      "OAuth deployment requires MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, and either MCP_OAUTH_DISCOVERY=true with MCP_OAUTH_ISSUER, MCP_OAUTH_CLOUDFLARE_DOMAIN, or the explicit MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, and MCP_OAUTH_JWKS_URL settings. The callback URL to register upstream is https://mcp.example.com/oauth/callback.",
     );
   });
 
