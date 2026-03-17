@@ -6,7 +6,7 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 export const name = "ynab_get_transactions_by_account";
 export const description = "Gets transactions for a single account.";
 export const inputSchema = {
-  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
+  planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
   accountId: z.string().describe("The account ID to filter by."),
 };
 

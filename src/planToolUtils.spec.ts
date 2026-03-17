@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
-import { getPlanId, resolvePlanId } from "./tools/planToolUtils.js";
+import { getPlanId, resolvePlanId, toErrorResult, toTextResult } from "./tools/planToolUtils.js";
 
 describe("planToolUtils", () => {
   it("prefers the explicit planId input", () => {
@@ -127,5 +127,33 @@ describe("planToolUtils", () => {
     await expect(resolvePlanId(undefined, api)).rejects.toThrow(
       "No plan ID provided. Please provide a plan ID, set YNAB_PLAN_ID, or configure a default YNAB plan.",
     );
+  });
+
+  it("serializes tool payloads without pretty-print whitespace", () => {
+    expect(toTextResult({
+      plan: {
+        id: "plan-1",
+        name: "Home",
+      },
+    })).toEqual({
+      content: [{
+        type: "text",
+        text: "{\"plan\":{\"id\":\"plan-1\",\"name\":\"Home\"}}",
+      }],
+    });
+  });
+
+  it("returns compact parseable error payloads", () => {
+    const result = toErrorResult(new Error("Plan not found"));
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{
+      type: "text",
+      text: "{\"success\":false,\"error\":\"Plan not found\"}",
+    }]);
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      success: false,
+      error: "Plan not found",
+    });
   });
 });

@@ -6,7 +6,7 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 export const name = "ynab_list_categories";
 export const description = "Lists category groups and categories for a single YNAB plan.";
 export const inputSchema = {
-  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
+  planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
 };
 
 export async function execute(input: { planId?: string }, api: ynab.API) {
