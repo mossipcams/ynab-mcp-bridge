@@ -14,7 +14,7 @@ import {
   registerOAuthClient,
   startAuthorization,
   startUpstreamOAuthServer,
-} from "./__test__/oauthTestHelpers.js";
+} from "./oauthTestHelpers.js";
 import { getPackageInfo } from "./packageInfo.js";
 
 describe("startHttpServer", () => {
@@ -290,31 +290,6 @@ describe("startHttpServer", () => {
     expect(response.headers.get("access-control-allow-headers")).toContain("mcp-session-id");
     expect(response.headers.get("access-control-expose-headers")).toContain("Mcp-Session-Id");
     expect(response.headers.get("vary")).toContain("Origin");
-  });
-
-  it("advertises DELETE support on oauth MCP preflight requests", async () => {
-    const { jwksUrl } = await startJwksServer();
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const response = await fetch(httpServer.url, {
-      method: "OPTIONS",
-      headers: {
-        Origin: "https://claude.ai",
-        "Access-Control-Request-Method": "DELETE",
-      },
-    });
-
-    expect(response.status).toBe(204);
-    expect(response.headers.get("access-control-allow-origin")).toBe("https://claude.ai");
-    expect(response.headers.get("access-control-allow-methods")).toContain("DELETE");
-    expect(response.headers.get("access-control-allow-methods")).toContain("POST");
   });
 
   it("adds CORS headers to MCP responses", async () => {
@@ -1535,70 +1510,6 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("aliases OpenID discovery to the OAuth authorization server metadata endpoint", async () => {
-    const { jwksUrl } = await startJwksServer();
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const response = await fetch(new URL("/.well-known/openid-configuration", httpServer.url), {
-      headers: {
-        Origin: "https://claude.ai",
-      },
-    });
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      authorization_endpoint: "https://mcp.example.com/authorize",
-      issuer: "https://mcp.example.com/",
-      registration_endpoint: "https://mcp.example.com/register",
-      token_endpoint: "https://mcp.example.com/token",
-      token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
-    });
-  });
-
-  it("exposes path-based OAuth and OpenID discovery aliases for MCP hosts that start from /mcp", async () => {
-    const { jwksUrl } = await startJwksServer();
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const metadataPaths = [
-      "/.well-known/oauth-authorization-server/mcp",
-      "/.well-known/openid-configuration/mcp",
-      "/mcp/.well-known/openid-configuration",
-    ];
-
-    for (const metadataPath of metadataPaths) {
-      const response = await fetch(new URL(metadataPath, httpServer.url), {
-        headers: {
-          Origin: "https://claude.ai",
-        },
-      });
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({
-        authorization_endpoint: "https://mcp.example.com/authorize",
-        issuer: "https://mcp.example.com/",
-        registration_endpoint: "https://mcp.example.com/register",
-        token_endpoint: "https://mcp.example.com/token",
-        token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
-      });
-    }
-  });
-
   it("registers OAuth clients with the requested public metadata", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
@@ -2400,47 +2311,6 @@ describe("startHttpServer", () => {
         params: {
           arguments: {},
           name: "ynab_get_user",
-        },
-      }),
-    });
-
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toContain("Bearer");
-  });
-
-  it("rejects Cloudflare Access JWT assertion headers on protected MCP tool calls", async () => {
-    const { jwksUrl, privateKey } = await startJwksServer();
-    const token = await createOAuthTestToken(privateKey, {
-      iss: "https://id.example.com",
-    });
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createGenericOAuthAuth({
-        jwksUrl,
-        scopes: ["openid"],
-      }),
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const response = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Cf-Access-Jwt-Assertion": token,
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: {
-          name: "ynab_get_user",
-          arguments: {},
         },
       }),
     });

@@ -1,9 +1,12 @@
 import type { Response } from "express";
 
-const CORS_ALLOWED_HEADERS = "content-type, mcp-session-id, mcp-protocol-version, authorization";
-const CORS_EXPOSE_HEADERS = "Mcp-Session-Id";
+const CORS_HEADERS = {
+  "access-control-allow-headers": "content-type, mcp-session-id, mcp-protocol-version, authorization",
+  "access-control-allow-methods": "OPTIONS, POST",
+  "access-control-expose-headers": "Mcp-Session-Id",
+} as const;
 
-export function getFirstHeaderValue(value: string | string[] | undefined) {
+function getFirstHeaderValue(value: string | string[] | undefined) {
   if (typeof value === "string") {
     return value.split(",")[0]?.trim();
   }
@@ -23,7 +26,7 @@ function parseHostName(host: string | undefined) {
   }
 }
 
-export function isLoopbackHostname(hostname: string | undefined) {
+function isLoopbackHostname(hostname: string | undefined) {
   return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
 }
 
@@ -91,14 +94,10 @@ export function resolveOriginPolicy(input: {
   };
 }
 
-export function applyCorsHeaders(
-  res: Response,
-  responseOrigin: string | undefined,
-  allowedMethods: readonly string[] = ["OPTIONS", "POST"],
-) {
-  res.setHeader("access-control-allow-headers", CORS_ALLOWED_HEADERS);
-  res.setHeader("access-control-allow-methods", allowedMethods.join(", "));
-  res.setHeader("access-control-expose-headers", CORS_EXPOSE_HEADERS);
+export function applyCorsHeaders(res: Response, responseOrigin: string | undefined) {
+  for (const [name, value] of Object.entries(CORS_HEADERS)) {
+    res.setHeader(name, value);
+  }
 
   if (!responseOrigin) {
     return;

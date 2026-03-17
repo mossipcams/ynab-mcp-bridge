@@ -40,9 +40,9 @@ Set these environment variables before starting the server:
 
 HTTP mode validates the `Origin` header when one is present. Loopback origins are allowed automatically for loopback hosts, but remote/browser deployments should set `MCP_ALLOWED_ORIGINS` explicitly, for example `https://claude.ai`.
 The default HTTP transport is stateless: clients should use `POST /mcp` requests directly and should not rely on returned `Mcp-Session-Id` headers, session-scoped `GET` streams, or `DELETE` session teardown.
-In OAuth deployment modes the server acts as the MCP authorization server for clients such as Claude Web. It exposes local `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`, and `/.well-known/oauth-protected-resource/mcp` endpoints, requires an MCP-side consent step before redirecting upstream, brokers the upstream authorization-code and refresh-token exchanges, and enforces broker-issued bearer tokens on protected `POST /mcp` tool calls. If Cloudflare Access injects `Cf-Access-Jwt-Assertion`, the server only bridges that header for public/discovery MCP requests as an explicit compatibility mode; protected tool calls still require broker-issued bearer tokens.
+In OAuth deployment modes the server acts as the MCP authorization server for clients such as Claude Web. It exposes local `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`, and `/.well-known/oauth-protected-resource/mcp` endpoints, requires an MCP-side consent step before redirecting upstream, brokers the upstream authorization-code and refresh-token exchanges, and enforces broker-issued bearer tokens on `POST /mcp` tool calls.
 
-Current OAuth deployments are single-instance and effectively sticky-session only. OAuth SSE sessions live in process memory, and the JSON OAuth store is a single-writer local file, so do not put the current broker flow behind a load balancer or multi-replica deployment unless requests are pinned to one instance and storage is shared safely.
+Current OAuth deployments are single-instance and effectively sticky-session only. The JSON OAuth store is a single-writer local file, so do not put the current broker flow behind a load balancer or multi-replica deployment unless requests are pinned to one instance and storage is shared safely.
 
 If `YNAB_PLAN_ID` is not set, the bridge automatically resolves YNAB's `default_plan` when one exists or the only available plan when there is exactly one. If a configured plan becomes stale, the bridge retries once with a fresh plan resolution.
 OAuth here protects access to a shared backend YNAB token configured through `YNAB_API_TOKEN`; it does not yet perform per-user YNAB OAuth delegation.
@@ -150,6 +150,8 @@ MCP_OAUTH_TOKEN_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc
 MCP_OAUTH_JWKS_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks \
 MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
 MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
+MCP_OAUTH_AUDIENCE=https://mcp.example.com/mcp \
+MCP_OAUTH_STORE_PATH=/var/lib/ynab-mcp-bridge/oauth-store.json \
 MCP_OAUTH_TOKEN_SIGNING_SECRET=replace-with-a-long-random-secret \
 MCP_OAUTH_SCOPES=openid,profile \
 npm run start:http
@@ -206,6 +208,12 @@ node dist/index.js \
   --oauth-cloudflare-domain example.cloudflareaccess.com \
   --oauth-client-id cloudflare-access-client-id \
   --oauth-client-secret cloudflare-access-client-secret \
+  --oauth-issuer https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123 \
+  --oauth-authorization-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization \
+  --oauth-token-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token \
+  --oauth-jwks-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks \
+  --oauth-audience https://mcp.example.com/mcp \
+  --oauth-store-path /var/lib/ynab-mcp-bridge/oauth-store.json \
   --oauth-token-signing-secret replace-with-a-long-random-secret \
   --oauth-scopes openid,profile
 ```
