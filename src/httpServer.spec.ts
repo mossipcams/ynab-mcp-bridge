@@ -1515,6 +1515,97 @@ describe("startHttpServer", () => {
     });
   });
 
+  it("exposes OpenID discovery metadata when oauth mode is enabled", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/openid-configuration", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      authorization_endpoint: "https://mcp.example.com/authorize",
+      grant_types_supported: expect.arrayContaining(["authorization_code", "refresh_token"]),
+      issuer: "https://mcp.example.com/",
+      jwks_uri: "https://mcp.example.com/.well-known/jwks.json",
+      registration_endpoint: "https://mcp.example.com/register",
+      response_types_supported: ["code"],
+      subject_types_supported: ["public"],
+      token_endpoint: "https://mcp.example.com/token",
+      token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
+    });
+  });
+
+  it("supports ChatGPT-style OAuth metadata probes for both root and MCP-path discovery shapes", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai", "https://chatgpt.com"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const protectedResourceResponses = await Promise.all([
+      fetch(new URL("/.well-known/oauth-protected-resource", httpServer.url)),
+      fetch(new URL("/.well-known/oauth-protected-resource/mcp", httpServer.url)),
+      fetch(new URL("/mcp/.well-known/oauth-protected-resource", httpServer.url)),
+    ]);
+
+    for (const response of protectedResourceResponses) {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        authorization_servers: ["https://mcp.example.com/"],
+        resource: "https://mcp.example.com/mcp",
+      });
+    }
+
+    const oauthMetadataResponses = await Promise.all([
+      fetch(new URL("/.well-known/oauth-authorization-server", httpServer.url)),
+      fetch(new URL("/.well-known/oauth-authorization-server/mcp", httpServer.url)),
+      fetch(new URL("/mcp/.well-known/oauth-authorization-server", httpServer.url)),
+    ]);
+
+    for (const response of oauthMetadataResponses) {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        authorization_endpoint: "https://mcp.example.com/authorize",
+        issuer: "https://mcp.example.com/",
+        registration_endpoint: "https://mcp.example.com/register",
+        token_endpoint: "https://mcp.example.com/token",
+      });
+    }
+
+    const openIdResponses = await Promise.all([
+      fetch(new URL("/.well-known/openid-configuration", httpServer.url)),
+      fetch(new URL("/.well-known/openid-configuration/mcp", httpServer.url)),
+      fetch(new URL("/mcp/.well-known/openid-configuration", httpServer.url)),
+    ]);
+
+    for (const response of openIdResponses) {
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        authorization_endpoint: "https://mcp.example.com/authorize",
+        issuer: "https://mcp.example.com/",
+        jwks_uri: "https://mcp.example.com/.well-known/jwks.json",
+        token_endpoint: "https://mcp.example.com/token",
+      });
+    }
+  });
+
   it("registers OAuth clients with the requested public metadata", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({

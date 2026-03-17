@@ -9,9 +9,11 @@ import {
   localhostHostValidation,
 } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import {
+  createOAuthMetadata,
   getOAuthProtectedResourceMetadataUrl,
   mcpAuthRouter,
 } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -204,6 +206,66 @@ function logHttpDebug(event: string, details: HttpDebugDetails) {
 
 function getPublicResourceServerUrl(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
   return new URL(auth.publicUrl);
+}
+
+function getIssuerBaseUrl(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
+  return new URL(new URL(auth.publicUrl).origin);
+}
+
+function getResourcePathAliases(pathname: string) {
+  if (pathname === "/") {
+    return [];
+  }
+
+  const normalizedPath = pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  return [normalizedPath];
+}
+
+function getProtectedResourceMetadata(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
+  return {
+    authorization_servers: [getIssuerBaseUrl(auth).href],
+    resource: getPublicResourceServerUrl(auth).href,
+    resource_name: "YNAB MCP Bridge",
+    scopes_supported: auth.scopes.length > 0 ? auth.scopes : undefined,
+  };
+}
+
+function getMetadataRouteAliases(prefix: string, pathname: string) {
+  const aliases = new Set<string>([`/.well-known/${prefix}`]);
+
+  for (const resourcePath of getResourcePathAliases(pathname)) {
+    aliases.add(`/.well-known/${prefix}${resourcePath}`);
+    aliases.add(`${resourcePath}/.well-known/${prefix}`);
+  }
+
+  return Array.from(aliases);
+}
+
+function getOpenIdConfiguration(
+  auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>,
+  provider: OAuthServerProvider,
+) {
+  const issuerUrl = getIssuerBaseUrl(auth);
+  const oauthMetadata = createOAuthMetadata({
+    issuerUrl,
+    provider,
+    scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
+  });
+
+  return {
+    authorization_endpoint: oauthMetadata.authorization_endpoint,
+    code_challenge_methods_supported: oauthMetadata.code_challenge_methods_supported,
+    grant_types_supported: oauthMetadata.grant_types_supported,
+    id_token_signing_alg_values_supported: ["HS256"],
+    issuer: oauthMetadata.issuer,
+    jwks_uri: new URL("/.well-known/jwks.json", issuerUrl).href,
+    registration_endpoint: oauthMetadata.registration_endpoint,
+    response_types_supported: oauthMetadata.response_types_supported,
+    scopes_supported: oauthMetadata.scopes_supported,
+    subject_types_supported: ["public"],
+    token_endpoint: oauthMetadata.token_endpoint,
+    token_endpoint_auth_methods_supported: oauthMetadata.token_endpoint_auth_methods_supported,
+  };
 }
 
 function getSessionId(req: Pick<Request, "headers">) {
@@ -595,7 +657,31 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   if (auth.mode === "oauth") {
     const publicServerUrl = getPublicResourceServerUrl(auth);
+    const oauthMetadata = createOAuthMetadata({
+      issuerUrl: getIssuerBaseUrl(auth),
+      provider: oauthBroker!.provider,
+      scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
+    });
+    const protectedResourceMetadata = getProtectedResourceMetadata(auth);
 
+    app.get("/.well-known/jwks.json", (_req, res) => {
+      writeJson(res, 200, { keys: [] });
+    });
+    for (const route of getMetadataRouteAliases("openid-configuration", publicServerUrl.pathname)) {
+      app.get(route, (_req, res) => {
+        writeJson(res, 200, getOpenIdConfiguration(auth, oauthBroker!.provider));
+      });
+    }
+    for (const route of getMetadataRouteAliases("oauth-authorization-server", publicServerUrl.pathname)) {
+      app.get(route, (_req, res) => {
+        writeJson(res, 200, oauthMetadata);
+      });
+    }
+    for (const route of getMetadataRouteAliases("oauth-protected-resource", publicServerUrl.pathname)) {
+      app.get(route, (_req, res) => {
+        writeJson(res, 200, protectedResourceMetadata);
+      });
+    }
     app.use(oauthBroker!.callbackPath, oauthBroker!.handleCallback);
     app.post("/authorize/consent", urlencodedParser, oauthBroker!.handleConsent);
     app.use(mcpAuthRouter({
