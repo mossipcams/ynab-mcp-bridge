@@ -1460,6 +1460,30 @@ describe("startHttpServer", () => {
     expect(response.headers["content-type"]).toContain("application/json");
   });
 
+  it("does not challenge empty post-token MCP probes in oauth mode", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "*/*",
+        "Content-Type": "application/octet-stream",
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.statusCode).not.toBe(401);
+  });
+
   it("allows unauthenticated public tool calls in oauth mode while still challenging protected tools", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
