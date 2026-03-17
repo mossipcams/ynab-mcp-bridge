@@ -23,6 +23,7 @@ describe("plan read tools", () => {
           data: {
             plans: [
               { id: "plan-1", name: "Home", last_modified_on: "2026-03-01" },
+              { id: "plan-2", name: "Work", last_modified_on: "2026-03-02" },
             ],
             default_plan: { id: "plan-1", name: "Home" },
           },
@@ -30,18 +31,21 @@ describe("plan read tools", () => {
       },
     };
 
-    const result = await ListPlansTool.execute({}, api as any);
+    const result = await ListPlansTool.execute({ limit: 1 }, api as any);
 
     expect(api.plans.getPlans).toHaveBeenCalledOnce();
     expect(parseResponseText(result)).toEqual({
       plans: [
         { id: "plan-1", name: "Home", last_modified_on: "2026-03-01" },
       ],
+      returned_count: 1,
+      total_count: 2,
+      has_more: true,
       default_plan: { id: "plan-1", name: "Home" },
     });
   });
 
-  it("gets a single plan by id", async () => {
+  it("gets a single plan summary by id", async () => {
     const api = {
       plans: {
         getPlanById: vi.fn().mockResolvedValue({
@@ -49,6 +53,7 @@ describe("plan read tools", () => {
             plan: {
               id: "plan-1",
               name: "Home",
+              last_modified_on: "2026-03-10",
               accounts: [],
               category_groups: [],
             },
@@ -64,8 +69,50 @@ describe("plan read tools", () => {
       plan: {
         id: "plan-1",
         name: "Home",
-        accounts: [],
-        category_groups: [],
+        last_modified_on: "2026-03-10",
+      },
+    });
+  });
+
+  it("includes nested plan sections when explicitly requested", async () => {
+    const api = {
+      plans: {
+        getPlanById: vi.fn().mockResolvedValue({
+          data: {
+            plan: {
+              id: "plan-1",
+              name: "Home",
+              accounts: [
+                { id: "acct-1", name: "Checking" },
+              ],
+              category_groups: [
+                { id: "group-1", name: "Bills" },
+              ],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetPlanDetailsTool.execute(
+      {
+        planId: "plan-1",
+        includeAccounts: true,
+        includeCategoryGroups: true,
+      },
+      api as any,
+    );
+
+    expect(parseResponseText(result)).toEqual({
+      plan: {
+        id: "plan-1",
+        name: "Home",
+        accounts: [
+          { id: "acct-1", name: "Checking" },
+        ],
+        category_groups: [
+          { id: "group-1", name: "Bills" },
+        ],
       },
     });
   });
@@ -284,7 +331,9 @@ describe("plan read tools", () => {
           to_be_budgeted: 60000,
         },
       ],
-      month_count: 1,
+      returned_count: 1,
+      total_count: 1,
+      has_more: false,
     });
   });
 });
