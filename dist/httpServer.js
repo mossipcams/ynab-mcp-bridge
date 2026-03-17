@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
-import { decodeJwt } from "jose";
 import { hostHeaderValidation, localhostHostValidation, } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
-import { createOAuthBroker } from "./oauthBroker.js";
-import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
+import { assertYnabConfig, } from "./config.js";
+import { createOAuthBroker, CONSENT_PATH } from "./oauthBroker.js";
+import { isDirectUpstreamBearerToken } from "./oauthJwt.js";
+import { applyCorsHeaders, getFirstHeaderValue, isLoopbackHostname, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { createServer, isPublicToolName } from "./server.js";
 import { createYnabApi } from "./ynabApi.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
@@ -33,37 +33,6 @@ function getRequestPath(req) {
         return "/";
     }
     return new URL(req.url, "http://127.0.0.1").pathname;
-}
-function getFirstHeaderValue(value) {
-    if (typeof value === "string") {
-        return value.split(",")[0]?.trim();
-    }
-    return value?.[0]?.split(",")[0]?.trim();
-}
-function getBearerToken(authorizationHeader) {
-    if (!authorizationHeader?.startsWith("Bearer ")) {
-        return undefined;
-    }
-    return authorizationHeader.slice("Bearer ".length).trim();
-}
-function isDirectUpstreamBearerToken(req, auth) {
-    const authorizationSource = getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]);
-    if (authorizationSource === "cf-access-jwt-assertion") {
-        return false;
-    }
-    const token = getBearerToken(getFirstHeaderValue(req.headers.authorization));
-    if (!token) {
-        return false;
-    }
-    try {
-        return decodeJwt(token).iss === auth.issuer;
-    }
-    catch {
-        return false;
-    }
-}
-function isLoopbackHostname(hostname) {
-    return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
 }
 function writeJson(res, statusCode, body) {
     res.status(statusCode);
@@ -338,14 +307,6 @@ export async function startHttpServer(options) {
     if (auth.mode === "oauth") {
         allowedOrigins.add(new URL(auth.publicUrl).origin);
     }
-    if (auth.mode === "oauth") {
-        validateCloudflareAccessOAuthSettings({
-            authorizationUrl: auth.authorizationUrl,
-            issuer: auth.issuer,
-            jwksUrl: auth.jwksUrl,
-            tokenUrl: auth.tokenUrl,
-        });
-    }
     const app = express();
     const jsonParser = express.json();
     const urlencodedParser = express.urlencoded({ extended: false });
@@ -396,7 +357,7 @@ export async function startHttpServer(options) {
     if (auth.mode === "oauth") {
         const publicServerUrl = getPublicResourceServerUrl(auth);
         app.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
-        app.post("/authorize/consent", urlencodedParser, oauthBroker.handleConsent);
+        app.post(CONSENT_PATH, urlencodedParser, oauthBroker.handleConsent);
         app.use(mcpAuthRouter({
             baseUrl: oauthBroker.getIssuerUrl(),
             issuerUrl: oauthBroker.getIssuerUrl(),
@@ -441,7 +402,6 @@ export async function startHttpServer(options) {
                 next();
                 return;
             }
-            applyCloudflareAccessAuthorizationHeader(req);
             if (getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]) === "cf-access-jwt-assertion") {
                 delete req.headers.authorization;
             }

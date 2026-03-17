@@ -424,7 +424,7 @@ describe("createOAuthCore", () => {
     const approvalResult = await core.approveConsent(consentResult.consentChallenge, "approve");
 
     if (approvalResult.type !== "redirect") {
-      throw new Error("Expected redirect result");
+      throw new Error("Expected upstream redirect");
     }
 
     const upstreamState = new URL(approvalResult.location).searchParams.get("state");
@@ -437,10 +437,10 @@ describe("createOAuthCore", () => {
       throw new Error("Expected redirect result");
     }
 
-    const authorizationCode = new URL(callbackResult.location).searchParams.get("code");
+    const localAuthorizationCode = new URL(callbackResult.location).searchParams.get("code");
     const tokenResult = await core.exchangeAuthorizationCode(
       client,
-      authorizationCode!,
+      localAuthorizationCode!,
       "https://claude.ai/oauth/callback",
       new URL("https://mcp.example.com/mcp"),
     );

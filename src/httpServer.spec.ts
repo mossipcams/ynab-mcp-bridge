@@ -14,7 +14,7 @@ import {
   registerOAuthClient,
   startAuthorization,
   startUpstreamOAuthServer,
-} from "./oauthTestHelpers.js";
+} from "./__test__/oauthTestHelpers.js";
 import { getPackageInfo } from "./packageInfo.js";
 
 describe("startHttpServer", () => {
@@ -2311,6 +2311,47 @@ describe("startHttpServer", () => {
         params: {
           arguments: {},
           name: "ynab_get_user",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+  });
+
+  it("rejects Cloudflare Access JWT assertion headers on protected MCP tool calls", async () => {
+    const { jwksUrl, privateKey } = await startJwksServer();
+    const token = await createOAuthTestToken(privateKey, {
+      iss: "https://id.example.com",
+    });
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({
+        jwksUrl,
+        scopes: ["openid"],
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Cf-Access-Jwt-Assertion": token,
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_user",
+          arguments: {},
         },
       }),
     });
