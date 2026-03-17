@@ -1,7 +1,7 @@
 import express from "express";
 import { decodeJwt } from "jose";
 import { hostHeaderValidation, localhostHostValidation, } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
-import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { createOAuthMetadata, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
@@ -106,6 +106,25 @@ function logHttpDebug(event, details) {
 }
 function getPublicResourceServerUrl(auth) {
     return new URL(auth.publicUrl);
+}
+function getOpenIdConfiguration(auth, oauthBroker) {
+    const oauthMetadata = createOAuthMetadata({
+        issuerUrl: oauthBroker.getIssuerUrl(),
+        provider: oauthBroker.provider,
+        scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
+    });
+    return {
+        authorization_endpoint: oauthMetadata.authorization_endpoint,
+        code_challenge_methods_supported: oauthMetadata.code_challenge_methods_supported,
+        grant_types_supported: oauthMetadata.grant_types_supported,
+        issuer: oauthMetadata.issuer,
+        registration_endpoint: oauthMetadata.registration_endpoint,
+        response_types_supported: oauthMetadata.response_types_supported,
+        scopes_supported: oauthMetadata.scopes_supported,
+        subject_types_supported: ["public"],
+        token_endpoint: oauthMetadata.token_endpoint,
+        token_endpoint_auth_methods_supported: oauthMetadata.token_endpoint_auth_methods_supported,
+    };
 }
 function getSessionId(req) {
     const sessionId = req.headers["mcp-session-id"];
@@ -247,6 +266,7 @@ export async function startHttpServer(options) {
     const jsonParser = express.json();
     const urlencodedParser = express.urlencoded({ extended: false });
     app.disable("x-powered-by");
+    app.set("trust proxy", 1);
     app.use((req, _res, next) => {
         logHttpDebug("request.received", getRequestDebugDetails(req));
         next();
@@ -292,6 +312,9 @@ export async function startHttpServer(options) {
         const publicServerUrl = getPublicResourceServerUrl(auth);
         app.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
         app.post("/authorize/consent", urlencodedParser, oauthBroker.handleConsent);
+        app.get("/.well-known/openid-configuration", (_req, res) => {
+            writeJson(res, 200, getOpenIdConfiguration(auth, oauthBroker));
+        });
         app.use(mcpAuthRouter({
             baseUrl: oauthBroker.getIssuerUrl(),
             issuerUrl: oauthBroker.getIssuerUrl(),
