@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
-import { getPlanId, resolvePlanId, toErrorResult, toTextResult } from "./tools/planToolUtils.js";
+import {
+  buildCompactListPayload,
+  compactResultItem,
+  getPlanId,
+  resolvePlanId,
+  toErrorResult,
+  toTextResult,
+} from "./tools/planToolUtils.js";
 
 describe("planToolUtils", () => {
   it("prefers the explicit planId input", () => {
@@ -154,6 +161,43 @@ describe("planToolUtils", () => {
     expect(JSON.parse(result.content[0].text)).toEqual({
       success: false,
       error: "Plan not found",
+    });
+  });
+
+  it("removes empty and default fields from compact result items", () => {
+    expect(compactResultItem({
+      id: "tx-1",
+      memo: null,
+      approved: true,
+      cleared: "uncleared",
+      flag_name: "",
+      transfer_account_id: undefined,
+      amount: "12.34",
+    }, {
+      emptyStringKeys: ["flag_name"],
+      omitWhenEqual: {
+        approved: true,
+        cleared: "uncleared",
+      },
+    })).toEqual({
+      id: "tx-1",
+      amount: "12.34",
+    });
+  });
+
+  it("builds compact bounded list payloads with pagination metadata", () => {
+    expect(buildCompactListPayload("transactions", [
+      { id: "tx-1", amount: "10.00" },
+      { id: "tx-2", amount: "20.00" },
+      { id: "tx-3", amount: "30.00" },
+    ], 2)).toEqual({
+      transactions: [
+        { id: "tx-1", amount: "10.00" },
+        { id: "tx-2", amount: "20.00" },
+      ],
+      returned_count: 2,
+      total_count: 3,
+      has_more: true,
     });
   });
 });

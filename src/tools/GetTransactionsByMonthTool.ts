@@ -1,16 +1,28 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import {
+  buildCompactListPayload,
+  normalizeListLimit,
+  projectTransaction,
+  toErrorResult,
+  toTextResult,
+  withResolvedPlan,
+} from "./planToolUtils.js";
 
 export const name = "ynab_get_transactions_by_month";
 export const description = "Gets transactions for a single plan month.";
 export const inputSchema = {
   planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
   month: z.string().describe("Month as YYYY-MM-DD."),
+  limit: z.number().int().min(1).max(200).optional().describe("Max transactions to return."),
+  includeFullDetails: z.boolean().optional().describe("Include extra transaction fields."),
 };
 
-export async function execute(input: { planId?: string; month: string }, api: ynab.API) {
+export async function execute(
+  input: { planId?: string; month: string; limit?: number; includeFullDetails?: boolean },
+  api: ynab.API,
+) {
   try {
     const response = await withResolvedPlan(input.planId, api, async (planId) => api.transactions.getTransactionsByMonth(
       planId,
@@ -20,21 +32,13 @@ export async function execute(input: { planId?: string; month: string }, api: yn
       undefined,
     ));
 
-    return toTextResult({
-      transactions: response.data.transactions
-        .filter((transaction) => !transaction.deleted)
-        .map((transaction) => ({
-          id: transaction.id,
-          date: transaction.date,
-          amount: (transaction.amount / 1000).toFixed(2),
-          payee_name: transaction.payee_name,
-          category_name: transaction.category_name,
-          account_name: transaction.account_name,
-          approved: transaction.approved,
-          cleared: transaction.cleared,
-        })),
-      transaction_count: response.data.transactions.filter((transaction) => !transaction.deleted).length,
-    });
+    const transactions = response.data.transactions
+      .filter((transaction) => !transaction.deleted)
+      .map((transaction) => projectTransaction(transaction, {
+        includeFullDetails: input.includeFullDetails,
+      }));
+
+    return toTextResult(buildCompactListPayload("transactions", transactions, normalizeListLimit(input.limit)));
   } catch (error) {
     return toErrorResult(error);
   }
