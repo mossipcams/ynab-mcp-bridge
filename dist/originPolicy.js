@@ -39,12 +39,6 @@ export function resolveOriginPolicy(input) {
             responseOrigin: undefined,
         };
     }
-    if (originHeader === "null" && input.path === "/authorize/consent") {
-        return {
-            allowed: true,
-            responseOrigin: undefined,
-        };
-    }
     try {
         const normalizedOrigin = normalizeOrigin(originHeader);
         if (input.allowedOrigins.has(normalizedOrigin)) {

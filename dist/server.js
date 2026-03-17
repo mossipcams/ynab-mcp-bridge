@@ -87,39 +87,10 @@ export const toolRegistrations = [
     { title: "Get Category Trend Summary", module: GetCategoryTrendSummaryTool },
     { title: "Get 70/20/10 Summary", module: GetBudgetRatioSummaryTool },
 ];
-const PUBLIC_OAUTH_TOOL_NAMES = new Set([
-    GetMcpVersionTool.name,
-]);
-function buildToolMetadata(toolName, options) {
-    const securitySchemes = (options.authMode === "oauth" && !PUBLIC_OAUTH_TOOL_NAMES.has(toolName))
-        ? [{
-                scopes: options.oauthScopes && options.oauthScopes.length > 0 ? options.oauthScopes : undefined,
-                type: "oauth2",
-            }]
-        : [{
-                type: "noauth",
-            }];
-    return {
-        _meta: {
-            securitySchemes,
-        },
-        annotations: {
-            openWorldHint: false,
-            readOnlyHint: true,
-        },
-    };
-}
-export function isPublicToolName(toolName) {
-    return PUBLIC_OAUTH_TOOL_NAMES.has(toolName);
-}
-export function registerServerTools(registrar, api, options = {
-    authMode: "none",
-}) {
+export function registerServerTools(registrar, api) {
     const registeredToolNames = [];
     for (const { title, module } of toolRegistrations) {
-        const metadata = buildToolMetadata(module.name, options);
         registrar.registerTool(module.name, {
-            ...metadata,
             title,
             description: module.description,
             inputSchema: module.inputSchema,
@@ -128,13 +99,10 @@ export function registerServerTools(registrar, api, options = {
     }
     return registeredToolNames;
 }
-export function createServer(config, api = createYnabApi(config), options = {}) {
+export function createServer(config, api = createYnabApi(config)) {
     const normalizedConfig = assertYnabConfig(config);
     const server = new McpServer(SERVER_INFO);
     const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
-    registerServerTools(server, configuredApi, {
-        authMode: options.auth?.mode ?? "none",
-        oauthScopes: options.auth?.mode === "oauth" ? options.auth.scopes : undefined,
-    });
+    registerServerTools(server, configuredApi);
     return server;
 }

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import path from "node:path";
+import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
 
 import { readYnabConfig, resolveAppConfig } from "./config.js";
@@ -118,25 +121,6 @@ describe("config", () => {
     );
   });
 
-  it("fails fast when Cloudflare OAuth endpoints are combined with a non-Cloudflare jwks url", () => {
-    expect(() => resolveAppConfig([], {
-      MCP_AUTH_MODE: "oauth",
-      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
-      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
-      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
-      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
-      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
-      MCP_OAUTH_JWKS_URL: "https://keys.example.com/jwks.json",
-      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
-      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
-      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
-      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
-      YNAB_API_TOKEN: "token-1",
-    })).toThrow(
-      "Cloudflare Access OAuth settings must use the per-application OIDC SaaS endpoints under /cdn-cgi/access/sso/oidc/<client-id> for issuer, authorization, token, and jwks URLs.",
-    );
-  });
-
   it("fails fast when oauth mode is missing required settings", () => {
     expect(() => resolveAppConfig([], {
       MCP_AUTH_MODE: "oauth",
@@ -168,17 +152,34 @@ describe("config", () => {
     });
   });
 
-  it("requires an explicit token signing secret for a small remote deployment config", () => {
-    expect(() => resolveAppConfig([], {
+  it("derives Cloudflare OAuth endpoints and local defaults from a small remote deployment config", () => {
+    const config = resolveAppConfig([], {
       MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
       MCP_OAUTH_CLIENT_ID: "client-123",
       MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
       MCP_OAUTH_CLOUDFLARE_DOMAIN: "example.cloudflareaccess.com",
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
       YNAB_API_TOKEN: "token-1",
-    })).toThrow(
-      "OAuth deployment requires MCP_OAUTH_TOKEN_SIGNING_SECRET so broker-issued tokens remain stable across restarts and upstream credential rotation. The callback URL to register upstream is https://mcp.example.com/oauth/callback.",
-    );
+    });
+
+    expect(config.runtime.auth).toEqual({
+      audience: "https://mcp.example.com/mcp",
+      authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      callbackPath: "/oauth/callback",
+      clientId: "client-123",
+      clientSecret: "cloudflare-client-secret",
+      deployment: "oauth-single-tenant",
+      issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      mode: "oauth",
+      publicUrl: "https://mcp.example.com/mcp",
+      scopes: [],
+      storePath: path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json"),
+      tokenSigningSecret: createHash("sha256")
+        .update("cloudflare-client-secret\nhttps://mcp.example.com/mcp\nclient-123")
+        .digest("base64url"),
+      tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+    });
   });
 
   it("fails with an actionable setup message when oauth deployment settings are incomplete", () => {

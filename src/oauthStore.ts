@@ -126,7 +126,6 @@ function parseGrantRecord(value: unknown): OAuthGrant | undefined {
     clientName: grant.clientName,
     codeChallenge: grant.codeChallenge,
     consent: grant.consent,
-    consentApprovalReplay: grant.consentApprovalReplay,
     grantId: grant.grantId,
     pendingAuthorization: grant.pendingAuthorization,
     redirectUri: grant.redirectUri,
@@ -546,17 +545,11 @@ export function createOAuthStore(storePath: string | undefined) {
       return findGrant((candidate) => candidate.pendingAuthorization?.stateId === stateId);
     },
     getPendingConsent(consentId: string) {
-      const grant = findGrant((candidate) => (
-        candidate.consent?.challenge === consentId ||
-        candidate.consentApprovalReplay?.challenge === consentId
-      ));
+      const grant = findGrant((candidate) => candidate.consent?.challenge === consentId);
       return grant ? toPendingConsentRecord(grant) : undefined;
     },
     getPendingConsentGrant(consentId: string) {
-      return findGrant((candidate) => (
-        candidate.consent?.challenge === consentId ||
-        candidate.consentApprovalReplay?.challenge === consentId
-      ));
+      return findGrant((candidate) => candidate.consent?.challenge === consentId);
     },
     getRefreshToken(refreshToken: string) {
       const grant = findGrant((candidate) => candidate.refreshToken?.token === refreshToken);

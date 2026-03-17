@@ -14,7 +14,6 @@ describe("originPolicy", () => {
         host: "mcp.example.com",
         origin: "https://claude.ai",
       },
-      path: "/mcp",
     });
 
     expect(resolution).toEqual({
@@ -30,7 +29,6 @@ describe("originPolicy", () => {
         host: "127.0.0.1:3000",
         origin: "http://localhost:5173",
       },
-      path: "/mcp",
     });
 
     expect(resolution).toEqual({
@@ -45,23 +43,6 @@ describe("originPolicy", () => {
       headers: {
         host: "mcp.example.com",
       },
-      path: "/mcp",
-    });
-
-    expect(resolution).toEqual({
-      allowed: true,
-      responseOrigin: undefined,
-    });
-  });
-
-  it("allows null origins only for oauth consent posts", () => {
-    const resolution = resolveOriginPolicy({
-      allowedOrigins: new Set(["https://claude.ai"]),
-      headers: {
-        host: "mcp.example.com",
-        origin: "null",
-      },
-      path: "/authorize/consent",
     });
 
     expect(resolution).toEqual({
@@ -77,39 +58,6 @@ describe("originPolicy", () => {
         host: "mcp.example.com",
         origin: "https://evil.example",
       },
-      path: "/mcp",
-    });
-
-    expect(resolution).toEqual({
-      allowed: false,
-      responseOrigin: undefined,
-    });
-  });
-
-  it("allows null origins for oauth consent posts", () => {
-    const resolution = resolveOriginPolicy({
-      allowedOrigins: new Set(["https://claude.ai"]),
-      headers: {
-        host: "mcp.example.com",
-        origin: "null",
-      },
-      path: "/authorize/consent",
-    });
-
-    expect(resolution).toEqual({
-      allowed: true,
-      responseOrigin: undefined,
-    });
-  });
-
-  it("still rejects null origins for non-oauth routes", () => {
-    const resolution = resolveOriginPolicy({
-      allowedOrigins: new Set(["https://claude.ai"]),
-      headers: {
-        host: "mcp.example.com",
-        origin: "null",
-      },
-      path: "/mcp",
     });
 
     expect(resolution).toEqual({

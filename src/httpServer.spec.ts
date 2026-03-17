@@ -9,18 +9,15 @@ import { startHttpServer } from "./httpServer.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
-  createGenericOAuthAuth,
   createCodeChallenge,
   registerOAuthClient,
   startAuthorization,
   startUpstreamOAuthServer,
 } from "./oauthTestHelpers.js";
-import { getPackageInfo } from "./packageInfo.js";
 
 describe("startHttpServer", () => {
   const cleanups: Array<() => Promise<void>> = [];
   const originalEnv = process.env;
-  const packageInfo = getPackageInfo();
   const ynab = {
     apiToken: "test-token",
   } as const;
@@ -1264,7 +1261,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1291,7 +1288,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1333,11 +1330,11 @@ describe("startHttpServer", () => {
     );
   });
 
-  it("returns a bearer challenge with resource metadata for protected MCP tool calls in oauth mode", async () => {
+  it("returns a bearer challenge with resource metadata when oauth mode is enabled", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({
+      auth: createCloudflareOAuthAuth({
         jwksUrl,
         scopes: ["openid"],
       }),
@@ -1358,11 +1355,8 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/call",
-        params: {
-          name: "ynab_get_user",
-          arguments: {},
-        },
+        method: "tools/list",
+        params: {},
       }),
     });
 
@@ -1370,123 +1364,11 @@ describe("startHttpServer", () => {
     expect(response.headers.get("www-authenticate")).toContain("resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"");
   });
 
-  it("allows unauthenticated tools/list in oauth mode and exposes per-tool security metadata", async () => {
-    const { jwksUrl } = await startJwksServer();
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const response = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    expect(response.status).toBe(200);
-    const payload = await response.json() as {
-      result: {
-        tools: Array<{
-          _meta?: {
-            securitySchemes?: Array<{ scopes?: string[]; type: string }>;
-          };
-          name: string;
-        }>;
-      };
-    };
-    const versionTool = payload.result.tools.find((tool) => tool.name === "ynab_get_mcp_version");
-    const userTool = payload.result.tools.find((tool) => tool.name === "ynab_get_user");
-
-    expect(versionTool?._meta?.securitySchemes).toEqual([
-      {
-        type: "noauth",
-      },
-    ]);
-    expect(userTool?._meta?.securitySchemes).toEqual([
-      {
-        scopes: ["openid", "profile"],
-        type: "oauth2",
-      },
-    ]);
-  });
-
-  it("allows unauthenticated public tool calls in oauth mode while still challenging protected tools", async () => {
-    const { jwksUrl } = await startJwksServer();
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const publicResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: {
-          name: "ynab_get_mcp_version",
-          arguments: {},
-        },
-      }),
-    });
-
-    expect(publicResponse.status).toBe(200);
-    await expect(publicResponse.text()).resolves.toContain(packageInfo.version);
-
-    const protectedResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: {
-          name: "ynab_get_user",
-          arguments: {},
-        },
-      }),
-    });
-
-    expect(protectedResponse.status).toBe(401);
-    expect(protectedResponse.headers.get("www-authenticate")).toContain("Bearer");
-  });
-
   it("exposes OAuth authorization server metadata when oauth mode is enabled", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1514,7 +1396,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1537,7 +1419,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1570,7 +1452,7 @@ describe("startHttpServer", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -1678,76 +1560,6 @@ describe("startHttpServer", () => {
     expect(redirectUrl.searchParams.get("state")).toBeTruthy();
   });
 
-  it("accepts oauth consent posts from null origins used by popup auth flows", async () => {
-    const upstream = await startUpstreamOAuthServer(cleanups);
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createCloudflareOAuthAuth({
-        authorizationUrl: upstream.authorizationUrl,
-        issuer: upstream.issuer,
-        jwksUrl: upstream.jwksUrl,
-        tokenUrl: upstream.tokenUrl,
-      }),
-      allowedOrigins: ["https://claude.ai", "https://chatgpt.com"],
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const registration = await registerOAuthClient(httpServer.url);
-    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
-
-    expect(authorizeResponse.status).toBe(200);
-
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-
-    expect(consentResponse.status).toBe(302);
-    expect(consentResponse.headers.get("location")).toContain("/authorize");
-  });
-
-  it("treats consent submits without a button action as approval", async () => {
-    const upstream = await startUpstreamOAuthServer(cleanups);
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createCloudflareOAuthAuth({
-        authorizationUrl: upstream.authorizationUrl,
-        issuer: upstream.issuer,
-        jwksUrl: upstream.jwksUrl,
-        tokenUrl: upstream.tokenUrl,
-      }),
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const registration = await registerOAuthClient(httpServer.url);
-    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
-    const consentBody = await authorizeResponse.text();
-    const challengeMatch = consentBody.match(/name="consent_challenge" value="([^"]+)"/);
-
-    expect(authorizeResponse.status).toBe(200);
-    expect(challengeMatch?.[1]).toBeTruthy();
-
-    const consentResponse = await fetch(new URL("/authorize/consent", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Origin: "https://claude.ai",
-      },
-      body: new URLSearchParams({
-        consent_challenge: challengeMatch![1],
-      }),
-      redirect: "manual",
-    });
-
-    expect(consentResponse.status).toBe(302);
-    expect(consentResponse.headers.get("location")).toContain("/authorize");
-  });
   it("escapes client metadata and sends hardened headers on the consent page", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
@@ -1789,49 +1601,11 @@ describe("startHttpServer", () => {
     expect(authorizeResponse.status).toBe(200);
     expect(consentBody).toContain("&lt;img src=x onerror=alert(&#39;boom&#39;)&gt;");
     expect(consentBody).not.toContain("<img src=x onerror=alert('boom')>");
-    expect(consentBody).toContain("After you approve, this window may take a moment to continue.");
-    expect(consentBody).toContain("Continuing...");
-    expect(consentBody).toContain("approveButton.disabled = true");
-    expect(consentBody).toContain("denyButton.disabled = true");
     expect(authorizeResponse.headers.get("content-security-policy")).toContain("default-src 'none'");
-    expect(authorizeResponse.headers.get("content-security-policy")).toContain("connect-src 'self'");
-    expect(authorizeResponse.headers.get("content-security-policy")).toContain(
-      `form-action 'self' https://claude.ai ${new URL(upstream.authorizationUrl).origin}`,
-    );
-    expect(authorizeResponse.headers.get("content-security-policy")).toContain("script-src 'nonce-");
+    expect(authorizeResponse.headers.get("content-security-policy")).toContain("form-action 'self'");
     expect(authorizeResponse.headers.get("x-content-type-options")).toBe("nosniff");
     expect(authorizeResponse.headers.get("referrer-policy")).toBe("no-referrer");
     expect(authorizeResponse.headers.get("cache-control")).toContain("no-store");
-  });
-
-  it("accepts oauth consent posts from null origins used by popup auth flows", async () => {
-    const upstream = await startUpstreamOAuthServer(cleanups);
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createCloudflareOAuthAuth({
-        authorizationUrl: upstream.authorizationUrl,
-        issuer: upstream.issuer,
-        jwksUrl: upstream.jwksUrl,
-        tokenUrl: upstream.tokenUrl,
-      }),
-      allowedOrigins: ["https://claude.ai", "https://chatgpt.com"],
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const registration = await registerOAuthClient(httpServer.url);
-    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
-
-    expect(authorizeResponse.status).toBe(200);
-
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-
-    expect(consentResponse.status).toBe(302);
-    expect(consentResponse.headers.get("location")).toContain("/authorize");
   });
 
   it("exchanges upstream callback codes and redirects back to the registered client", async () => {
@@ -1965,106 +1739,6 @@ describe("startHttpServer", () => {
     expect(mcpResponse.status).toBe(200);
   });
 
-  it("creates an authenticated MCP session that can open a GET SSE stream after oauth authorization", async () => {
-    const upstream = await startUpstreamOAuthServer(cleanups);
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createCloudflareOAuthAuth({
-        authorizationUrl: upstream.authorizationUrl,
-        issuer: upstream.issuer,
-        jwksUrl: upstream.jwksUrl,
-        tokenUrl: upstream.tokenUrl,
-      }),
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const codeVerifier = "test-code-verifier-123456789";
-    const codeChallenge = createCodeChallenge(codeVerifier);
-    const registration = await registerOAuthClient(httpServer.url);
-    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
-    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
-
-    const callbackResponse = await fetch(new URL(
-      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        Origin: "https://claude.ai",
-      },
-    });
-    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
-
-    const tokenResponse = await fetch(new URL("/token", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Origin: "https://claude.ai",
-      },
-      body: new URLSearchParams({
-        client_id: registration.client_id,
-        code: localAuthorizationCode!,
-        code_verifier: codeVerifier,
-        grant_type: "authorization_code",
-        redirect_uri: "https://claude.ai/oauth/callback",
-        resource: "https://mcp.example.com/mcp",
-      }),
-    });
-
-    expect(tokenResponse.status).toBe(200);
-    const tokens = await tokenResponse.json() as {
-      access_token: string;
-    };
-
-    const initializeResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        Authorization: `Bearer ${tokens.access_token}`,
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: LATEST_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: {
-            name: "oauth-sse-client",
-            version: "1.0.0",
-          },
-        },
-      }),
-    });
-
-    expect(initializeResponse.status).toBe(200);
-    const sessionId = initializeResponse.headers.get("mcp-session-id");
-    expect(sessionId).toEqual(expect.any(String));
-
-    const streamResponse = await fetch(httpServer.url, {
-      headers: {
-        Accept: "text/event-stream",
-        Authorization: `Bearer ${tokens.access_token}`,
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        "Mcp-Session-Id": sessionId!,
-      },
-    });
-
-    expect(streamResponse.status).toBe(200);
-    expect(streamResponse.headers.get("content-type")).toContain("text/event-stream");
-    expect(streamResponse.headers.get("mcp-session-id")).toBe(sessionId);
-    await streamResponse.body?.cancel();
-  });
-
   it("brokers refresh-token exchanges through the upstream provider before issuing a fresh local token", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
@@ -2166,14 +1840,12 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("rejects upstream OAuth bearer tokens passed directly on protected MCP tool calls", async () => {
+  it("rejects upstream OAuth bearer tokens passed directly in the authorization header", async () => {
     const { jwksUrl, privateKey } = await startJwksServer();
-    const token = await createOAuthTestToken(privateKey, {
-      iss: "https://id.example.com",
-    });
+    const token = await createOAuthTestToken(privateKey);
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({
+      auth: createCloudflareOAuthAuth({
         jwksUrl,
         scopes: ["openid"],
       }),
@@ -2195,11 +1867,8 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/call",
-        params: {
-          name: "ynab_get_user",
-          arguments: {},
-        },
+        method: "tools/list",
+        params: {},
       }),
     });
 
@@ -2207,85 +1876,12 @@ describe("startHttpServer", () => {
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
   });
 
-  it("still rejects null origins on non-oauth MCP requests", async () => {
-    const httpServer = await startHttpServer({
-      ynab,
-      allowedOrigins: ["https://claude.ai", "https://chatgpt.com"],
-      host: "127.0.0.1",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const response = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "null",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: "Forbidden origin",
-    });
-  });
-
-  it("trusts proxy forwarding on oauth routes so forwarded headers do not trigger rate-limit validation errors", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { jwksUrl } = await startJwksServer();
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createGenericOAuthAuth({
-        jwksUrl,
-      }),
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      port: 0,
-    });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
-
-    const response = await fetch(new URL("/register", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "X-Forwarded-For": "203.0.113.10",
-      },
-      body: JSON.stringify({
-        client_name: "Claude Web",
-        grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://claude.ai/oauth/callback"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-      }),
-    });
-
-    expect(response.status).toBe(201);
-    expect(consoleErrorSpy.mock.calls.some(([message]) => (
-      typeof message === "string" &&
-      message.includes("ERR_ERL_UNEXPECTED_X_FORWARDED_FOR")
-    ))).toBe(false);
-  });
-
-  it("rejects Cloudflare Access JWT assertion headers on protected MCP tool calls", async () => {
+  it("accepts Cloudflare Access JWT assertion headers when authorization is absent", async () => {
     const { jwksUrl, privateKey } = await startJwksServer();
-    const token = await createOAuthTestToken(privateKey, {
-      iss: "https://id.example.com",
-    });
+    const token = await createOAuthTestToken(privateKey);
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({
+      auth: createCloudflareOAuthAuth({
         jwksUrl,
         scopes: ["openid"],
       }),
@@ -2307,24 +1903,30 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/call",
-        params: {
-          arguments: {},
-          name: "ynab_get_user",
-        },
+        method: "tools/list",
+        params: {},
       }),
     });
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      result: {
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_list_plans",
+          }),
+        ]),
+      },
+    });
   });
 
-  it("logs oauth auth failures for protected tool calls without leaking token material", async () => {
+  it("logs oauth auth failures without leaking token material", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({
+      auth: createCloudflareOAuthAuth({
         jwksUrl,
         scopes: ["openid"],
       }),
@@ -2348,11 +1950,8 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/call",
-        params: {
-          name: "ynab_get_user",
-          arguments: {},
-        },
+        method: "tools/list",
+        params: {},
       }),
     });
 

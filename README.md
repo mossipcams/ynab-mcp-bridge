@@ -32,7 +32,7 @@ Set these environment variables before starting the server:
 * `MCP_OAUTH_CLIENT_ID` required in OAuth deployment modes, the upstream confidential OAuth client ID used by the MCP bridge
 * `MCP_OAUTH_CLIENT_SECRET` required in OAuth deployment modes, the upstream confidential OAuth client secret used by the MCP bridge
 * `MCP_OAUTH_STORE_PATH` optional in OAuth deployment modes; defaults to `~/.ynab-mcp-bridge/oauth-store.json`
-* `MCP_OAUTH_TOKEN_SIGNING_SECRET` required in OAuth deployment modes; use a long random secret that is independent of the upstream OAuth client secret so broker-issued tokens remain stable across restarts and upstream credential rotation
+* `MCP_OAUTH_TOKEN_SIGNING_SECRET` optional in OAuth deployment modes; defaults to a stable secret derived from `MCP_OAUTH_CLIENT_SECRET`, `MCP_PUBLIC_URL`, and `MCP_OAUTH_CLIENT_ID`
 * `MCP_OAUTH_CALLBACK_PATH` optional in OAuth deployment modes, default `/oauth/callback`
 * `MCP_OAUTH_SCOPES` optional comma-separated scopes to advertise and require in OAuth deployment modes
 
@@ -40,9 +40,7 @@ Set these environment variables before starting the server:
 
 HTTP mode validates the `Origin` header when one is present. Loopback origins are allowed automatically for loopback hosts, but remote/browser deployments should set `MCP_ALLOWED_ORIGINS` explicitly, for example `https://claude.ai`.
 The default HTTP transport is stateless: clients should use `POST /mcp` requests directly and should not rely on returned `Mcp-Session-Id` headers, session-scoped `GET` streams, or `DELETE` session teardown.
-In OAuth deployment modes the server acts as the MCP authorization server for clients such as Claude Web. It exposes local `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`, and `/.well-known/oauth-protected-resource/mcp` endpoints, requires an MCP-side consent step before redirecting upstream, brokers the upstream authorization-code and refresh-token exchanges, and enforces broker-issued bearer tokens on `POST /mcp` tool calls.
-
-Current OAuth deployments are single-instance and effectively sticky-session only. The JSON OAuth store is a single-writer local file, so do not put the current broker flow behind a load balancer or multi-replica deployment unless requests are pinned to one instance and storage is shared safely.
+In OAuth deployment modes the server acts as the MCP authorization server for clients such as Claude Web. It exposes local `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`, and `/.well-known/oauth-protected-resource/mcp` endpoints, requires an MCP-side consent step before redirecting upstream, brokers the upstream authorization-code and refresh-token exchanges, and enforces broker-issued bearer tokens on `POST /mcp`. If Cloudflare Access injects `Cf-Access-Jwt-Assertion`, the server will still bridge that header into the MCP request path as an explicit compatibility mode.
 
 If `YNAB_PLAN_ID` is not set, the bridge automatically resolves YNAB's `default_plan` when one exists or the only available plan when there is exactly one. If a configured plan becomes stale, the bridge retries once with a fresh plan resolution.
 OAuth here protects access to a shared backend YNAB token configured through `YNAB_API_TOKEN`; it does not yet perform per-user YNAB OAuth delegation.
@@ -131,7 +129,6 @@ MCP_PUBLIC_URL=https://mcp.example.com/mcp \
 MCP_OAUTH_CLOUDFLARE_DOMAIN=example.cloudflareaccess.com \
 MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
 MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
-MCP_OAUTH_TOKEN_SIGNING_SECRET=replace-with-a-long-random-secret \
 MCP_OAUTH_SCOPES=openid,profile \
 npm run start:http
 ```
@@ -153,6 +150,8 @@ MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
 MCP_OAUTH_AUDIENCE=https://mcp.example.com/mcp \
 MCP_OAUTH_STORE_PATH=/var/lib/ynab-mcp-bridge/oauth-store.json \
 MCP_OAUTH_TOKEN_SIGNING_SECRET=replace-with-a-long-random-secret \
+MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
+MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
 MCP_OAUTH_SCOPES=openid,profile \
 npm run start:http
 ```
@@ -162,9 +161,8 @@ npm run start:http
 For Cloudflare Access, the easiest path is to set `MCP_OAUTH_CLOUDFLARE_DOMAIN`, `MCP_OAUTH_CLIENT_ID`, `MCP_OAUTH_CLIENT_SECRET`, and `MCP_PUBLIC_URL`; the bridge will derive the per-application OIDC SaaS endpoints under `/cdn-cgi/access/sso/oidc/<client-id>` automatically.
 Use the public MCP URL for both `MCP_PUBLIC_URL` and `MCP_OAUTH_AUDIENCE` unless your Access app is configured with a different audience/resource identifier.
 Set `MCP_OAUTH_CLIENT_ID` and `MCP_OAUTH_CLIENT_SECRET` to the confidential client credentials for the upstream Access application, and make sure the Access application allows the bridge callback URL built from `MCP_PUBLIC_URL` and `MCP_OAUTH_CALLBACK_PATH` such as `https://mcp.example.com/oauth/callback`.
-Set `MCP_OAUTH_TOKEN_SIGNING_SECRET` explicitly and keep it stable across restarts and upstream client-secret rotation.
-Override `MCP_OAUTH_STORE_PATH` if you need durable local persistence, but note that the current broker flow is still designed for a single instance.
-The bridge advertises itself as the MCP authorization server from `/.well-known/oauth-authorization-server`, dynamically registers MCP clients at `/register`, presents an MCP-side consent step at `/authorize`, exchanges the upstream code at the callback URL, refreshes the upstream grant when Claude refreshes, and issues MCP bearer tokens from `/token`. If the upstream provider does not issue a refresh token, the bridge will not mint a local refresh token either.
+If you need to control persistence or token signing explicitly, override `MCP_OAUTH_STORE_PATH` and `MCP_OAUTH_TOKEN_SIGNING_SECRET`. Otherwise, the defaults are enough for a local or simple remote deployment.
+The bridge advertises itself as the MCP authorization server from `/.well-known/oauth-authorization-server`, dynamically registers MCP clients at `/register`, presents an MCP-side consent step at `/authorize`, exchanges the upstream code at the callback URL, refreshes the upstream grant when Claude refreshes, and issues MCP bearer tokens from `/token`.
 Do not use the older tenant-wide `/cdn-cgi/access/sso/oauth2/*` or `/cdn-cgi/access/certs` endpoints here. With current MCP clients, that legacy configuration can break the authorization-code redirect and surface errors like `code: Field required`.
 When deployed behind Cloudflare, keep `MCP_PUBLIC_URL` on the external HTTPS hostname even if the local bind address is `127.0.0.1` or `0.0.0.0`; discovery metadata must describe the public URL, not the internal listener.
 
@@ -215,11 +213,12 @@ node dist/index.js \
   --oauth-audience https://mcp.example.com/mcp \
   --oauth-store-path /var/lib/ynab-mcp-bridge/oauth-store.json \
   --oauth-token-signing-secret replace-with-a-long-random-secret \
+  --oauth-client-id cloudflare-access-client-id \
+  --oauth-client-secret cloudflare-access-client-secret \
   --oauth-scopes openid,profile
 ```
 
 For a stricter remote deployment, switch `oauth-single-tenant` to `oauth-hardened` and keep `--allowed-origins` or `MCP_ALLOWED_ORIGINS` explicitly populated.
-Do not horizontally scale the current OAuth broker flow without sticky sessions and a real shared state store.
 
 ## Development
 

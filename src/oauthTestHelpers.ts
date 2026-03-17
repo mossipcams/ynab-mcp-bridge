@@ -48,24 +48,6 @@ export function createCloudflareOAuthAuth(overrides: Partial<OAuthAuthConfig> = 
   };
 }
 
-export function createGenericOAuthAuth(overrides: Partial<OAuthAuthConfig> = {}): OAuthAuthConfig {
-  return {
-    audience: DEFAULT_RESOURCE,
-    authorizationUrl: "https://id.example.com/oauth/authorize",
-    callbackPath: "/oauth/callback",
-    clientId: "oauth-client-id",
-    clientSecret: "oauth-client-secret",
-    deployment: "oauth-single-tenant",
-    issuer: "https://id.example.com",
-    jwksUrl: "https://id.example.com/.well-known/jwks.json",
-    mode: "oauth",
-    publicUrl: DEFAULT_RESOURCE,
-    scopes: ["openid", "profile"],
-    tokenUrl: "https://id.example.com/oauth/token",
-    ...overrides,
-  };
-}
-
 export async function startUpstreamOAuthServer(cleanups: Cleanup[]) {
   let lastTokenRequest: {
     authorization?: string;
