@@ -2830,4 +2830,58 @@ describe("startHttpServer", () => {
       !("authorization" in details)
     ))).toBeTruthy();
   });
+
+  it("logs rejected MCP requests with auth and payload diagnostics without leaking secrets", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({
+        jwksUrl,
+        scopes: ["openid"],
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const secretToken = "super-secret-opaque-token";
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${secretToken}`,
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_user",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
+      details.reason === "unauthorized" &&
+      details.path === "/mcp" &&
+      details.authorizationPresent === true &&
+      details.cfAccessJwtAssertionPresent === false &&
+      details.contentType === "application/json" &&
+      details.accept === "application/json, text/event-stream" &&
+      typeof details.contentLength === "number" &&
+      details.jsonRpcMethod === "tools/call" &&
+      details.jsonRpcShape === "single"
+    ))).toBeTruthy();
+    expect(JSON.stringify(consoleErrorSpy.mock.calls)).not.toContain(secretToken);
+  });
 });

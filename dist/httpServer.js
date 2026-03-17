@@ -40,6 +40,12 @@ function getFirstHeaderValue(value) {
     }
     return value?.[0]?.split(",")[0]?.trim();
 }
+function getHeaderValue(value) {
+    if (typeof value === "string") {
+        return value;
+    }
+    return value?.[0];
+}
 function getBearerToken(authorizationHeader) {
     if (!authorizationHeader?.startsWith("Bearer ")) {
         return undefined;
@@ -228,6 +234,28 @@ function getJsonRpcDebugDetails(parsedBody) {
         details.jsonRpcId = request.id;
     }
     return details;
+}
+function getJsonRpcShape(parsedBody) {
+    if (Array.isArray(parsedBody)) {
+        return "batch";
+    }
+    if (parsedBody && typeof parsedBody === "object") {
+        return "single";
+    }
+    return undefined;
+}
+function getMcpRejectionDebugDetails(req, parsedBody) {
+    const contentLengthHeader = getFirstHeaderValue(req.headers["content-length"]);
+    const contentLength = contentLengthHeader === undefined ? undefined : Number.parseInt(contentLengthHeader, 10);
+    return {
+        accept: getHeaderValue(req.headers.accept),
+        authorizationPresent: Boolean(getFirstHeaderValue(req.headers.authorization)),
+        cfAccessJwtAssertionPresent: Boolean(getFirstHeaderValue(req.headers["cf-access-jwt-assertion"])),
+        contentLength: Number.isFinite(contentLength) ? contentLength : undefined,
+        contentType: getHeaderValue(req.headers["content-type"]),
+        jsonRpcShape: getJsonRpcShape(parsedBody),
+        ...getJsonRpcDebugDetails(parsedBody),
+    };
 }
 function getErrorDebugDetails(error) {
     if (!error || typeof error !== "object") {
@@ -627,6 +655,7 @@ export async function startHttpServer(options) {
                 }
                 logHttpDebug("request.rejected", {
                     ...getRequestDebugDetails(req),
+                    ...getMcpRejectionDebugDetails(req, req.body),
                     reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope",
                 });
             });
