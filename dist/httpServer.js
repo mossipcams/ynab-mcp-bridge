@@ -309,7 +309,11 @@ export async function startHttpServer(options) {
         allowedOrigins.add(new URL(auth.publicUrl).origin);
     }
     const app = express();
-    const jsonParser = express.json();
+    const jsonParser = express.json({
+        // Some browser-hosted MCP clients send valid JSON-RPC discovery bodies
+        // before they attach the usual application/json content type.
+        type: () => true,
+    });
     const urlencodedParser = express.urlencoded({ extended: false });
     app.disable("x-powered-by");
     app.set("trust proxy", 1);
@@ -382,7 +386,13 @@ export async function startHttpServer(options) {
             if (auth.mode === "oauth") {
                 applyCloudflareAccessAuthorizationHeader(req);
             }
-            jsonParser(req, res, next);
+            jsonParser(req, res, (error) => {
+                if (!error && getFirstHeaderValue(req.headers["content-type"]) === undefined) {
+                    req.headers["content-type"] = "application/json";
+                    req.rawHeaders.push("Content-Type", "application/json");
+                }
+                next(error);
+            });
             return;
         }
         next();
