@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.5...ynab-mcp-bridge-v0.7.0) (2026-03-17)
+
+
+### Features
+
+* isolate oauth provider client and discovery fallback ([#68](https://github.com/mossipcams/ynab-mcp-bridge/issues/68)) ([c7ff598](https://github.com/mossipcams/ynab-mcp-bridge/commit/c7ff598fb6496f5f9f938d7c8f0eb74df44de5a4))
+* use pipe-delimited format for tool output ([#71](https://github.com/mossipcams/ynab-mcp-bridge/issues/71)) ([919586e](https://github.com/mossipcams/ynab-mcp-bridge/commit/919586e29d2997bb644b115cf9d5bea628533c17))
+
+
+### Bug Fixes
+
+* accept Cloudflare Access JWT assertions on MCP requests ([#74](https://github.com/mossipcams/ynab-mcp-bridge/issues/74)) ([fb55838](https://github.com/mossipcams/ynab-mcp-bridge/commit/fb55838bf5f29543e206b6a998ca3d11ba6a4c9d))
+* accept mcp bootstrap posts without json content type ([#78](https://github.com/mossipcams/ynab-mcp-bridge/issues/78)) ([772c9f1](https://github.com/mossipcams/ynab-mcp-bridge/commit/772c9f1ffdb4cf3198486b287c4123ce16225661))
+* accept safari mobile discovery posts without json headers ([#60](https://github.com/mossipcams/ynab-mcp-bridge/issues/60)) ([0bfb686](https://github.com/mossipcams/ynab-mcp-bridge/commit/0bfb6865796fafefea4187a828d1818f09ceb5d5))
+* add mcp auth rejection diagnostics ([#80](https://github.com/mossipcams/ynab-mcp-bridge/issues/80)) ([6d705e2](https://github.com/mossipcams/ynab-mcp-bridge/commit/6d705e2e45ab97424fa98841b85da8b0cbab6702))
+* add path-aware oauth discovery metadata aliases ([#64](https://github.com/mossipcams/ynab-mcp-bridge/issues/64)) ([32852b2](https://github.com/mossipcams/ynab-mcp-bridge/commit/32852b237fc97e2ee2aa99f03eb15f80772e6d19))
+* advertise oauth delete support in MCP preflight ([#58](https://github.com/mossipcams/ynab-mcp-bridge/issues/58)) ([ef6019e](https://github.com/mossipcams/ynab-mcp-bridge/commit/ef6019e16d817948426d549619e660bc7882b877))
+* align oauth discovery metadata and add auth debug logs ([#76](https://github.com/mossipcams/ynab-mcp-bridge/issues/76)) ([239a1d4](https://github.com/mossipcams/ynab-mcp-bridge/commit/239a1d4464519d09cd4949110853e758bc762c6e))
+* allow empty mcp oauth bootstrap probes ([#82](https://github.com/mossipcams/ynab-mcp-bridge/issues/82)) ([b83a572](https://github.com/mossipcams/ynab-mcp-bridge/commit/b83a572657e1ec674062772d0911f3c2da8a9e56))
+* deepen MCP token usage optimization ([#70](https://github.com/mossipcams/ynab-mcp-bridge/issues/70)) ([f7c77a8](https://github.com/mossipcams/ynab-mcp-bridge/commit/f7c77a8ac77da36f3d71544ee5250a9f24ae7fd3))
+* expose openid discovery metadata alias ([#62](https://github.com/mossipcams/ynab-mcp-bridge/issues/62)) ([4171e46](https://github.com/mossipcams/ynab-mcp-bridge/commit/4171e46a3f8ad2c50d4f6d677620c2b14bc520c2))
+* reduce MCP token usage ([#69](https://github.com/mossipcams/ynab-mcp-bridge/issues/69)) ([8f43a39](https://github.com/mossipcams/ynab-mcp-bridge/commit/8f43a394de5221e57d48ed18e34c6a55904d4589))
+* support ChatGPT OAuth discovery metadata ([#72](https://github.com/mossipcams/ynab-mcp-bridge/issues/72)) ([434e944](https://github.com/mossipcams/ynab-mcp-bridge/commit/434e944c24d5c47b616bdf67418c92346843e29f))
+
+
+### Reverts
+
+* restore v0.6.5 release ([#84](https://github.com/mossipcams/ynab-mcp-bridge/issues/84)) ([9422f60](https://github.com/mossipcams/ynab-mcp-bridge/commit/9422f603448d58b681e34e64db74777bb4210ad2))
+* roll back to v0.6.5 pre-refactor baseline ([#66](https://github.com/mossipcams/ynab-mcp-bridge/issues/66)) ([b16df49](https://github.com/mossipcams/ynab-mcp-bridge/commit/b16df498407c79197b520db508c93b7af6a6aaee))
+
 ## [0.6.5](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.4...ynab-mcp-bridge-v0.6.5) (2026-03-16)
 
 
