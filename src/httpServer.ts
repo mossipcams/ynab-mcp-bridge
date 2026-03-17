@@ -8,6 +8,7 @@ import {
   localhostHostValidation,
 } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import {
+  createOAuthMetadata,
   getOAuthProtectedResourceMetadataUrl,
   mcpAuthRouter,
 } from "@modelcontextprotocol/sdk/server/auth/router.js";
@@ -544,9 +545,18 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   if (auth.mode === "oauth") {
     const publicServerUrl = getPublicResourceServerUrl(auth);
+    const oauthMetadata = createOAuthMetadata({
+      baseUrl: oauthBroker!.getIssuerUrl(),
+      issuerUrl: oauthBroker!.getIssuerUrl(),
+      provider: oauthBroker!.provider,
+      scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
+    });
 
     app.use(oauthBroker!.callbackPath, oauthBroker!.handleCallback);
     app.post(CONSENT_PATH, urlencodedParser, oauthBroker!.handleConsent);
+    app.get("/.well-known/openid-configuration", (_req, res) => {
+      res.status(200).json(oauthMetadata);
+    });
     app.use(mcpAuthRouter({
       baseUrl: oauthBroker!.getIssuerUrl(),
       issuerUrl: oauthBroker!.getIssuerUrl(),
