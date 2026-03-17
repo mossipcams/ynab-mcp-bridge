@@ -40,7 +40,6 @@ export function createCloudflareOAuthAuth(overrides: Partial<OAuthAuthConfig> = 
     deployment: "oauth-single-tenant",
     issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
     jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
-    metadataMode: "explicit",
     mode: "oauth",
     publicUrl: DEFAULT_RESOURCE,
     scopes: ["openid", "profile"],
@@ -59,7 +58,6 @@ export function createGenericOAuthAuth(overrides: Partial<OAuthAuthConfig> = {})
     deployment: "oauth-single-tenant",
     issuer: "https://id.example.com",
     jwksUrl: "https://id.example.com/.well-known/jwks.json",
-    metadataMode: "explicit",
     mode: "oauth",
     publicUrl: DEFAULT_RESOURCE,
     scopes: ["openid", "profile"],
@@ -68,10 +66,7 @@ export function createGenericOAuthAuth(overrides: Partial<OAuthAuthConfig> = {})
   };
 }
 
-export async function startUpstreamOAuthServer(cleanups: Cleanup[], options: {
-  discoveryDocument?: (origin: string) => Record<string, unknown>;
-  discoveryStatus?: number;
-} = {}) {
+export async function startUpstreamOAuthServer(cleanups: Cleanup[]) {
   let lastTokenRequest: {
     authorization?: string;
     body: URLSearchParams;
@@ -89,18 +84,6 @@ export async function startUpstreamOAuthServer(cleanups: Cleanup[], options: {
     if (requestUrl.pathname === "/jwks") {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ keys: [] }));
-      return;
-    }
-
-    if (requestUrl.pathname === "/.well-known/openid-configuration") {
-      res.statusCode = options.discoveryStatus ?? 200;
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify(options.discoveryDocument?.(origin) ?? {
-        authorization_endpoint: `${origin}/authorize`,
-        issuer: origin,
-        jwks_uri: `${origin}/jwks`,
-        token_endpoint: `${origin}/token`,
-      }));
       return;
     }
 

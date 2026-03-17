@@ -5,11 +5,10 @@ import * as GetBudgetRatioSummaryTool from "./tools/GetBudgetRatioSummaryTool.js
 import * as GetCategoryTrendSummaryTool from "./tools/GetCategoryTrendSummaryTool.js";
 import * as GetGoalProgressSummaryTool from "./tools/GetGoalProgressSummaryTool.js";
 import * as GetIncomeSummaryTool from "./tools/GetIncomeSummaryTool.js";
-import { parsePipeDelimited } from "./testHelpers.js";
 import * as GetUpcomingObligationsTool from "./tools/GetUpcomingObligationsTool.js";
 
 function parseText(result: Awaited<ReturnType<typeof GetUpcomingObligationsTool.execute>>) {
-  return parsePipeDelimited(result.content[0].text);
+  return JSON.parse(result.content[0].text);
 }
 
 describe("advanced finance tools", () => {

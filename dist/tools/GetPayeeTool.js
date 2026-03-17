@@ -3,7 +3,7 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 export const name = "ynab_get_payee";
 export const description = "Gets a single payee by ID.";
 export const inputSchema = {
-    planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
+    planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
     payeeId: z.string().describe("The payee ID to fetch."),
 };
 export async function execute(input, api) {

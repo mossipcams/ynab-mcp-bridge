@@ -8,12 +8,12 @@ export const name = "ynab_get_cash_flow_summary";
 export const description =
   "Returns a compact cash flow summary with inflow, outflow, net flow, and monthly assigned versus spent trends.";
 export const inputSchema = {
-  planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
+  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
   fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe(
-    "Start month as YYYY-MM-DD or 'current'.",
+    "The first month in ISO format or the string 'current'.",
   ),
   toMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).optional().describe(
-    "End month as YYYY-MM-DD. Defaults to fromMonth.",
+    "The last month in ISO format. Defaults to fromMonth.",
   ),
 };
 

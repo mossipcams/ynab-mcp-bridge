@@ -5,14 +5,15 @@ import type { RequestHandler } from "express";
 import {
   InvalidRequestError,
   InvalidTokenError,
+  ServerError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import type { RuntimeAuthConfig } from "./config.js";
 import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
-import { createProviderClient } from "./providerClient.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
 
@@ -87,45 +88,20 @@ function buildConsentPageHeaders(scriptNonce: string, formActionSources: string[
   } as const;
 }
 
-function logOAuthBrokerDebug(event: string, details: Record<string, unknown>) {
-  console.error("[http]", event, details);
-}
-
-export async function createOAuthBroker(config: OAuthAuthConfig): Promise<{
+export function createOAuthBroker(config: OAuthAuthConfig): {
   callbackPath: string;
   callbackUrl: string;
   getIssuerUrl: () => URL;
   handleConsent: RequestHandler;
   provider: OAuthServerProvider;
   handleCallback: RequestHandler;
-}> {
+} {
+  const store = createOAuthStore(config.storePath);
   const resourceUrl = new URL(config.publicUrl);
   const issuerUrl = new URL(resourceUrl.origin);
   const callbackUrl = new URL(config.callbackPath, issuerUrl).href;
-  const providerClient = await createProviderClient({
-    callbackUrl,
-    clientId: config.clientId,
-    clientSecret: config.clientSecret,
-    issuer: config.issuer,
-    ...(config.metadataMode === "explicit"
-      ? {
-          authorizationUrl: config.authorizationUrl,
-          jwksUrl: config.jwksUrl,
-          metadataMode: "explicit" as const,
-          tokenUrl: config.tokenUrl,
-        }
-      : {
-          authorizationUrl: config.authorizationUrl,
-          fallbackToExplicit: config.fallbackToExplicit,
-          jwksUrl: config.jwksUrl,
-          metadataMode: "discovery" as const,
-          tokenUrl: config.tokenUrl,
-        }),
-  });
-  const providerMetadata = providerClient.getMetadata();
-  const store = createOAuthStore(config.storePath);
   const localTokenSecret = Buffer.from(config.tokenSigningSecret ?? crypto.randomBytes(32).toString("base64url"), "utf8");
-  const upstreamJwks = createRemoteJWKSet(new URL(providerMetadata.jwksUrl));
+  const upstreamJwks = createRemoteJWKSet(new URL(config.jwksUrl));
   const allowedAudiences = Array.from(new Set([config.audience, config.publicUrl]));
 
   async function verifyLocalAccessToken(token: string): Promise<AuthInfo> {
@@ -150,7 +126,7 @@ export async function createOAuthBroker(config: OAuthAuthConfig): Promise<{
   async function verifyUpstreamAccessToken(token: string): Promise<AuthInfo> {
     const { payload } = await jwtVerify<LocalClaims>(token, upstreamJwks, {
       audience: config.audience,
-      issuer: providerMetadata.issuer,
+      issuer: config.issuer,
     });
 
     return {
@@ -216,6 +192,73 @@ export async function createOAuthBroker(config: OAuthAuthConfig): Promise<{
       .sign(localTokenSecret);
   }
 
+  async function exchangeUpstreamAuthorizationCode(code: string) {
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      redirect_uri: callbackUrl,
+    });
+    const response = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      throw new ServerError(`Upstream token exchange failed with status ${response.status}.`);
+    }
+
+    return await response.json() as OAuthTokens;
+  }
+
+  async function exchangeUpstreamRefreshToken(refreshToken: string) {
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+    });
+    const response = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      throw new ServerError(`Upstream refresh exchange failed with status ${response.status}.`);
+    }
+
+    return await response.json() as OAuthTokens;
+  }
+
+  function buildUpstreamAuthorizationUrl(pending: {
+    resource: string;
+    scopes: string[];
+    upstreamState: string;
+  }) {
+    const upstreamAuthorizationUrl = new URL(config.authorizationUrl);
+    upstreamAuthorizationUrl.searchParams.set("client_id", config.clientId);
+    upstreamAuthorizationUrl.searchParams.set("redirect_uri", callbackUrl);
+    upstreamAuthorizationUrl.searchParams.set("response_type", "code");
+    upstreamAuthorizationUrl.searchParams.set("state", pending.upstreamState);
+
+    if (pending.scopes.length > 0) {
+      upstreamAuthorizationUrl.searchParams.set("scope", pending.scopes.join(" "));
+    }
+
+    upstreamAuthorizationUrl.searchParams.set("resource", pending.resource);
+
+    return upstreamAuthorizationUrl;
+  }
+
   const core = createOAuthCore({
     config: {
       callbackUrl,
@@ -224,9 +267,9 @@ export async function createOAuthBroker(config: OAuthAuthConfig): Promise<{
     },
     dependencies: {
       createId: () => crypto.randomBytes(24).toString("base64url"),
-      createUpstreamAuthorizationUrl: (pending) => providerClient.buildAuthorizationUrl(pending).href,
-      exchangeUpstreamAuthorizationResponse: (response) => providerClient.exchangeAuthorizationCodeResponse(response),
-      exchangeUpstreamRefreshToken: (refreshToken) => providerClient.exchangeRefreshToken(refreshToken),
+      createUpstreamAuthorizationUrl: (pending) => buildUpstreamAuthorizationUrl(pending).href,
+      exchangeUpstreamAuthorizationCode,
+      exchangeUpstreamRefreshToken,
       mintAccessToken,
       now: () => Date.now(),
     },
@@ -313,7 +356,7 @@ export async function createOAuthBroker(config: OAuthAuthConfig): Promise<{
     const formActionSources = Array.from(new Set([
       "'self'",
       new URL(pending.redirectUri).origin,
-      new URL(providerMetadata.authorizationUrl).origin,
+      new URL(config.authorizationUrl).origin,
     ]));
 
     for (const [name, value] of Object.entries(buildConsentPageHeaders(scriptNonce, formActionSources))) {
@@ -357,11 +400,9 @@ export async function createOAuthBroker(config: OAuthAuthConfig): Promise<{
   };
 
   const handleConsent: RequestHandler = async (req, res, next) => {
-    const action = typeof req.body?.action === "string" ? req.body.action : undefined;
-    const requestPath = req.baseUrl || req.path;
-
     try {
       const consentChallenge = typeof req.body?.consent_challenge === "string" ? req.body.consent_challenge : undefined;
+      const action = typeof req.body?.action === "string" ? req.body.action : undefined;
 
       if (!consentChallenge) {
         throw new InvalidRequestError("Missing consent challenge.");
@@ -371,12 +412,6 @@ export async function createOAuthBroker(config: OAuthAuthConfig): Promise<{
       res.redirect(302, result.location);
     } catch (error) {
       if (error instanceof InvalidRequestError) {
-        logOAuthBrokerDebug("oauth.consent_failed", {
-          action,
-          message: error.message,
-          path: requestPath,
-          reason: "invalid_request",
-        });
         res.status(400).json(error.toResponseObject());
         return;
       }
@@ -387,16 +422,21 @@ export async function createOAuthBroker(config: OAuthAuthConfig): Promise<{
 
   const handleCallback: RequestHandler = async (req, res, next) => {
     try {
-      const callbackRequestUrl = new URL(req.originalUrl || req.url || config.callbackPath, issuerUrl);
-      const result = await core.handleCallback(providerClient.parseAuthorizationResponse(callbackRequestUrl));
+      const upstreamState = typeof req.query.state === "string" ? req.query.state : undefined;
+
+      if (!upstreamState) {
+        throw new InvalidRequestError("Missing upstream OAuth state.");
+      }
+
+      const result = await core.handleCallback({
+        code: typeof req.query.code === "string" && req.query.code.length > 0 ? req.query.code : undefined,
+        error: typeof req.query.error === "string" ? req.query.error : undefined,
+        errorDescription: typeof req.query.error_description === "string" ? req.query.error_description : undefined,
+        upstreamState,
+      });
       res.redirect(302, result.location);
     } catch (error) {
       if (error instanceof InvalidRequestError) {
-        logOAuthBrokerDebug("oauth.callback_failed", {
-          message: error.message,
-          path: req.baseUrl || req.path,
-          reason: "invalid_request",
-        });
         res.status(400).json(error.toResponseObject());
         return;
       }

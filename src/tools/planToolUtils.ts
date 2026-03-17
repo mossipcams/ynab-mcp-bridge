@@ -26,36 +26,6 @@ type ResolvePlanIdOptions = {
   ignoreRuntimePlanIdOverride?: boolean;
 };
 
-type CompactResultItemOptions<T extends Record<string, unknown>> = {
-  emptyStringKeys?: Array<keyof T>;
-  omitWhenEqual?: Partial<T>;
-};
-
-type TransactionLike = {
-  account_id?: string | null;
-  account_name?: string | null;
-  amount: number;
-  approved?: boolean;
-  category_id?: string | null;
-  category_name?: string | null;
-  cleared?: string | null;
-  date: string;
-  flag_name?: string | null;
-  id: string;
-  import_id?: string | null;
-  memo?: string | null;
-  payee_id?: string | null;
-  payee_name?: string | null;
-  transfer_account_id?: string | null;
-  transfer_transaction_id?: string | null;
-};
-
-type TransactionProjectionOptions = {
-  includeFullDetails?: boolean;
-};
-
-export const DEFAULT_COMPACT_LIST_LIMIT = 50;
-
 function getApiConfiguredPlanId(api: object) {
   return getYnabApiRuntimeContext(api)?.config.planId?.trim();
 }
@@ -172,107 +142,11 @@ export async function withResolvedPlan<T>(
   }
 }
 
-export function compactResultItem<T extends Record<string, unknown>>(
-  item: T,
-  options: CompactResultItemOptions<T> = {},
-) {
-  const emptyStringKeys = new Set<keyof T>(options.emptyStringKeys ?? []);
-
-  return Object.fromEntries(
-    Object.entries(item).filter(([rawKey, value]) => {
-      const key = rawKey as keyof T;
-
-      if (value === undefined || value === null) {
-        return false;
-      }
-
-      if (emptyStringKeys.has(key) && value === "") {
-        return false;
-      }
-
-      if (Object.prototype.hasOwnProperty.call(options.omitWhenEqual ?? {}, key) && options.omitWhenEqual?.[key] === value) {
-        return false;
-      }
-
-      return true;
-    }),
-  ) as Partial<T>;
-}
-
-export function buildCompactListPayload<T>(
-  key: string,
-  items: T[],
-  limit = items.length,
-) {
-  const normalizedLimit = Math.max(0, Math.min(limit, items.length));
-  const boundedItems = items.slice(0, normalizedLimit);
-
-  return {
-    [key]: boundedItems,
-    returned_count: boundedItems.length,
-    total_count: items.length,
-    has_more: items.length > boundedItems.length,
-  } as Record<string, unknown>;
-}
-
-export function normalizeListLimit(limit: number | undefined, defaultLimit = DEFAULT_COMPACT_LIST_LIMIT) {
-  if (limit === undefined) {
-    return defaultLimit;
-  }
-
-  if (!Number.isFinite(limit)) {
-    return defaultLimit;
-  }
-
-  return Math.max(1, Math.floor(limit));
-}
-
-export function projectTransaction(
-  transaction: TransactionLike,
-  options: TransactionProjectionOptions = {},
-) {
-  const baseProjection = {
-    id: transaction.id,
-    date: transaction.date,
-    amount: (transaction.amount / 1000).toFixed(2),
-    payee_name: transaction.payee_name,
-    category_name: transaction.category_name,
-    account_name: transaction.account_name,
-  };
-
-  if (!options.includeFullDetails) {
-    return compactResultItem(baseProjection);
-  }
-
-  return compactResultItem({
-    ...baseProjection,
-    account_id: transaction.account_id,
-    payee_id: transaction.payee_id,
-    category_id: transaction.category_id,
-    transfer_account_id: transaction.transfer_account_id,
-    transfer_transaction_id: transaction.transfer_transaction_id,
-    approved: transaction.approved,
-    cleared: transaction.cleared,
-    memo: transaction.memo,
-    flag_name: transaction.flag_name,
-    import_id: transaction.import_id,
-  }, {
-    emptyStringKeys: ["memo", "flag_name", "import_id"],
-  });
-}
-
-function toPipeDelimited(value: unknown, prefix = ""): string {
-  if (value === null || value === undefined) return `${prefix}|`;
-  if (Array.isArray(value)) return value.map((item, i) => toPipeDelimited(item, `${prefix}.${i}`)).join("\n");
-  if (typeof value === "object") return Object.entries(value as Record<string, unknown>).map(([k, v]) => toPipeDelimited(v, prefix ? `${prefix}.${k}` : k)).join("\n");
-  return `${prefix}|${String(value)}`;
-}
-
 export function toTextResult(payload: unknown) {
   return {
     content: [{
       type: "text" as const,
-      text: toPipeDelimited(payload),
+      text: JSON.stringify(payload, null, 2),
     }],
   };
 }

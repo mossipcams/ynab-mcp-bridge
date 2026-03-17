@@ -7,7 +7,6 @@ export function getPlanId(inputPlanId, configuredPlanId) {
     }
     return planId;
 }
-export const DEFAULT_COMPACT_LIST_LIMIT = 50;
 function getApiConfiguredPlanId(api) {
     return getYnabApiRuntimeContext(api)?.config.planId?.trim();
 }
@@ -86,83 +85,11 @@ export async function withResolvedPlan(inputPlanId, api, operation) {
         return operation(recoveredPlanId);
     }
 }
-export function compactResultItem(item, options = {}) {
-    const emptyStringKeys = new Set(options.emptyStringKeys ?? []);
-    return Object.fromEntries(Object.entries(item).filter(([rawKey, value]) => {
-        const key = rawKey;
-        if (value === undefined || value === null) {
-            return false;
-        }
-        if (emptyStringKeys.has(key) && value === "") {
-            return false;
-        }
-        if (Object.prototype.hasOwnProperty.call(options.omitWhenEqual ?? {}, key) && options.omitWhenEqual?.[key] === value) {
-            return false;
-        }
-        return true;
-    }));
-}
-export function buildCompactListPayload(key, items, limit = items.length) {
-    const normalizedLimit = Math.max(0, Math.min(limit, items.length));
-    const boundedItems = items.slice(0, normalizedLimit);
-    return {
-        [key]: boundedItems,
-        returned_count: boundedItems.length,
-        total_count: items.length,
-        has_more: items.length > boundedItems.length,
-    };
-}
-export function normalizeListLimit(limit, defaultLimit = DEFAULT_COMPACT_LIST_LIMIT) {
-    if (limit === undefined) {
-        return defaultLimit;
-    }
-    if (!Number.isFinite(limit)) {
-        return defaultLimit;
-    }
-    return Math.max(1, Math.floor(limit));
-}
-export function projectTransaction(transaction, options = {}) {
-    const baseProjection = {
-        id: transaction.id,
-        date: transaction.date,
-        amount: (transaction.amount / 1000).toFixed(2),
-        payee_name: transaction.payee_name,
-        category_name: transaction.category_name,
-        account_name: transaction.account_name,
-    };
-    if (!options.includeFullDetails) {
-        return compactResultItem(baseProjection);
-    }
-    return compactResultItem({
-        ...baseProjection,
-        account_id: transaction.account_id,
-        payee_id: transaction.payee_id,
-        category_id: transaction.category_id,
-        transfer_account_id: transaction.transfer_account_id,
-        transfer_transaction_id: transaction.transfer_transaction_id,
-        approved: transaction.approved,
-        cleared: transaction.cleared,
-        memo: transaction.memo,
-        flag_name: transaction.flag_name,
-        import_id: transaction.import_id,
-    }, {
-        emptyStringKeys: ["memo", "flag_name", "import_id"],
-    });
-}
-function toPipeDelimited(value, prefix = "") {
-    if (value === null || value === undefined)
-        return `${prefix}|`;
-    if (Array.isArray(value))
-        return value.map((item, i) => toPipeDelimited(item, `${prefix}.${i}`)).join("\n");
-    if (typeof value === "object")
-        return Object.entries(value).map(([k, v]) => toPipeDelimited(v, prefix ? `${prefix}.${k}` : k)).join("\n");
-    return `${prefix}|${String(value)}`;
-}
 export function toTextResult(payload) {
     return {
         content: [{
                 type: "text",
-                text: toPipeDelimited(payload),
+                text: JSON.stringify(payload, null, 2),
             }],
     };
 }

@@ -89,25 +89,6 @@ function toPendingConsent(grant) {
     };
 }
 export function createOAuthCore({ config, dependencies, store }) {
-    const refreshTokenLocks = new Map();
-    async function withRefreshTokenLock(refreshToken, action) {
-        const previous = refreshTokenLocks.get(refreshToken) ?? Promise.resolve();
-        let release;
-        const current = new Promise((resolve) => {
-            release = resolve;
-        });
-        refreshTokenLocks.set(refreshToken, current);
-        await previous;
-        try {
-            return await action();
-        }
-        finally {
-            release?.();
-            if (refreshTokenLocks.get(refreshToken) === current) {
-                refreshTokenLocks.delete(refreshToken);
-            }
-        }
-    }
     async function registerClient(client) {
         validateClientMetadata(client);
         const registeredClient = {
@@ -241,7 +222,7 @@ export function createOAuthCore({ config, dependencies, store }) {
             throw new InvalidRequestError("Unknown upstream OAuth state.");
         }
         store.deleteGrant(grant.grantId);
-        if (params.type === "error") {
+        if (params.error) {
             return {
                 type: "redirect",
                 location: createErrorRedirect(grant.redirectUri, {
@@ -251,8 +232,11 @@ export function createOAuthCore({ config, dependencies, store }) {
                 }),
             };
         }
+        if (!params.code) {
+            throw new InvalidRequestError("Missing upstream OAuth code.");
+        }
         const authorizationCode = dependencies.createId();
-        const upstreamTokens = await dependencies.exchangeUpstreamAuthorizationResponse(params);
+        const upstreamTokens = await dependencies.exchangeUpstreamAuthorizationCode(params.code);
         store.saveGrant({
             ...grant,
             authorizationCode: {
@@ -335,61 +319,59 @@ export function createOAuthCore({ config, dependencies, store }) {
         };
     }
     async function exchangeRefreshToken(client, refreshToken, scopes, resource) {
-        return await withRefreshTokenLock(refreshToken, async () => {
-            const grant = store.getRefreshTokenGrant(refreshToken);
-            if (!grant || !grant.refreshToken || grant.clientId !== client.client_id) {
-                throw new InvalidGrantError("Unknown refresh token.");
-            }
-            if (isExpired(grant.refreshToken.expiresAt, dependencies.now())) {
-                store.deleteGrant(grant.grantId);
-                throw new InvalidGrantError("Refresh token has expired.");
-            }
-            const grantedScopes = scopes && scopes.length > 0 ? scopes : grant.scopes;
-            if (!grantedScopes.every((scope) => grant.scopes.includes(scope))) {
-                throw new InvalidScopeError("Requested scope exceeds the original grant.");
-            }
-            if (resource?.href && resource.href !== grant.resource) {
-                throw new InvalidGrantError("resource does not match the refresh token.");
-            }
-            const upstreamRefreshToken = grant.upstreamTokens?.refresh_token;
-            if (!upstreamRefreshToken) {
-                throw new InvalidGrantError("Refresh token is missing upstream refresh context.");
-            }
-            const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(upstreamRefreshToken);
-            const nextUpstreamTokens = {
-                ...grant.upstreamTokens,
-                ...refreshedUpstreamTokens,
-                refresh_token: refreshedUpstreamTokens.refresh_token ?? grant.upstreamTokens?.refresh_token,
-            };
-            if (!grant.subject) {
-                store.deleteGrant(grant.grantId);
-                throw new InvalidGrantError("Refresh token is missing grant context.");
-            }
-            const expiresInSeconds = clampExpiresIn(nextUpstreamTokens.expires_in);
-            const accessToken = await dependencies.mintAccessToken({
-                clientId: grant.clientId,
-                expiresInSeconds,
-                resource: grant.resource,
-                scopes: grantedScopes,
-                subject: grant.subject,
-            });
-            const nextRefreshToken = dependencies.createId();
-            store.saveGrant({
-                ...grant,
-                refreshToken: {
-                    expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
-                    token: nextRefreshToken,
-                },
-                upstreamTokens: nextUpstreamTokens,
-            });
-            return {
-                access_token: accessToken,
-                expires_in: expiresInSeconds,
-                refresh_token: nextRefreshToken,
-                scope: grantedScopes.join(" "),
-                token_type: "Bearer",
-            };
+        const grant = store.getRefreshTokenGrant(refreshToken);
+        if (!grant || !grant.refreshToken || grant.clientId !== client.client_id) {
+            throw new InvalidGrantError("Unknown refresh token.");
+        }
+        if (isExpired(grant.refreshToken.expiresAt, dependencies.now())) {
+            store.deleteGrant(grant.grantId);
+            throw new InvalidGrantError("Refresh token has expired.");
+        }
+        const grantedScopes = scopes && scopes.length > 0 ? scopes : grant.scopes;
+        if (!grantedScopes.every((scope) => grant.scopes.includes(scope))) {
+            throw new InvalidScopeError("Requested scope exceeds the original grant.");
+        }
+        if (resource?.href && resource.href !== grant.resource) {
+            throw new InvalidGrantError("resource does not match the refresh token.");
+        }
+        const upstreamRefreshToken = grant.upstreamTokens?.refresh_token;
+        if (!upstreamRefreshToken) {
+            throw new InvalidGrantError("Refresh token is missing upstream refresh context.");
+        }
+        const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(upstreamRefreshToken);
+        const nextUpstreamTokens = {
+            ...grant.upstreamTokens,
+            ...refreshedUpstreamTokens,
+            refresh_token: refreshedUpstreamTokens.refresh_token ?? grant.upstreamTokens?.refresh_token,
+        };
+        if (!grant.subject) {
+            store.deleteGrant(grant.grantId);
+            throw new InvalidGrantError("Refresh token is missing grant context.");
+        }
+        const expiresInSeconds = clampExpiresIn(nextUpstreamTokens.expires_in);
+        const accessToken = await dependencies.mintAccessToken({
+            clientId: grant.clientId,
+            expiresInSeconds,
+            resource: grant.resource,
+            scopes: grantedScopes,
+            subject: grant.subject,
         });
+        const nextRefreshToken = dependencies.createId();
+        store.saveGrant({
+            ...grant,
+            refreshToken: {
+                expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
+                token: nextRefreshToken,
+            },
+            upstreamTokens: nextUpstreamTokens,
+        });
+        return {
+            access_token: accessToken,
+            expires_in: expiresInSeconds,
+            refresh_token: nextRefreshToken,
+            scope: grantedScopes.join(" "),
+            token_type: "Bearer",
+        };
     }
     return {
         approveConsent,

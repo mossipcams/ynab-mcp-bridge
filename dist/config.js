@@ -123,19 +123,6 @@ function readHostnameLikeValue(value, name) {
         throw new Error(`${name} must be a valid hostname or URL.`);
     }
 }
-function readBooleanLikeValue(value, name) {
-    const normalized = readOptionalValue(value);
-    if (!normalized) {
-        return undefined;
-    }
-    if (normalized === "true") {
-        return true;
-    }
-    if (normalized === "false") {
-        return false;
-    }
-    throw new Error(`${name} must be 'true' or 'false'.`);
-}
 function buildCallbackUrl(publicUrl, callbackPath) {
     if (!publicUrl || !callbackPath) {
         return undefined;
@@ -201,7 +188,6 @@ function resolveRuntimeAuthConfig(args, env) {
     const clientSecret = readOptionalValue(readFlag(args, "--oauth-client-secret") ?? env.MCP_OAUTH_CLIENT_SECRET);
     const cloudflareDomain = readHostnameLikeValue(readFlag(args, "--oauth-cloudflare-domain") ?? env.MCP_OAUTH_CLOUDFLARE_DOMAIN, "MCP_OAUTH_CLOUDFLARE_DOMAIN");
     const cloudflareAccessUrls = buildCloudflareAccessUrls(cloudflareDomain, clientId);
-    const discoveryEnabled = readBooleanLikeValue(readFlag(args, "--oauth-discovery") ?? env.MCP_OAUTH_DISCOVERY, "MCP_OAUTH_DISCOVERY") ?? false;
     const issuer = readUrlLikeValue(readFlag(args, "--oauth-issuer") ?? env.MCP_OAUTH_ISSUER, "MCP_OAUTH_ISSUER")
         ?? cloudflareAccessUrls?.issuer;
     const authorizationUrl = readUrlLikeValue(readFlag(args, "--oauth-authorization-url") ?? env.MCP_OAUTH_AUTHORIZATION_URL, "MCP_OAUTH_AUTHORIZATION_URL") ?? cloudflareAccessUrls?.authorizationUrl;
@@ -214,85 +200,37 @@ function resolveRuntimeAuthConfig(args, env) {
         ?? getDefaultOAuthStorePath();
     const tokenSigningSecret = readOptionalValue(readFlag(args, "--oauth-token-signing-secret") ?? env.MCP_OAUTH_TOKEN_SIGNING_SECRET);
     const callbackUrl = buildCallbackUrl(publicUrl, callbackPath);
-    if (discoveryEnabled &&
-        !issuer &&
-        audience &&
-        publicUrl &&
-        clientId &&
-        clientSecret &&
-        callbackPath &&
-        storePath &&
-        tokenSigningSecret) {
-        throw new Error("OAuth discovery mode requires MCP_OAUTH_ISSUER.");
-    }
-    const hasDiscoveryRequirements = Boolean(issuer &&
-        audience &&
-        publicUrl &&
-        clientId &&
-        clientSecret &&
-        callbackPath &&
-        storePath);
-    const hasExplicitMetadataRequirements = Boolean(authorizationUrl && tokenUrl && jwksUrl);
-    if (!tokenSigningSecret && hasDiscoveryRequirements && (discoveryEnabled || hasExplicitMetadataRequirements)) {
+    if (!tokenSigningSecret && issuer && authorizationUrl && tokenUrl && jwksUrl && audience && publicUrl && clientId && clientSecret && callbackPath && storePath) {
         throw new Error(`OAuth deployment requires MCP_OAUTH_TOKEN_SIGNING_SECRET so broker-issued tokens remain stable across restarts and upstream credential rotation.${callbackUrl ? ` The callback URL to register upstream is ${callbackUrl}.` : ""}`);
     }
-    if (!issuer ||
-        !audience ||
-        !publicUrl ||
-        !clientId ||
-        !clientSecret ||
-        !callbackPath ||
-        !storePath ||
-        !tokenSigningSecret ||
-        (!discoveryEnabled && !hasExplicitMetadataRequirements)) {
+    if (!issuer || !authorizationUrl || !tokenUrl || !jwksUrl || !audience || !publicUrl || !clientId || !clientSecret || !callbackPath || !storePath || !tokenSigningSecret) {
         if (explicitDeploymentMode) {
-            throw new Error(`OAuth deployment requires MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, and either MCP_OAUTH_DISCOVERY=true with MCP_OAUTH_ISSUER, MCP_OAUTH_CLOUDFLARE_DOMAIN, or the explicit MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, and MCP_OAUTH_JWKS_URL settings.${callbackUrl ? ` The callback URL to register upstream is ${callbackUrl}.` : ""}`);
+            throw new Error(`OAuth deployment requires MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, and either MCP_OAUTH_CLOUDFLARE_DOMAIN or the explicit MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, and MCP_OAUTH_JWKS_URL settings.${callbackUrl ? ` The callback URL to register upstream is ${callbackUrl}.` : ""}`);
         }
-        throw new Error("OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, MCP_OAUTH_TOKEN_SIGNING_SECRET, and either MCP_OAUTH_DISCOVERY=true or the explicit MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, and MCP_OAUTH_JWKS_URL settings.");
-    }
-    const scopes = parseCsv(readFlag(args, "--oauth-scopes") ?? env.MCP_OAUTH_SCOPES ?? "");
-    if (discoveryEnabled) {
-        return {
-            audience,
-            authorizationUrl,
-            callbackPath,
-            clientId,
-            clientSecret,
-            deployment,
-            fallbackToExplicit: hasExplicitMetadataRequirements ? true : undefined,
-            issuer,
-            jwksUrl,
-            metadataMode: "discovery",
-            mode: "oauth",
-            publicUrl,
-            scopes,
-            storePath,
-            tokenSigningSecret,
-            tokenUrl,
-        };
+        throw new Error("OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, and MCP_OAUTH_TOKEN_SIGNING_SECRET.");
     }
     validateCloudflareAccessOAuthSettings({
-        authorizationUrl: authorizationUrl,
+        authorizationUrl,
         issuer,
-        jwksUrl: jwksUrl,
-        tokenUrl: tokenUrl,
+        jwksUrl,
+        tokenUrl,
     });
+    const scopes = parseCsv(readFlag(args, "--oauth-scopes") ?? env.MCP_OAUTH_SCOPES ?? "");
     return {
         audience,
-        authorizationUrl: authorizationUrl,
+        authorizationUrl,
         callbackPath,
         clientId,
         clientSecret,
         deployment,
         issuer,
-        jwksUrl: jwksUrl,
-        metadataMode: "explicit",
+        jwksUrl,
         mode: "oauth",
         publicUrl,
         scopes,
         storePath,
         tokenSigningSecret,
-        tokenUrl: tokenUrl,
+        tokenUrl,
     };
 }
 function getBackendReadiness(env) {

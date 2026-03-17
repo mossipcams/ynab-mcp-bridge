@@ -1,10 +1,9 @@
 import { z } from "zod";
-import { buildCompactListPayload, normalizeListLimit, toErrorResult, toTextResult, withResolvedPlan, } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_list_payee_locations";
 export const description = "Lists payee locations for a single YNAB plan.";
 export const inputSchema = {
-    planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
-    limit: z.number().int().min(1).max(200).optional().describe("Max payee locations to return."),
+    planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
 };
 export async function execute(input, api) {
     try {
@@ -17,7 +16,10 @@ export async function execute(input, api) {
             latitude: location.latitude,
             longitude: location.longitude,
         }));
-        return toTextResult(buildCompactListPayload("payee_locations", payeeLocations, normalizeListLimit(input.limit)));
+        return toTextResult({
+            payee_locations: payeeLocations,
+            payee_location_count: payeeLocations.length,
+        });
     }
     catch (error) {
         return toErrorResult(error);
