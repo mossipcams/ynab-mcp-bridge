@@ -5,10 +5,11 @@ import * as GetPlanMonthTool from "./tools/GetPlanMonthTool.js";
 import * as GetPlanSettingsTool from "./tools/GetPlanSettingsTool.js";
 import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
 import * as ListPlansTool from "./tools/ListPlansTool.js";
+import { parsePipeDelimited } from "./testHelpers.js";
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
 
 function parseResponseText(result: Awaited<ReturnType<typeof ListPlansTool.execute>>) {
-  return JSON.parse(result.content[0].text);
+  return parsePipeDelimited(result.content[0].text);
 }
 
 describe("plan read tools", () => {

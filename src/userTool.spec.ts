@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import * as GetUserTool from "./tools/GetUserTool.js";
+import { parsePipeDelimited } from "./testHelpers.js";
 
 function parseResponseText(result: Awaited<ReturnType<typeof GetUserTool.execute>>) {
-  return JSON.parse(result.content[0].text);
+  return parsePipeDelimited(result.content[0].text);
 }
 
 describe("user tool", () => {

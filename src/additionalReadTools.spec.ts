@@ -22,9 +22,10 @@ import * as ListPayeeLocationsTool from "./tools/ListPayeeLocationsTool.js";
 import * as ListPayeesTool from "./tools/ListPayeesTool.js";
 import * as ListPlanCategoriesTool from "./tools/ListPlanCategoriesTool.js";
 import * as ListScheduledTransactionsTool from "./tools/ListScheduledTransactionsTool.js";
+import { parsePipeDelimited } from "./testHelpers.js";
 
 function parseText(result: Awaited<ReturnType<typeof GetAccountTool.execute>>) {
-  return JSON.parse(result.content[0].text);
+  return parsePipeDelimited(result.content[0].text);
 }
 
 describe("additional read-only tools", () => {

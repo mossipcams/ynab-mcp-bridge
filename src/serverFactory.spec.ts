@@ -234,11 +234,7 @@ describe("createServer", () => {
 
     const result = await (server as any)._registeredTools.ynab_get_plan.handler({});
 
-    expect(JSON.parse(result.content[0].text)).toEqual({
-      plan: {
-        id: "plan-1",
-      },
-    });
+    expect(result.content[0].text).toBe("plan.id|plan-1");
     expect(calls).toEqual([
       ["getPlanById", "plan-1"],
     ]);
