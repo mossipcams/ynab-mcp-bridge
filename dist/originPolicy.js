@@ -1,8 +1,5 @@
-const CORS_HEADERS = {
-    "access-control-allow-headers": "content-type, mcp-session-id, mcp-protocol-version, authorization",
-    "access-control-allow-methods": "OPTIONS, POST",
-    "access-control-expose-headers": "Mcp-Session-Id",
-};
+const CORS_ALLOWED_HEADERS = "content-type, mcp-session-id, mcp-protocol-version, authorization";
+const CORS_EXPOSE_HEADERS = "Mcp-Session-Id";
 export function getFirstHeaderValue(value) {
     if (typeof value === "string") {
         return value.split(",")[0]?.trim();
@@ -73,10 +70,10 @@ export function resolveOriginPolicy(input) {
         responseOrigin: undefined,
     };
 }
-export function applyCorsHeaders(res, responseOrigin) {
-    for (const [name, value] of Object.entries(CORS_HEADERS)) {
-        res.setHeader(name, value);
-    }
+export function applyCorsHeaders(res, responseOrigin, allowedMethods = ["OPTIONS", "POST"]) {
+    res.setHeader("access-control-allow-headers", CORS_ALLOWED_HEADERS);
+    res.setHeader("access-control-allow-methods", allowedMethods.join(", "));
+    res.setHeader("access-control-expose-headers", CORS_EXPOSE_HEADERS);
     if (!responseOrigin) {
         return;
     }

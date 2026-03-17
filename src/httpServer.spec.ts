@@ -292,6 +292,31 @@ describe("startHttpServer", () => {
     expect(response.headers.get("vary")).toContain("Origin");
   });
 
+  it("advertises DELETE support on oauth MCP preflight requests", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://claude.ai",
+        "Access-Control-Request-Method": "DELETE",
+      },
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://claude.ai");
+    expect(response.headers.get("access-control-allow-methods")).toContain("DELETE");
+    expect(response.headers.get("access-control-allow-methods")).toContain("POST");
+  });
+
   it("adds CORS headers to MCP responses", async () => {
     const httpServer = await startHttpServer({
       ynab,
