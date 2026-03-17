@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.7.1...ynab-mcp-bridge-v0.7.2) (2026-03-17)
+
+
+### Bug Fixes
+
+* accept Cloudflare Access JWT assertions on MCP requests ([#74](https://github.com/mossipcams/ynab-mcp-bridge/issues/74)) ([fb55838](https://github.com/mossipcams/ynab-mcp-bridge/commit/fb55838bf5f29543e206b6a998ca3d11ba6a4c9d))
+
 ## [0.7.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.7.0...ynab-mcp-bridge-v0.7.1) (2026-03-17)
 
 
