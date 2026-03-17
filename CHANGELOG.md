@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.2...ynab-mcp-bridge-v0.6.3) (2026-03-17)
+
+
+### Bug Fixes
+
+* clarify cloudflare callback matching ([ede869a](https://github.com/mossipcams/ynab-mcp-bridge/commit/ede869afe0f6f11640df229dfb174f4833b6545a))
+* clarify cloudflare callback matching ([d3dbfc3](https://github.com/mossipcams/ynab-mcp-bridge/commit/d3dbfc3c11394620955f4134a74076f5f4b455da))
+* reset release-please baseline after rollback ([8886114](https://github.com/mossipcams/ynab-mcp-bridge/commit/888611401e0ee0f364e405b436e293e61667782f))
+* reset release-please baseline after rollback ([d1b4cb4](https://github.com/mossipcams/ynab-mcp-bridge/commit/d1b4cb446a37c269092cbc730dcb07f086947020))
+
 ## [0.6.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.1...ynab-mcp-bridge-v0.6.2) (2026-03-17)
 
 
