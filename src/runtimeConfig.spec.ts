@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import path from "node:path";
+import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { assertBackendEnvironment, resolveRuntimeConfig } from "./runtimeConfig.js";
 
@@ -128,24 +131,6 @@ describe("resolveRuntimeConfig", () => {
     );
   });
 
-  it("rejects Cloudflare oauth mode when jwks is not the same Cloudflare app", () => {
-    expect(() => resolveRuntimeConfig([], {
-      MCP_AUTH_MODE: "oauth",
-      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
-      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
-      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
-      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
-      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
-      MCP_OAUTH_JWKS_URL: "https://keys.example.com/jwks.json",
-      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
-      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
-      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
-      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
-    })).toThrow(
-      "Cloudflare Access OAuth settings must use the per-application OIDC SaaS endpoints under /cdn-cgi/access/sso/oidc/<client-id> for issuer, authorization, token, and jwks URLs.",
-    );
-  });
-
   it("throws for unsupported transports", () => {
     expect(() => resolveRuntimeConfig(["--transport", "sse"], {})).toThrow(
       "Unsupported transport: sse",
@@ -221,16 +206,39 @@ describe("resolveRuntimeConfig", () => {
     })).toThrow("oauth-hardened deployment requires MCP_ALLOWED_ORIGINS or --allowed-origins.");
   });
 
-  it("requires an explicit token signing secret for minimal oauth settings", () => {
-    expect(() => resolveRuntimeConfig([], {
+  it("derives Cloudflare endpoints, store path, and a stable local signing secret from minimal oauth settings", () => {
+    expect(resolveRuntimeConfig([], {
       MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
       MCP_OAUTH_CLIENT_ID: "client-123",
       MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
       MCP_OAUTH_CLOUDFLARE_DOMAIN: "example.cloudflareaccess.com",
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
-    })).toThrow(
-      "OAuth deployment requires MCP_OAUTH_TOKEN_SIGNING_SECRET so broker-issued tokens remain stable across restarts and upstream credential rotation. The callback URL to register upstream is https://mcp.example.com/oauth/callback.",
-    );
+    })).toEqual({
+      allowedHosts: [],
+      allowedOrigins: [],
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+        callbackPath: "/oauth/callback",
+        clientId: "client-123",
+        clientSecret: "cloudflare-client-secret",
+        deployment: "oauth-single-tenant",
+        issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+        jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: [],
+        storePath: path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json"),
+        tokenSigningSecret: createHash("sha256")
+          .update("cloudflare-client-secret\nhttps://mcp.example.com/mcp\nclient-123")
+          .digest("base64url"),
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      },
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 3000,
+      transport: "http",
+    });
   });
 
   it("lets explicit upstream URLs override the Cloudflare preset when both are provided", () => {
@@ -242,7 +250,6 @@ describe("resolveRuntimeConfig", () => {
       MCP_OAUTH_CLOUDFLARE_DOMAIN: "example.cloudflareaccess.com",
       MCP_OAUTH_ISSUER: "https://id.example.com",
       MCP_OAUTH_JWKS_URL: "https://id.example.com/.well-known/jwks.json",
-      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
       MCP_OAUTH_TOKEN_URL: "https://id.example.com/oauth/token",
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
     })).toMatchObject({

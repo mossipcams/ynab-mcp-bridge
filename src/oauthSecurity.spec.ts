@@ -7,7 +7,6 @@ import { startHttpServer } from "./httpServer.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
-  createGenericOAuthAuth,
   registerOAuthClient,
   startAuthorization,
   startUpstreamOAuthServer,
@@ -138,7 +137,7 @@ describe("oauth security regressions", () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({ jwksUrl }),
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -206,12 +205,12 @@ describe("oauth security regressions", () => {
     });
   });
 
-  it("rejects upstream bearer tokens passed directly to protected MCP tool calls", async () => {
+  it("rejects upstream bearer tokens passed directly to the MCP endpoint", async () => {
     const { jwksUrl, privateKey } = await startJwksServer();
     const token = await createUpstreamAccessToken(privateKey);
     const httpServer = await startHttpServer({
       ynab,
-      auth: createGenericOAuthAuth({
+      auth: createCloudflareOAuthAuth({
         jwksUrl,
       }),
       allowedOrigins: ["https://claude.ai"],
@@ -233,11 +232,8 @@ describe("oauth security regressions", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/call",
-        params: {
-          name: "ynab_get_user",
-          arguments: {},
-        },
+        method: "tools/list",
+        params: {},
       }),
     });
 

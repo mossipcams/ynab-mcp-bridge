@@ -5,41 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.5](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.4...ynab-mcp-bridge-v0.6.5) (2026-03-16)
-
-
-### Bug Fixes
-
-* harden MCP OAuth setup boundaries ([#55](https://github.com/mossipcams/ynab-mcp-bridge/issues/55)) ([9db85f1](https://github.com/mossipcams/ynab-mcp-bridge/commit/9db85f1a8e59402ef3a8e77a515e3b332657724a))
-
-## [0.6.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.3...ynab-mcp-bridge-v0.6.4) (2026-03-16)
-
-
-### Bug Fixes
-
-* harden Claude OAuth consent redirects ([#53](https://github.com/mossipcams/ynab-mcp-bridge/issues/53)) ([3d2d236](https://github.com/mossipcams/ynab-mcp-bridge/commit/3d2d236adceacab823ac4bf36a5a60d186016d3a))
-
-## [0.6.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.2...ynab-mcp-bridge-v0.6.3) (2026-03-16)
-
-
-### Bug Fixes
-
-* support Claude OAuth SSE sessions and mixed auth ([#51](https://github.com/mossipcams/ynab-mcp-bridge/issues/51)) ([ca0c145](https://github.com/mossipcams/ynab-mcp-bridge/commit/ca0c14510767efab5589b9c8749c1041459088d9))
-
-## [0.6.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.1...ynab-mcp-bridge-v0.6.2) (2026-03-16)
-
-
-### Bug Fixes
-
-* harden oauth popup consent flow ([#49](https://github.com/mossipcams/ynab-mcp-bridge/issues/49)) ([554ba13](https://github.com/mossipcams/ynab-mcp-bridge/commit/554ba130784cea2893907cf19a5cfc9af078275d))
-
-## [0.6.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.0...ynab-mcp-bridge-v0.6.1) (2026-03-16)
-
-
-### Bug Fixes
-
-* allow popup oauth consent origins ([#47](https://github.com/mossipcams/ynab-mcp-bridge/issues/47)) ([37e00be](https://github.com/mossipcams/ynab-mcp-bridge/commit/37e00be837ded5ffd1ab36877b70e27e8c58af53))
-
 ## [0.6.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.5.0...ynab-mcp-bridge-v0.6.0) (2026-03-16)
 
 

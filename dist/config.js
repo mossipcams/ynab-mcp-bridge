@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 export const CLOUDFLARE_ACCESS_ERROR = "Cloudflare Access OAuth settings must use the per-application OIDC SaaS endpoints under /cdn-cgi/access/sso/oidc/<client-id> for issuer, authorization, token, and jwks URLs.";
@@ -35,23 +36,28 @@ export function validateCloudflareAccessOAuthSettings(config) {
     if (!includesCloudflareAccess) {
         return;
     }
-    if (![authorizationUrl, issuerUrl, jwksUrl, tokenUrl].every((url) => isCloudflareAccessHostname(url.hostname))) {
+    if (!cloudflareCoreUrls.every((url) => isCloudflareAccessHostname(url.hostname))) {
         throw new Error(CLOUDFLARE_ACCESS_ERROR);
     }
     const authorizationClientId = getCloudflareAccessClientId(authorizationUrl, "authorization");
     const issuerClientId = getCloudflareAccessClientId(issuerUrl, "issuer");
     const tokenClientId = getCloudflareAccessClientId(tokenUrl, "token");
-    const jwksClientId = getCloudflareAccessClientId(jwksUrl, "jwks");
-    if (!authorizationClientId || !issuerClientId || !tokenClientId || !jwksClientId) {
+    if (!authorizationClientId || !issuerClientId || !tokenClientId) {
         throw new Error(CLOUDFLARE_ACCESS_ERROR);
     }
     if (authorizationUrl.origin !== issuerUrl.origin ||
         authorizationUrl.origin !== tokenUrl.origin ||
-        authorizationUrl.origin !== jwksUrl.origin ||
         authorizationClientId !== issuerClientId ||
-        authorizationClientId !== tokenClientId ||
-        authorizationClientId !== jwksClientId) {
+        authorizationClientId !== tokenClientId) {
         throw new Error(CLOUDFLARE_ACCESS_ERROR);
+    }
+    if (isCloudflareAccessHostname(jwksUrl.hostname)) {
+        const jwksClientId = getCloudflareAccessClientId(jwksUrl, "jwks");
+        if (!jwksClientId ||
+            authorizationUrl.origin !== jwksUrl.origin ||
+            authorizationClientId !== jwksClientId) {
+            throw new Error(CLOUDFLARE_ACCESS_ERROR);
+        }
     }
 }
 function readFlag(args, name) {
@@ -144,6 +150,14 @@ function buildCloudflareAccessUrls(hostname, clientId) {
 function getDefaultOAuthStorePath() {
     return path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json");
 }
+function deriveTokenSigningSecret(clientSecret, publicUrl, clientId) {
+    if (!clientSecret || !publicUrl || !clientId) {
+        return undefined;
+    }
+    return createHash("sha256")
+        .update(`${clientSecret}\n${publicUrl}\n${clientId}`)
+        .digest("base64url");
+}
 function readLegacyAuthMode(args, env) {
     const authMode = readOptionalValue(readFlag(args, "--auth-mode")) ?? readOptionalValue(env.MCP_AUTH_MODE);
     if (!authMode) {
@@ -198,13 +212,11 @@ function resolveRuntimeAuthConfig(args, env) {
     const audience = readOptionalValue(readFlag(args, "--oauth-audience") ?? env.MCP_OAUTH_AUDIENCE) ?? publicUrl;
     const storePath = readFilePathValue(readFlag(args, "--oauth-store-path") ?? env.MCP_OAUTH_STORE_PATH)
         ?? getDefaultOAuthStorePath();
-    const tokenSigningSecret = readOptionalValue(readFlag(args, "--oauth-token-signing-secret") ?? env.MCP_OAUTH_TOKEN_SIGNING_SECRET);
-    const callbackUrl = buildCallbackUrl(publicUrl, callbackPath);
-    if (!tokenSigningSecret && issuer && authorizationUrl && tokenUrl && jwksUrl && audience && publicUrl && clientId && clientSecret && callbackPath && storePath) {
-        throw new Error(`OAuth deployment requires MCP_OAUTH_TOKEN_SIGNING_SECRET so broker-issued tokens remain stable across restarts and upstream credential rotation.${callbackUrl ? ` The callback URL to register upstream is ${callbackUrl}.` : ""}`);
-    }
+    const tokenSigningSecret = readOptionalValue(readFlag(args, "--oauth-token-signing-secret") ?? env.MCP_OAUTH_TOKEN_SIGNING_SECRET)
+        ?? deriveTokenSigningSecret(clientSecret, publicUrl, clientId);
     if (!issuer || !authorizationUrl || !tokenUrl || !jwksUrl || !audience || !publicUrl || !clientId || !clientSecret || !callbackPath || !storePath || !tokenSigningSecret) {
         if (explicitDeploymentMode) {
+            const callbackUrl = buildCallbackUrl(publicUrl, callbackPath);
             throw new Error(`OAuth deployment requires MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, and either MCP_OAUTH_CLOUDFLARE_DOMAIN or the explicit MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, and MCP_OAUTH_JWKS_URL settings.${callbackUrl ? ` The callback URL to register upstream is ${callbackUrl}.` : ""}`);
         }
         throw new Error("OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, and MCP_OAUTH_TOKEN_SIGNING_SECRET.");

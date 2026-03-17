@@ -24,6 +24,7 @@ type LocalClaims = JWTPayload & {
 
 const CONSENT_PAGE_HEADERS = {
   "cache-control": "no-store",
+  "content-security-policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   pragma: "no-cache",
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
@@ -79,13 +80,6 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-function buildConsentPageHeaders(scriptNonce: string, formActionSources: string[]) {
-  return {
-    ...CONSENT_PAGE_HEADERS,
-    "content-security-policy": `default-src 'none'; connect-src 'self'; script-src 'nonce-${scriptNonce}'; form-action ${formActionSources.join(" ")}; frame-ancestors 'none'; base-uri 'none'`,
-  } as const;
 }
 
 export function createOAuthBroker(config: OAuthAuthConfig): {
@@ -276,7 +270,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     store,
   });
 
-  function renderConsentPage(consentChallenge: string, pending: PendingConsent, scriptNonce: string) {
+  function renderConsentPage(consentChallenge: string, pending: PendingConsent) {
     const clientName = escapeHtml(pending.clientName ?? pending.clientId);
     const resource = escapeHtml(pending.resource);
     const scopes = escapeHtml(pending.scopes.length > 0 ? pending.scopes.join(", ") : "default scopes");
@@ -292,80 +286,23 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     <h1>Approve MCP client access</h1>
     <p><strong>${clientName}</strong> is requesting access to ${resource}.</p>
     <p>Requested scopes: ${scopes}</p>
-    <p>After you approve, this window may take a moment to continue.</p>
-    <p id="consent-status" hidden>Continuing...</p>
-    <form id="approve-form" method="post" action="/authorize/consent" data-action="approve">
-      <input type="hidden" name="action" value="approve">
+    <form method="post" action="/authorize/consent">
       <input type="hidden" name="consent_challenge" value="${escapedConsentChallenge}">
-      <button id="approve-button" type="submit">Approve</button>
+      <button type="submit" name="action" value="approve">Approve</button>
+      <button type="submit" name="action" value="deny">Deny</button>
     </form>
-    <form id="deny-form" method="post" action="/authorize/consent" data-action="deny">
-      <input type="hidden" name="action" value="deny">
-      <input type="hidden" name="consent_challenge" value="${escapedConsentChallenge}">
-      <button id="deny-button" type="submit">Deny</button>
-    </form>
-    <script nonce="${scriptNonce}">
-      const forms = document.querySelectorAll("form");
-      const status = document.getElementById("consent-status");
-      const approveButton = document.getElementById("approve-button");
-      const denyButton = document.getElementById("deny-button");
-
-      for (const form of forms) {
-        if (!(form instanceof HTMLFormElement)) {
-          continue;
-        }
-
-        form.addEventListener("submit", (event) => {
-          if (document.body.dataset.submitted === "true") {
-            event.preventDefault();
-            return;
-          }
-
-          document.body.dataset.submitted = "true";
-
-          if (approveButton instanceof HTMLButtonElement) {
-            approveButton.disabled = true;
-          }
-
-          if (denyButton instanceof HTMLButtonElement) {
-            denyButton.disabled = true;
-          }
-
-          const action = form.dataset.action === "deny" ? "deny" : "approve";
-
-          if (action === "deny") {
-            if (denyButton instanceof HTMLButtonElement) {
-              denyButton.textContent = "Denying...";
-            }
-          } else if (approveButton instanceof HTMLButtonElement) {
-            approveButton.textContent = "Continuing...";
-          }
-
-          if (status instanceof HTMLElement) {
-            status.hidden = false;
-          }
-        });
-      }
-    </script>
   </body>
 </html>`;
   }
 
   function sendConsentPage(res: Parameters<RequestHandler>[1], consentChallenge: string, pending: PendingConsent) {
-    const scriptNonce = crypto.randomBytes(16).toString("base64url");
-    const formActionSources = Array.from(new Set([
-      "'self'",
-      new URL(pending.redirectUri).origin,
-      new URL(config.authorizationUrl).origin,
-    ]));
-
-    for (const [name, value] of Object.entries(buildConsentPageHeaders(scriptNonce, formActionSources))) {
+    for (const [name, value] of Object.entries(CONSENT_PAGE_HEADERS)) {
       res.setHeader(name, value);
     }
 
     res.status(200)
       .type("html")
-      .send(renderConsentPage(consentChallenge, pending, scriptNonce));
+      .send(renderConsentPage(consentChallenge, pending));
   }
 
   const provider: OAuthServerProvider = {
@@ -408,7 +345,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
         throw new InvalidRequestError("Missing consent challenge.");
       }
 
-      const result = await core.approveConsent(consentChallenge, action ?? "approve");
+      const result = await core.approveConsent(consentChallenge, action ?? "");
       res.redirect(302, result.location);
     } catch (error) {
       if (error instanceof InvalidRequestError) {

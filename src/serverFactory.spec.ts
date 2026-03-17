@@ -135,57 +135,6 @@ describe("createServer", () => {
     );
   });
 
-  it("registers per-tool security metadata for mixed-auth deployments", () => {
-    const registerTool = vi.fn();
-
-    registerServerTools(
-      {
-        registerTool,
-      },
-      {} as any,
-      {
-        authMode: "oauth",
-        oauthScopes: ["openid", "profile"],
-      },
-    );
-
-    expect(registerTool).toHaveBeenCalledWith(
-      "ynab_get_mcp_version",
-      expect.objectContaining({
-        annotations: expect.objectContaining({
-          openWorldHint: false,
-          readOnlyHint: true,
-        }),
-        _meta: expect.objectContaining({
-          securitySchemes: [
-            {
-              type: "noauth",
-            },
-          ],
-        }),
-      }),
-      expect.any(Function),
-    );
-    expect(registerTool).toHaveBeenCalledWith(
-      "ynab_get_user",
-      expect.objectContaining({
-        annotations: expect.objectContaining({
-          openWorldHint: false,
-          readOnlyHint: true,
-        }),
-        _meta: expect.objectContaining({
-          securitySchemes: [
-            {
-              scopes: ["openid", "profile"],
-              type: "oauth2",
-            },
-          ],
-        }),
-      }),
-      expect.any(Function),
-    );
-  });
-
   it("requires explicit config instead of reading the API token from environment", () => {
     process.env = { ...originalEnv, YNAB_API_TOKEN: "env-token" };
 

@@ -35,10 +35,7 @@ describe("createOAuthCore", () => {
         return findGrant((grant) => grant.pendingAuthorization?.stateId === stateId);
       },
       getPendingConsentGrant(consentId: string) {
-        return findGrant((grant) => (
-          grant.consent?.challenge === consentId ||
-          grant.consentApprovalReplay?.challenge === consentId
-        ));
+        return findGrant((grant) => grant.consent?.challenge === consentId);
       },
       getRefreshTokenGrant(refreshToken: string) {
         return findGrant((grant) => grant.refreshToken?.token === refreshToken);
@@ -64,10 +61,7 @@ describe("createOAuthCore", () => {
     };
   }
 
-  function createCore(overrides: {
-    exchangeUpstreamAuthorizationCode?: (code: string) => Promise<OAuthTokens>;
-    exchangeUpstreamRefreshToken?: (refreshToken: string) => Promise<OAuthTokens>;
-  } = {}) {
+  function createCore() {
     const store = createStore();
     const mintedAccessTokens: Array<{
       clientId: string;
@@ -96,7 +90,7 @@ describe("createOAuthCore", () => {
           url.searchParams.set("scope", pending.scopes.join(" "));
           return url.href;
         },
-        exchangeUpstreamAuthorizationCode: overrides.exchangeUpstreamAuthorizationCode ?? (async (code) => {
+        exchangeUpstreamAuthorizationCode: async (code) => {
           upstreamCodeExchanges.push(code);
           return {
             access_token: "upstream-access-token",
@@ -104,8 +98,8 @@ describe("createOAuthCore", () => {
             refresh_token: "upstream-refresh-token",
             token_type: "Bearer",
           } satisfies OAuthTokens;
-        }),
-        exchangeUpstreamRefreshToken: overrides.exchangeUpstreamRefreshToken ?? (async (refreshToken) => {
+        },
+        exchangeUpstreamRefreshToken: async (refreshToken) => {
           upstreamRefreshExchanges.push(refreshToken);
           return {
             access_token: "upstream-refresh-token-access",
@@ -113,7 +107,7 @@ describe("createOAuthCore", () => {
             refresh_token: "upstream-refresh-token-rotated",
             token_type: "Bearer",
           } satisfies OAuthTokens;
-        }),
+        },
         mintAccessToken: async (record) => {
           mintedAccessTokens.push(record);
           return `local-access-token-${mintedAccessTokens.length}`;
@@ -280,36 +274,6 @@ describe("createOAuthCore", () => {
     expect(store.state.grants.size).toBe(1);
   });
 
-  it("replays the same upstream redirect when an approval is submitted twice", async () => {
-    const { core } = createCore();
-    const client = await core.registerClient({
-      client_name: "Claude Web",
-      grant_types: ["authorization_code", "refresh_token"],
-      redirect_uris: ["https://claude.ai/oauth/callback"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-    });
-    const consentResult = await core.startAuthorization(client, {
-      codeChallenge: "pkce-challenge",
-      redirectUri: "https://claude.ai/oauth/callback",
-      resource: new URL("https://mcp.example.com/mcp"),
-      scopes: ["openid", "profile"],
-      state: "client-state",
-    });
-
-    if (consentResult.type !== "consent") {
-      throw new Error("Expected consent result");
-    }
-
-    const firstApproval = await core.approveConsent(consentResult.consentChallenge, "approve");
-    const secondApproval = await core.approveConsent(consentResult.consentChallenge, "approve");
-
-    expect(firstApproval).toMatchObject({
-      type: "redirect",
-    });
-    expect(secondApproval).toEqual(firstApproval);
-  });
-
   it("refreshes local tokens against the upstream provider and rejects mismatched redirect or resource values", async () => {
     const { core, upstreamRefreshExchanges } = createCore();
     const client = await core.registerClient({
@@ -391,114 +355,6 @@ describe("createOAuthCore", () => {
     )).rejects.toThrow(InvalidGrantError);
   });
 
-  it("does not mint a local refresh token when the upstream provider does not issue one", async () => {
-    const { core, mintedAccessTokens, store, upstreamCodeExchanges } = createCore({
-      exchangeUpstreamAuthorizationCode: async (code) => {
-        upstreamCodeExchanges.push(code);
-        return {
-          access_token: "upstream-access-token",
-          expires_in: 1800,
-          token_type: "Bearer",
-        } satisfies OAuthTokens;
-      },
-    });
-    const client = await core.registerClient({
-      client_name: "Claude Web",
-      grant_types: ["authorization_code", "refresh_token"],
-      redirect_uris: ["https://claude.ai/oauth/callback"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-    });
-    const consentResult = await core.startAuthorization(client, {
-      codeChallenge: "pkce-challenge",
-      redirectUri: "https://claude.ai/oauth/callback",
-      resource: new URL("https://mcp.example.com/mcp"),
-      scopes: ["openid", "profile"],
-      state: "client-state",
-    });
-
-    if (consentResult.type !== "consent") {
-      throw new Error("Expected consent result");
-    }
-
-    const approvalResult = await core.approveConsent(consentResult.consentChallenge, "approve");
-
-    if (approvalResult.type !== "redirect") {
-      throw new Error("Expected redirect result");
-    }
-
-    const upstreamState = new URL(approvalResult.location).searchParams.get("state");
-    const callbackResult = await core.handleCallback({
-      code: "upstream-code-123",
-      upstreamState: upstreamState!,
-    });
-
-    if (callbackResult.type !== "redirect") {
-      throw new Error("Expected redirect result");
-    }
-
-    const authorizationCode = new URL(callbackResult.location).searchParams.get("code");
-    const tokenResult = await core.exchangeAuthorizationCode(
-      client,
-      authorizationCode!,
-      "https://claude.ai/oauth/callback",
-      new URL("https://mcp.example.com/mcp"),
-    );
-
-    expect(tokenResult).toMatchObject({
-      access_token: "local-access-token-1",
-      token_type: "Bearer",
-    });
-    expect(tokenResult.refresh_token).toBeUndefined();
-    expect(mintedAccessTokens).toEqual([
-      {
-        clientId: client.client_id,
-        expiresInSeconds: 1800,
-        resource: "https://mcp.example.com/mcp",
-        scopes: ["openid", "profile"],
-        subject: client.client_id,
-      },
-    ]);
-    expect(store.state.grants.size).toBe(0);
-  });
-
-  it("rejects refresh token exchange when the stored grant has no upstream refresh token", async () => {
-    const { core, store } = createCore();
-    const client = await core.registerClient({
-      client_name: "Claude Web",
-      grant_types: ["authorization_code", "refresh_token"],
-      redirect_uris: ["https://claude.ai/oauth/callback"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-    });
-
-    store.saveGrant({
-      clientId: client.client_id,
-      codeChallenge: "pkce-challenge",
-      grantId: "grant-with-missing-upstream-refresh",
-      redirectUri: "https://claude.ai/oauth/callback",
-      refreshToken: {
-        expiresAt: 1_700_000_000_000 + 60_000,
-        token: "local-refresh-token",
-      },
-      resource: "https://mcp.example.com/mcp",
-      scopes: ["openid"],
-      subject: client.client_id,
-      upstreamTokens: {
-        access_token: "upstream-access-token",
-        expires_in: 1800,
-        token_type: "Bearer",
-      },
-    });
-
-    await expect(core.exchangeRefreshToken(
-      client,
-      "local-refresh-token",
-      ["openid"],
-      new URL("https://mcp.example.com/mcp"),
-    )).rejects.toThrow("Refresh token is missing upstream refresh context.");
-  });
-
   it("returns an OAuth error redirect when consent is denied and rejects unknown callback state", async () => {
     const { core } = createCore();
     const client = await core.registerClient({
@@ -536,35 +392,5 @@ describe("createOAuthCore", () => {
       code: "upstream-code-123",
       upstreamState: "missing-state",
     })).rejects.toThrow(InvalidRequestError);
-  });
-
-  it("still rejects duplicate denied consent submissions", async () => {
-    const { core } = createCore();
-    const client = await core.registerClient({
-      client_name: "Claude Web",
-      grant_types: ["authorization_code", "refresh_token"],
-      redirect_uris: ["https://claude.ai/oauth/callback"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-    });
-    const consentResult = await core.startAuthorization(client, {
-      codeChallenge: "pkce-challenge",
-      redirectUri: "https://claude.ai/oauth/callback",
-      resource: new URL("https://mcp.example.com/mcp"),
-      scopes: ["openid", "profile"],
-      state: "client-state",
-    });
-
-    if (consentResult.type !== "consent") {
-      throw new Error("Expected consent result");
-    }
-
-    const denialResult = await core.approveConsent(consentResult.consentChallenge, "deny");
-
-    expect(denialResult).toMatchObject({
-      type: "redirect",
-    });
-
-    await expect(core.approveConsent(consentResult.consentChallenge, "deny")).rejects.toThrow(InvalidRequestError);
   });
 });
