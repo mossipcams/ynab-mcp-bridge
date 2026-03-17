@@ -1430,6 +1430,36 @@ describe("startHttpServer", () => {
     ]);
   });
 
+  it("accepts unauthenticated tools/list bootstrap posts without a json content type in oauth mode", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Origin: "https://claude.ai",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("application/json");
+  });
+
   it("allows unauthenticated public tool calls in oauth mode while still challenging protected tools", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
