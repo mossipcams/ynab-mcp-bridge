@@ -136,7 +136,7 @@ describe("planToolUtils", () => {
     );
   });
 
-  it("serializes tool payloads without pretty-print whitespace", () => {
+  it("serializes nested objects as pipe-delimited key|value pairs", () => {
     expect(toTextResult({
       plan: {
         id: "plan-1",
@@ -145,23 +145,46 @@ describe("planToolUtils", () => {
     })).toEqual({
       content: [{
         type: "text",
-        text: "{\"plan\":{\"id\":\"plan-1\",\"name\":\"Home\"}}",
+        text: "plan.id|plan-1\nplan.name|Home",
       }],
     });
   });
 
-  it("returns compact parseable error payloads", () => {
+  it("serializes arrays with indexed keys in pipe-delimited format", () => {
+    expect(toTextResult({
+      accounts: [
+        { id: "a1", name: "Checking" },
+        { id: "a2", name: "Savings" },
+      ],
+      account_count: 2,
+    })).toEqual({
+      content: [{
+        type: "text",
+        text: "accounts.0.id|a1\naccounts.0.name|Checking\naccounts.1.id|a2\naccounts.1.name|Savings\naccount_count|2",
+      }],
+    });
+  });
+
+  it("handles null values in pipe-delimited output", () => {
+    expect(toTextResult({
+      present: "yes",
+      missing: null,
+    })).toEqual({
+      content: [{
+        type: "text",
+        text: "present|yes\nmissing|",
+      }],
+    });
+  });
+
+  it("returns pipe-delimited error payloads", () => {
     const result = toErrorResult(new Error("Plan not found"));
 
     expect(result.isError).toBe(true);
     expect(result.content).toEqual([{
       type: "text",
-      text: "{\"success\":false,\"error\":\"Plan not found\"}",
+      text: "success|false\nerror|Plan not found",
     }]);
-    expect(JSON.parse(result.content[0].text)).toEqual({
-      success: false,
-      error: "Plan not found",
-    });
   });
 
   it("removes empty and default fields from compact result items", () => {

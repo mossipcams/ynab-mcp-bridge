@@ -261,11 +261,18 @@ export function projectTransaction(
   });
 }
 
+function toPipeDelimited(value: unknown, prefix = ""): string {
+  if (value === null || value === undefined) return `${prefix}|`;
+  if (Array.isArray(value)) return value.map((item, i) => toPipeDelimited(item, `${prefix}.${i}`)).join("\n");
+  if (typeof value === "object") return Object.entries(value as Record<string, unknown>).map(([k, v]) => toPipeDelimited(v, prefix ? `${prefix}.${k}` : k)).join("\n");
+  return `${prefix}|${String(value)}`;
+}
+
 export function toTextResult(payload: unknown) {
   return {
     content: [{
       type: "text" as const,
-      text: JSON.stringify(payload),
+      text: toPipeDelimited(payload),
     }],
   };
 }
