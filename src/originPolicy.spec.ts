@@ -54,6 +54,22 @@ describe("originPolicy", () => {
     });
   });
 
+  it("allows null origins only for oauth consent posts", () => {
+    const resolution = resolveOriginPolicy({
+      allowedOrigins: new Set(["https://claude.ai"]),
+      headers: {
+        host: "mcp.example.com",
+        origin: "null",
+      },
+      path: "/authorize/consent",
+    });
+
+    expect(resolution).toEqual({
+      allowed: true,
+      responseOrigin: undefined,
+    });
+  });
+
   it("rejects untrusted origins", () => {
     const resolution = resolveOriginPolicy({
       allowedOrigins: new Set(["https://claude.ai"]),

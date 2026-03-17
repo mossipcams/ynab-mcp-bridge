@@ -18,7 +18,7 @@ type ApprovalRecord = {
   scopes: string[];
 };
 
-type LegacyPendingConsentRecord = {
+type PendingConsentRecord = {
   clientId: string;
   clientName?: string;
   codeChallenge: string;
@@ -29,14 +29,14 @@ type LegacyPendingConsentRecord = {
   state?: string;
 };
 
-type LegacyPendingAuthorizationRecord = Omit<LegacyPendingConsentRecord, "clientName">;
+type PendingAuthorizationRecord = Omit<PendingConsentRecord, "clientName">;
 
-type LegacyAuthorizationCodeRecord = LegacyPendingAuthorizationRecord & {
+type AuthorizationCodeRecord = PendingAuthorizationRecord & {
   subject: string;
   upstreamTokens: OAuthTokens;
 };
 
-type LegacyRefreshTokenRecord = {
+type RefreshTokenRecord = {
   clientId: string;
   expiresAt: number;
   resource: string;
@@ -171,7 +171,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
 
   if (parsed.pendingConsents && typeof parsed.pendingConsents === "object") {
     for (const [consentId, record] of Object.entries(parsed.pendingConsents)) {
-      const pending = record as Partial<LegacyPendingConsentRecord>;
+      const pending = record as Partial<PendingConsentRecord>;
 
       if (
         typeof pending.clientId === "string" &&
@@ -201,7 +201,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
 
   if (parsed.pendingAuthorizations && typeof parsed.pendingAuthorizations === "object") {
     for (const [stateId, record] of Object.entries(parsed.pendingAuthorizations)) {
-      const pending = record as Partial<LegacyPendingAuthorizationRecord>;
+      const pending = record as Partial<PendingAuthorizationRecord>;
 
       if (
         typeof pending.clientId === "string" &&
@@ -230,7 +230,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
 
   if (parsed.authorizationCodes && typeof parsed.authorizationCodes === "object") {
     for (const [code, record] of Object.entries(parsed.authorizationCodes)) {
-      const authorizationCode = record as Partial<LegacyAuthorizationCodeRecord>;
+      const authorizationCode = record as Partial<AuthorizationCodeRecord>;
 
       if (
         typeof authorizationCode.clientId === "string" &&
@@ -264,7 +264,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
 
   if (parsed.refreshTokens && typeof parsed.refreshTokens === "object") {
     for (const [token, record] of Object.entries(parsed.refreshTokens)) {
-      const refreshToken = record as Partial<LegacyRefreshTokenRecord>;
+      const refreshToken = record as Partial<RefreshTokenRecord>;
 
       if (
         typeof refreshToken.clientId === "string" &&
@@ -350,6 +350,72 @@ function loadState(storePath: string | undefined): PersistedOAuthState {
   }
 }
 
+function toPendingConsentRecord(grant: OAuthGrant): PendingConsentRecord | undefined {
+  if (!grant.consent) {
+    return undefined;
+  }
+
+  return {
+    clientId: grant.clientId,
+    clientName: grant.clientName,
+    codeChallenge: grant.codeChallenge,
+    expiresAt: grant.consent.expiresAt,
+    redirectUri: grant.redirectUri,
+    resource: grant.resource,
+    scopes: grant.scopes,
+    state: grant.state,
+  };
+}
+
+function toPendingAuthorizationRecord(grant: OAuthGrant): PendingAuthorizationRecord | undefined {
+  if (!grant.pendingAuthorization) {
+    return undefined;
+  }
+
+  return {
+    clientId: grant.clientId,
+    codeChallenge: grant.codeChallenge,
+    expiresAt: grant.pendingAuthorization.expiresAt,
+    redirectUri: grant.redirectUri,
+    resource: grant.resource,
+    scopes: grant.scopes,
+    state: grant.state,
+  };
+}
+
+function toAuthorizationCodeRecord(grant: OAuthGrant): AuthorizationCodeRecord | undefined {
+  if (!grant.authorizationCode || !grant.subject || !grant.upstreamTokens) {
+    return undefined;
+  }
+
+  return {
+    clientId: grant.clientId,
+    codeChallenge: grant.codeChallenge,
+    expiresAt: grant.authorizationCode.expiresAt,
+    redirectUri: grant.redirectUri,
+    resource: grant.resource,
+    scopes: grant.scopes,
+    state: grant.state,
+    subject: grant.subject,
+    upstreamTokens: grant.upstreamTokens,
+  };
+}
+
+function toRefreshTokenRecord(grant: OAuthGrant): RefreshTokenRecord | undefined {
+  if (!grant.refreshToken || !grant.subject || !grant.upstreamTokens) {
+    return undefined;
+  }
+
+  return {
+    clientId: grant.clientId,
+    expiresAt: grant.refreshToken.expiresAt,
+    resource: grant.resource,
+    scopes: grant.scopes,
+    subject: grant.subject,
+    upstreamTokens: grant.upstreamTokens,
+  };
+}
+
 export function createOAuthStore(storePath: string | undefined) {
   let state = pruneExpiredEntries(loadState(storePath));
 
@@ -417,21 +483,84 @@ export function createOAuthStore(storePath: string | undefined) {
         persist();
       }
     },
+    deleteAuthorizationCode(code: string) {
+      const grant = findGrant((candidate) => candidate.authorizationCode?.code === code);
+
+      if (grant) {
+        deleteGrant(grant.grantId);
+      }
+    },
     deleteGrant,
+    deletePendingAuthorization(stateId: string) {
+      const grant = findGrant((candidate) => candidate.pendingAuthorization?.stateId === stateId);
+
+      if (grant) {
+        deleteGrant(grant.grantId);
+      }
+    },
+    deletePendingConsent(consentId: string) {
+      const grant = findGrant((candidate) => candidate.consent?.challenge === consentId);
+
+      if (grant) {
+        deleteGrant(grant.grantId);
+      }
+    },
+    deleteRefreshToken(refreshToken: string) {
+      const grant = findGrant((candidate) => candidate.refreshToken?.token === refreshToken);
+
+      if (grant) {
+        deleteGrant(grant.grantId);
+      }
+    },
+    getAuthorizationCode(code: string) {
+      const grant = findGrant((candidate) => candidate.authorizationCode?.code === code);
+      return grant ? toAuthorizationCodeRecord(grant) : undefined;
+    },
     getAuthorizationCodeGrant(code: string) {
       return findGrant((candidate) => candidate.authorizationCode?.code === code);
     },
     getClient(clientId: string) {
       return state.clients[clientId];
     },
+    getGrant(grantId: string) {
+      const grant = state.grants[grantId];
+
+      if (!grant) {
+        return undefined;
+      }
+
+      const expiresAt = getGrantExpiry(grant);
+
+      if (expiresAt !== undefined && expiresAt <= Date.now()) {
+        deleteGrant(grantId);
+        return undefined;
+      }
+
+      return grant;
+    },
+    getPendingAuthorization(stateId: string) {
+      const grant = findGrant((candidate) => candidate.pendingAuthorization?.stateId === stateId);
+      return grant ? toPendingAuthorizationRecord(grant) : undefined;
+    },
     getPendingAuthorizationGrant(stateId: string) {
       return findGrant((candidate) => candidate.pendingAuthorization?.stateId === stateId);
+    },
+    getPendingConsent(consentId: string) {
+      const grant = findGrant((candidate) => (
+        candidate.consent?.challenge === consentId ||
+        candidate.consentApprovalReplay?.challenge === consentId
+      ));
+      return grant ? toPendingConsentRecord(grant) : undefined;
     },
     getPendingConsentGrant(consentId: string) {
       return findGrant((candidate) => (
         candidate.consent?.challenge === consentId ||
         candidate.consentApprovalReplay?.challenge === consentId
       ));
+    },
+    getRefreshToken(refreshToken: string) {
+      const grant = findGrant((candidate) => candidate.refreshToken?.token === refreshToken);
+      return grant ? toRefreshTokenRecord(grant) : undefined;
     },
     getRefreshTokenGrant(refreshToken: string) {
       return findGrant((candidate) => candidate.refreshToken?.token === refreshToken);
@@ -444,6 +573,30 @@ export function createOAuthStore(storePath: string | undefined) {
         approval.resource === record.resource &&
         approval.scopes.join(" ") === normalizedScopes.join(" ")
       ));
+    },
+    saveAuthorizationCode(code: string, record: AuthorizationCodeRecord) {
+      state = {
+        ...state,
+        grants: {
+          ...state.grants,
+          [`compat-code:${code}`]: normalizeGrant({
+            authorizationCode: {
+              code,
+              expiresAt: record.expiresAt,
+            },
+            clientId: record.clientId,
+            codeChallenge: record.codeChallenge,
+            grantId: `compat-code:${code}`,
+            redirectUri: record.redirectUri,
+            resource: record.resource,
+            scopes: record.scopes,
+            state: record.state,
+            subject: record.subject,
+            upstreamTokens: record.upstreamTokens,
+          }),
+        },
+      };
+      persist();
     },
     saveClient(client: OAuthClientInformationFull) {
       state = {
@@ -461,6 +614,74 @@ export function createOAuthStore(storePath: string | undefined) {
         grants: {
           ...state.grants,
           [grant.grantId]: normalizeGrant(grant),
+        },
+      };
+      persist();
+    },
+    savePendingAuthorization(stateId: string, record: PendingAuthorizationRecord) {
+      state = {
+        ...state,
+        grants: {
+          ...state.grants,
+          [`compat-authorization:${stateId}`]: normalizeGrant({
+            clientId: record.clientId,
+            codeChallenge: record.codeChallenge,
+            grantId: `compat-authorization:${stateId}`,
+            pendingAuthorization: {
+              expiresAt: record.expiresAt,
+              stateId,
+            },
+            redirectUri: record.redirectUri,
+            resource: record.resource,
+            scopes: record.scopes,
+            state: record.state,
+          }),
+        },
+      };
+      persist();
+    },
+    savePendingConsent(consentId: string, record: PendingConsentRecord) {
+      state = {
+        ...state,
+        grants: {
+          ...state.grants,
+          [`compat-consent:${consentId}`]: normalizeGrant({
+            clientId: record.clientId,
+            clientName: record.clientName,
+            codeChallenge: record.codeChallenge,
+            consent: {
+              challenge: consentId,
+              expiresAt: record.expiresAt,
+            },
+            grantId: `compat-consent:${consentId}`,
+            redirectUri: record.redirectUri,
+            resource: record.resource,
+            scopes: record.scopes,
+            state: record.state,
+          }),
+        },
+      };
+      persist();
+    },
+    saveRefreshToken(refreshToken: string, record: RefreshTokenRecord) {
+      state = {
+        ...state,
+        grants: {
+          ...state.grants,
+          [`compat-refresh:${refreshToken}`]: normalizeGrant({
+            clientId: record.clientId,
+            codeChallenge: "",
+            grantId: `compat-refresh:${refreshToken}`,
+            redirectUri: "",
+            refreshToken: {
+              expiresAt: record.expiresAt,
+              token: refreshToken,
+            },
+            resource: record.resource,
+            scopes: record.scopes,
+            subject: record.subject,
+            upstreamTokens: record.upstreamTokens,
+          }),
         },
       };
       persist();

@@ -1,21 +1,92 @@
 import crypto from "node:crypto";
 
+import { SignJWT, createRemoteJWKSet, errors, jwtVerify, type JWTPayload } from "jose";
 import type { RequestHandler } from "express";
 import {
   InvalidRequestError,
+  InvalidTokenError,
+  ServerError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
-import { validateCloudflareAccessOAuthSettings, type RuntimeAuthConfig } from "./config.js";
-import { CONSENT_PATH, sendConsentPage } from "./oauthConsentPage.js";
-import { createOAuthCore } from "./oauthCore.js";
-import { createJwtService } from "./oauthJwt.js";
+import type { RuntimeAuthConfig } from "./config.js";
+import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
-import { createUpstreamClient } from "./oauthUpstream.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
 
-export { CONSENT_PATH };
+type LocalClaims = JWTPayload & {
+  client_id?: string;
+  scope?: string;
+};
+
+const CONSENT_PAGE_HEADERS = {
+  "cache-control": "no-store",
+  pragma: "no-cache",
+  "referrer-policy": "no-referrer",
+  "x-content-type-options": "nosniff",
+} as const;
+
+function parseScopes(scopeClaim: unknown) {
+  if (typeof scopeClaim !== "string") {
+    return [];
+  }
+
+  return scopeClaim
+    .split(/\s+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+}
+
+function getClientId(payload: LocalClaims) {
+  if (typeof payload.client_id === "string" && payload.client_id.length > 0) {
+    return payload.client_id;
+  }
+
+  if (typeof payload.azp === "string" && payload.azp.length > 0) {
+    return payload.azp;
+  }
+
+  if (typeof payload.sub === "string" && payload.sub.length > 0) {
+    return payload.sub;
+  }
+
+  throw new InvalidTokenError("Token is missing a client identifier.");
+}
+
+function getAudienceValue(payload: LocalClaims) {
+  if (typeof payload.aud === "string") {
+    return payload.aud;
+  }
+
+  if (Array.isArray(payload.aud)) {
+    const audience = payload.aud.find((value) => typeof value === "string" && value.length > 0);
+
+    if (audience) {
+      return audience;
+    }
+  }
+
+  return undefined;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function buildConsentPageHeaders(scriptNonce: string, formActionSources: string[]) {
+  return {
+    ...CONSENT_PAGE_HEADERS,
+    "content-security-policy": `default-src 'none'; connect-src 'self'; script-src 'nonce-${scriptNonce}'; form-action ${formActionSources.join(" ")}; frame-ancestors 'none'; base-uri 'none'`,
+  } as const;
+}
 
 export function createOAuthBroker(config: OAuthAuthConfig): {
   callbackPath: string;
@@ -25,36 +96,168 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
   provider: OAuthServerProvider;
   handleCallback: RequestHandler;
 } {
-  validateCloudflareAccessOAuthSettings({
-    authorizationUrl: config.authorizationUrl,
-    issuer: config.issuer,
-    jwksUrl: config.jwksUrl,
-    tokenUrl: config.tokenUrl,
-  });
-
   const store = createOAuthStore(config.storePath);
   const resourceUrl = new URL(config.publicUrl);
   const issuerUrl = new URL(resourceUrl.origin);
   const callbackUrl = new URL(config.callbackPath, issuerUrl).href;
   const localTokenSecret = Buffer.from(config.tokenSigningSecret ?? crypto.randomBytes(32).toString("base64url"), "utf8");
+  const upstreamJwks = createRemoteJWKSet(new URL(config.jwksUrl));
   const allowedAudiences = Array.from(new Set([config.audience, config.publicUrl]));
 
-  const jwtService = createJwtService({
-    allowedAudiences,
-    issuerUrl,
-    localTokenSecret,
-    publicUrl: config.publicUrl,
-    upstreamAudience: config.audience,
-    upstreamIssuer: config.issuer,
-    upstreamJwksUrl: config.jwksUrl,
-  });
+  async function verifyLocalAccessToken(token: string): Promise<AuthInfo> {
+    const { payload } = await jwtVerify<LocalClaims>(token, localTokenSecret, {
+      audience: allowedAudiences,
+      issuer: issuerUrl.href,
+    });
+    const resource = getAudienceValue(payload) ?? config.publicUrl;
 
-  const upstream = createUpstreamClient({
-    authorizationUrl: config.authorizationUrl,
-    clientId: config.clientId,
-    clientSecret: config.clientSecret,
-    tokenUrl: config.tokenUrl,
-  }, callbackUrl);
+    return {
+      clientId: getClientId(payload),
+      expiresAt: typeof payload.exp === "number" ? payload.exp : undefined,
+      extra: {
+        subject: payload.sub,
+      },
+      resource: new URL(resource),
+      scopes: parseScopes(payload.scope),
+      token,
+    };
+  }
+
+  async function verifyUpstreamAccessToken(token: string): Promise<AuthInfo> {
+    const { payload } = await jwtVerify<LocalClaims>(token, upstreamJwks, {
+      audience: config.audience,
+      issuer: config.issuer,
+    });
+
+    return {
+      clientId: getClientId(payload),
+      expiresAt: typeof payload.exp === "number" ? payload.exp : undefined,
+      extra: {
+        subject: payload.sub,
+      },
+      resource: new URL(config.publicUrl),
+      scopes: parseScopes(payload.scope),
+      token,
+    };
+  }
+
+  async function verifyAccessToken(token: string): Promise<AuthInfo> {
+    try {
+      return await verifyLocalAccessToken(token);
+    } catch {
+      // Fall through to upstream verification so Cloudflare-issued JWTs still work.
+    }
+
+    try {
+      return await verifyUpstreamAccessToken(token);
+    } catch (error) {
+      if (error instanceof errors.JWTExpired) {
+        throw new InvalidTokenError("Token has expired.");
+      }
+
+      if (error instanceof errors.JWTClaimValidationFailed) {
+        if (error.claim === "iss") {
+          throw new InvalidTokenError("Invalid token issuer.");
+        }
+
+        if (error.claim === "aud") {
+          throw new InvalidTokenError("Invalid token audience.");
+        }
+      }
+
+      throw new InvalidTokenError("Invalid access token.");
+    }
+  }
+
+  async function mintAccessToken(record: {
+    clientId: string;
+    expiresInSeconds: number;
+    resource: string;
+    scopes: string[];
+    subject: string;
+  }) {
+    return await new SignJWT({
+      client_id: record.clientId,
+      scope: record.scopes.join(" "),
+    })
+      .setProtectedHeader({
+        alg: "HS256",
+        typ: "JWT",
+      })
+      .setIssuedAt()
+      .setIssuer(issuerUrl.href)
+      .setAudience(record.resource)
+      .setExpirationTime(`${record.expiresInSeconds}s`)
+      .setSubject(record.subject)
+      .sign(localTokenSecret);
+  }
+
+  async function exchangeUpstreamAuthorizationCode(code: string) {
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      redirect_uri: callbackUrl,
+    });
+    const response = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      throw new ServerError(`Upstream token exchange failed with status ${response.status}.`);
+    }
+
+    return await response.json() as OAuthTokens;
+  }
+
+  async function exchangeUpstreamRefreshToken(refreshToken: string) {
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+    });
+    const response = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      throw new ServerError(`Upstream refresh exchange failed with status ${response.status}.`);
+    }
+
+    return await response.json() as OAuthTokens;
+  }
+
+  function buildUpstreamAuthorizationUrl(pending: {
+    resource: string;
+    scopes: string[];
+    upstreamState: string;
+  }) {
+    const upstreamAuthorizationUrl = new URL(config.authorizationUrl);
+    upstreamAuthorizationUrl.searchParams.set("client_id", config.clientId);
+    upstreamAuthorizationUrl.searchParams.set("redirect_uri", callbackUrl);
+    upstreamAuthorizationUrl.searchParams.set("response_type", "code");
+    upstreamAuthorizationUrl.searchParams.set("state", pending.upstreamState);
+
+    if (pending.scopes.length > 0) {
+      upstreamAuthorizationUrl.searchParams.set("scope", pending.scopes.join(" "));
+    }
+
+    upstreamAuthorizationUrl.searchParams.set("resource", pending.resource);
+
+    return upstreamAuthorizationUrl;
+  }
 
   const core = createOAuthCore({
     config: {
@@ -64,14 +267,106 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     },
     dependencies: {
       createId: () => crypto.randomBytes(24).toString("base64url"),
-      createUpstreamAuthorizationUrl: (pending) => upstream.buildUpstreamAuthorizationUrl(pending).href,
-      exchangeUpstreamAuthorizationCode: upstream.exchangeUpstreamAuthorizationCode,
-      exchangeUpstreamRefreshToken: upstream.exchangeUpstreamRefreshToken,
-      mintAccessToken: jwtService.mintAccessToken,
+      createUpstreamAuthorizationUrl: (pending) => buildUpstreamAuthorizationUrl(pending).href,
+      exchangeUpstreamAuthorizationCode,
+      exchangeUpstreamRefreshToken,
+      mintAccessToken,
       now: () => Date.now(),
     },
     store,
   });
+
+  function renderConsentPage(consentChallenge: string, pending: PendingConsent, scriptNonce: string) {
+    const clientName = escapeHtml(pending.clientName ?? pending.clientId);
+    const resource = escapeHtml(pending.resource);
+    const scopes = escapeHtml(pending.scopes.length > 0 ? pending.scopes.join(", ") : "default scopes");
+    const escapedConsentChallenge = escapeHtml(consentChallenge);
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Approve MCP client access</title>
+  </head>
+  <body>
+    <h1>Approve MCP client access</h1>
+    <p><strong>${clientName}</strong> is requesting access to ${resource}.</p>
+    <p>Requested scopes: ${scopes}</p>
+    <p>After you approve, this window may take a moment to continue.</p>
+    <p id="consent-status" hidden>Continuing...</p>
+    <form id="approve-form" method="post" action="/authorize/consent" data-action="approve">
+      <input type="hidden" name="action" value="approve">
+      <input type="hidden" name="consent_challenge" value="${escapedConsentChallenge}">
+      <button id="approve-button" type="submit">Approve</button>
+    </form>
+    <form id="deny-form" method="post" action="/authorize/consent" data-action="deny">
+      <input type="hidden" name="action" value="deny">
+      <input type="hidden" name="consent_challenge" value="${escapedConsentChallenge}">
+      <button id="deny-button" type="submit">Deny</button>
+    </form>
+    <script nonce="${scriptNonce}">
+      const forms = document.querySelectorAll("form");
+      const status = document.getElementById("consent-status");
+      const approveButton = document.getElementById("approve-button");
+      const denyButton = document.getElementById("deny-button");
+
+      for (const form of forms) {
+        if (!(form instanceof HTMLFormElement)) {
+          continue;
+        }
+
+        form.addEventListener("submit", (event) => {
+          if (document.body.dataset.submitted === "true") {
+            event.preventDefault();
+            return;
+          }
+
+          document.body.dataset.submitted = "true";
+
+          if (approveButton instanceof HTMLButtonElement) {
+            approveButton.disabled = true;
+          }
+
+          if (denyButton instanceof HTMLButtonElement) {
+            denyButton.disabled = true;
+          }
+
+          const action = form.dataset.action === "deny" ? "deny" : "approve";
+
+          if (action === "deny") {
+            if (denyButton instanceof HTMLButtonElement) {
+              denyButton.textContent = "Denying...";
+            }
+          } else if (approveButton instanceof HTMLButtonElement) {
+            approveButton.textContent = "Continuing...";
+          }
+
+          if (status instanceof HTMLElement) {
+            status.hidden = false;
+          }
+        });
+      }
+    </script>
+  </body>
+</html>`;
+  }
+
+  function sendConsentPage(res: Parameters<RequestHandler>[1], consentChallenge: string, pending: PendingConsent) {
+    const scriptNonce = crypto.randomBytes(16).toString("base64url");
+    const formActionSources = Array.from(new Set([
+      "'self'",
+      new URL(pending.redirectUri).origin,
+      new URL(config.authorizationUrl).origin,
+    ]));
+
+    for (const [name, value] of Object.entries(buildConsentPageHeaders(scriptNonce, formActionSources))) {
+      res.setHeader(name, value);
+    }
+
+    res.status(200)
+      .type("html")
+      .send(renderConsentPage(consentChallenge, pending, scriptNonce));
+  }
 
   const provider: OAuthServerProvider = {
     clientsStore: {
@@ -90,7 +385,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
         return;
       }
 
-      sendConsentPage(res, result.consentChallenge, result.pending, config.authorizationUrl);
+      sendConsentPage(res, result.consentChallenge, result.pending);
     },
     async challengeForAuthorizationCode(client, authorizationCode) {
       return await core.getAuthorizationCodeChallenge(client, authorizationCode);
@@ -101,7 +396,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     async exchangeRefreshToken(client, refreshToken, scopes, resource) {
       return await core.exchangeRefreshToken(client, refreshToken, scopes, resource);
     },
-    verifyAccessToken: jwtService.verifyAccessToken,
+    verifyAccessToken,
   };
 
   const handleConsent: RequestHandler = async (req, res, next) => {

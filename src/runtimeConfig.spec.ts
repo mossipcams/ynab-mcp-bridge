@@ -1,5 +1,3 @@
-import path from "node:path";
-import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { assertBackendEnvironment, resolveRuntimeConfig } from "./runtimeConfig.js";
 

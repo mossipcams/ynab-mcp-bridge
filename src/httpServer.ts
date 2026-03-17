@@ -3,12 +3,12 @@ import type { Server as NodeHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
+import { decodeJwt } from "jose";
 import {
   hostHeaderValidation,
   localhostHostValidation,
 } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import {
-  createOAuthMetadata,
   getOAuthProtectedResourceMetadataUrl,
   mcpAuthRouter,
 } from "@modelcontextprotocol/sdk/server/auth/router.js";
@@ -18,12 +18,12 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
 import {
   assertYnabConfig,
+  validateCloudflareAccessOAuthSettings,
   type RuntimeAuthConfig,
   type YnabConfig,
 } from "./config.js";
-import { createOAuthBroker, CONSENT_PATH } from "./oauthBroker.js";
-import { isDirectUpstreamBearerToken } from "./oauthJwt.js";
-import { applyCorsHeaders, getFirstHeaderValue, isLoopbackHostname, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
+import { createOAuthBroker } from "./oauthBroker.js";
+import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { createServer, isPublicToolName } from "./server.js";
 import { createYnabApi } from "./ynabApi.js";
 
@@ -46,20 +46,7 @@ export type StartedHttpServer = {
 };
 
 const HTTP_ALLOWED_METHODS = ["POST"] as const;
-const OAUTH_HTTP_ALLOWED_METHODS = ["DELETE", "GET", "POST"] as const;
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
-
-function getPathBasedMetadataAliases(path: string) {
-  if (path === "/") {
-    return ["/.well-known/openid-configuration"];
-  }
-
-  return [
-    `/.well-known/oauth-authorization-server${path}`,
-    `/.well-known/openid-configuration${path}`,
-    `${path}/.well-known/openid-configuration`,
-  ];
-}
 
 type ManagedRequest = {
   close: () => Promise<void>;
@@ -122,6 +109,46 @@ function getRequestPath(req: Pick<Request, "path" | "url">) {
   }
 
   return new URL(req.url, "http://127.0.0.1").pathname;
+}
+
+function getFirstHeaderValue(value: string | string[] | undefined) {
+  if (typeof value === "string") {
+    return value.split(",")[0]?.trim();
+  }
+
+  return value?.[0]?.split(",")[0]?.trim();
+}
+
+function getBearerToken(authorizationHeader: string | undefined) {
+  if (!authorizationHeader?.startsWith("Bearer ")) {
+    return undefined;
+  }
+
+  return authorizationHeader.slice("Bearer ".length).trim();
+}
+
+function isDirectUpstreamBearerToken(req: Pick<Request, "headers">, auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
+  const authorizationSource = getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]);
+
+  if (authorizationSource === "cf-access-jwt-assertion") {
+    return false;
+  }
+
+  const token = getBearerToken(getFirstHeaderValue(req.headers.authorization));
+
+  if (!token) {
+    return false;
+  }
+
+  try {
+    return decodeJwt(token).iss === auth.issuer;
+  } catch {
+    return false;
+  }
+}
+
+function isLoopbackHostname(hostname: string | undefined) {
+  return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
 }
 
 function writeJson(res: Response, statusCode: number, body: unknown) {
@@ -486,6 +513,15 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     allowedOrigins.add(new URL(auth.publicUrl).origin);
   }
 
+  if (auth.mode === "oauth") {
+    validateCloudflareAccessOAuthSettings({
+      authorizationUrl: auth.authorizationUrl,
+      issuer: auth.issuer,
+      jwksUrl: auth.jwksUrl,
+      tokenUrl: auth.tokenUrl,
+    });
+  }
+
   const app = express();
   const jsonParser = express.json();
   const urlencodedParser = express.urlencoded({ extended: false });
@@ -543,34 +579,15 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   });
 
   app.use((_req, res, next) => {
-    applyCorsHeaders(
-      res,
-      typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined,
-      auth.mode === "oauth" ? ["OPTIONS", ...OAUTH_HTTP_ALLOWED_METHODS] : ["OPTIONS", ...HTTP_ALLOWED_METHODS],
-    );
+    applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
     next();
   });
 
   if (auth.mode === "oauth") {
     const publicServerUrl = getPublicResourceServerUrl(auth);
-    const oauthMetadata = createOAuthMetadata({
-      baseUrl: oauthBroker!.getIssuerUrl(),
-      issuerUrl: oauthBroker!.getIssuerUrl(),
-      provider: oauthBroker!.provider,
-      scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
-    });
-    const metadataAliasPaths = new Set([
-      "/.well-known/openid-configuration",
-      ...getPathBasedMetadataAliases(path),
-    ]);
 
     app.use(oauthBroker!.callbackPath, oauthBroker!.handleCallback);
-    app.post(CONSENT_PATH, urlencodedParser, oauthBroker!.handleConsent);
-    for (const metadataPath of metadataAliasPaths) {
-      app.get(metadataPath, (_req, res) => {
-        res.status(200).json(oauthMetadata);
-      });
-    }
+    app.post("/authorize/consent", urlencodedParser, oauthBroker!.handleConsent);
     app.use(mcpAuthRouter({
       baseUrl: oauthBroker!.getIssuerUrl(),
       issuerUrl: oauthBroker!.getIssuerUrl(),
@@ -584,11 +601,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   app.use((req, res, next) => {
     if (req.method === "OPTIONS") {
       logHttpDebug("request.preflight", getRequestDebugDetails(req));
-      applyCorsHeaders(
-        res,
-        typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined,
-        auth.mode === "oauth" ? ["OPTIONS", ...OAUTH_HTTP_ALLOWED_METHODS] : ["OPTIONS", ...HTTP_ALLOWED_METHODS],
-      );
+      applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
       res.status(204).end();
       return;
     }
@@ -628,6 +641,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
         return;
       }
 
+      applyCloudflareAccessAuthorizationHeader(req);
       if (getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]) === "cf-access-jwt-assertion") {
         delete req.headers.authorization;
       }
@@ -657,7 +671,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     }
 
     const allowedMethods: readonly string[] = auth.mode === "oauth"
-      ? OAUTH_HTTP_ALLOWED_METHODS
+      ? ["DELETE", "GET", "POST"]
       : HTTP_ALLOWED_METHODS;
 
     if (!allowedMethods.includes(req.method)) {

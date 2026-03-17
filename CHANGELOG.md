@@ -5,34 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.9](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.8...ynab-mcp-bridge-v0.6.9) (2026-03-17)
-
-
-### Bug Fixes
-
-* add path-aware oauth discovery metadata aliases ([#64](https://github.com/mossipcams/ynab-mcp-bridge/issues/64)) ([32852b2](https://github.com/mossipcams/ynab-mcp-bridge/commit/32852b237fc97e2ee2aa99f03eb15f80772e6d19))
-
-## [0.6.8](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.7...ynab-mcp-bridge-v0.6.8) (2026-03-17)
-
-
-### Bug Fixes
-
-* expose openid discovery metadata alias ([#62](https://github.com/mossipcams/ynab-mcp-bridge/issues/62)) ([4171e46](https://github.com/mossipcams/ynab-mcp-bridge/commit/4171e46a3f8ad2c50d4f6d677620c2b14bc520c2))
-
-## [0.6.7](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.6...ynab-mcp-bridge-v0.6.7) (2026-03-17)
-
-
-### Bug Fixes
-
-* accept safari mobile discovery posts without json headers ([#60](https://github.com/mossipcams/ynab-mcp-bridge/issues/60)) ([0bfb686](https://github.com/mossipcams/ynab-mcp-bridge/commit/0bfb6865796fafefea4187a828d1818f09ceb5d5))
-
-## [0.6.6](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.5...ynab-mcp-bridge-v0.6.6) (2026-03-17)
-
-
-### Bug Fixes
-
-* advertise oauth delete support in MCP preflight ([#58](https://github.com/mossipcams/ynab-mcp-bridge/issues/58)) ([ef6019e](https://github.com/mossipcams/ynab-mcp-bridge/commit/ef6019e16d817948426d549619e660bc7882b877))
-
 ## [0.6.5](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.4...ynab-mcp-bridge-v0.6.5) (2026-03-16)
 
 
