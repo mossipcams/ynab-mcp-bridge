@@ -2545,7 +2545,7 @@ describe("startHttpServer", () => {
     ))).toBe(false);
   });
 
-  it("rejects Cloudflare Access JWT assertion headers on protected MCP tool calls", async () => {
+  it("accepts Cloudflare Access JWT assertion headers on protected MCP tool calls", async () => {
     const { jwksUrl, privateKey } = await startJwksServer();
     const token = await createOAuthTestToken(privateKey, {
       iss: "https://id.example.com",
@@ -2582,8 +2582,8 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toContain("\"jsonrpc\":\"2.0\"");
   });
 
   it("logs oauth auth failures for protected tool calls without leaking token material", async () => {
