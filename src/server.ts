@@ -69,7 +69,6 @@ type ToolConfig = {
   annotations?: ToolAnnotations;
   description: string;
   inputSchema: any;
-  title: string;
 };
 
 type ToolHandler = (input: any) => Promise<any>;
@@ -184,14 +183,13 @@ export function registerServerTools(
 ) {
   const registeredToolNames: string[] = [];
 
-  for (const { title, module } of toolRegistrations) {
+  for (const { module } of toolRegistrations) {
     const metadata = buildToolMetadata(module.name, options);
 
     registrar.registerTool(
       module.name,
       {
         ...metadata,
-        title,
         description: module.description,
         inputSchema: module.inputSchema,
       },

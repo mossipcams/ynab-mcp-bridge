@@ -6,8 +6,8 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 export const name = "ynab_get_month_category";
 export const description = "Gets a single category for a specific month.";
 export const inputSchema = {
-  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
-  month: z.string().describe("The month in ISO format (YYYY-MM-DD)."),
+  planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
+  month: z.string().describe("Month as YYYY-MM-DD."),
   categoryId: z.string().describe("The category ID to fetch."),
 };
 

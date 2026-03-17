@@ -6,8 +6,8 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 export const name = "ynab_get_transactions_by_month";
 export const description = "Gets transactions for a single plan month.";
 export const inputSchema = {
-  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
-  month: z.string().describe("The month in ISO format (YYYY-MM-DD)."),
+  planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
+  month: z.string().describe("Month as YYYY-MM-DD."),
 };
 
 export async function execute(input: { planId?: string; month: string }, api: ynab.API) {

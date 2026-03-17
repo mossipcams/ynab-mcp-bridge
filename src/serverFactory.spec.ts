@@ -119,8 +119,14 @@ describe("createServer", () => {
     expect(registerTool).toHaveBeenCalledTimes(39);
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_mcp_version",
+      expect.not.objectContaining({
+        title: expect.anything(),
+      }),
+      expect.any(Function),
+    );
+    expect(registerTool).toHaveBeenCalledWith(
+      "ynab_get_70_20_10_summary",
       expect.objectContaining({
-        title: "Get MCP Version",
         description: expect.any(String),
         inputSchema: expect.any(Object),
       }),
@@ -128,8 +134,8 @@ describe("createServer", () => {
     );
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_70_20_10_summary",
-      expect.objectContaining({
-        title: "Get 70/20/10 Summary",
+      expect.not.objectContaining({
+        title: expect.anything(),
       }),
       expect.any(Function),
     );
