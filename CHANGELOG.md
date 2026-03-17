@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.7.0...ynab-mcp-bridge-v0.7.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* support ChatGPT OAuth discovery metadata ([#72](https://github.com/mossipcams/ynab-mcp-bridge/issues/72)) ([434e944](https://github.com/mossipcams/ynab-mcp-bridge/commit/434e944c24d5c47b616bdf67418c92346843e29f))
+
 ## [0.7.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.5...ynab-mcp-bridge-v0.7.0) (2026-03-17)
 
 
