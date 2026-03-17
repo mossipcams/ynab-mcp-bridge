@@ -288,6 +288,40 @@ function isPayloadTooLargeError(error) {
             ("status" in error && error.status === 413) ||
             ("statusCode" in error && error.statusCode === 413));
 }
+function createMcpBodyParser() {
+    const textParser = express.text({ type: () => true });
+    return (req, res, next) => {
+        textParser(req, res, (error) => {
+            if (error) {
+                next(error);
+                return;
+            }
+            if (typeof req.body !== "string") {
+                next();
+                return;
+            }
+            const trimmedBody = req.body.trim();
+            if (!trimmedBody) {
+                req.body = undefined;
+                next();
+                return;
+            }
+            try {
+                req.body = JSON.parse(trimmedBody);
+                if (!getFirstHeaderValue(req.headers["content-type"])) {
+                    req.headers["content-type"] = "application/json";
+                    if (Array.isArray(req.rawHeaders)) {
+                        req.rawHeaders.push("content-type", "application/json");
+                    }
+                }
+                next();
+            }
+            catch (parseError) {
+                next(parseError);
+            }
+        });
+    };
+}
 async function createManagedRequest(config, auth) {
     const mcpServer = createServer(config, createYnabApi(config), { auth });
     const transport = new StreamableHTTPServerTransport({
@@ -448,7 +482,7 @@ export async function startHttpServer(options) {
         allowedOrigins.add(new URL(auth.publicUrl).origin);
     }
     const app = express();
-    const jsonParser = express.json();
+    const mcpBodyParser = createMcpBodyParser();
     const urlencodedParser = express.urlencoded({ extended: false });
     app.disable("x-powered-by");
     app.set("trust proxy", 1);
@@ -558,7 +592,7 @@ export async function startHttpServer(options) {
             if (auth.mode === "oauth") {
                 applyCloudflareAccessAuthorizationHeader(req);
             }
-            jsonParser(req, res, next);
+            mcpBodyParser(req, res, next);
             return;
         }
         next();

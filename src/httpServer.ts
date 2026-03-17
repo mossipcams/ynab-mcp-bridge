@@ -448,6 +448,45 @@ function isPayloadTooLargeError(error: unknown) {
     );
 }
 
+function createMcpBodyParser() {
+  const textParser = express.text({ type: () => true });
+
+  return (req: Request, res: Response, next: express.NextFunction) => {
+    textParser(req, res, (error) => {
+      if (error) {
+        next(error);
+        return;
+      }
+
+      if (typeof req.body !== "string") {
+        next();
+        return;
+      }
+
+      const trimmedBody = req.body.trim();
+
+      if (!trimmedBody) {
+        req.body = undefined;
+        next();
+        return;
+      }
+
+      try {
+        req.body = JSON.parse(trimmedBody);
+        if (!getFirstHeaderValue(req.headers["content-type"])) {
+          req.headers["content-type"] = "application/json";
+          if (Array.isArray((req as Request & { rawHeaders?: string[] }).rawHeaders)) {
+            (req as Request & { rawHeaders: string[] }).rawHeaders.push("content-type", "application/json");
+          }
+        }
+        next();
+      } catch (parseError) {
+        next(parseError);
+      }
+    });
+  };
+}
+
 async function createManagedRequest(config: YnabConfig, auth?: RuntimeAuthConfig) {
   const mcpServer = createServer(config, createYnabApi(config), { auth });
   const transport = new StreamableHTTPServerTransport({
@@ -660,7 +699,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   }
 
   const app = express();
-  const jsonParser = express.json();
+  const mcpBodyParser = createMcpBodyParser();
   const urlencodedParser = express.urlencoded({ extended: false });
 
   app.disable("x-powered-by");
@@ -793,7 +832,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
         applyCloudflareAccessAuthorizationHeader(req);
       }
 
-      jsonParser(req, res, next);
+      mcpBodyParser(req, res, next);
       return;
     }
 
