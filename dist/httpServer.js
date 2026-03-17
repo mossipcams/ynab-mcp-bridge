@@ -290,6 +290,19 @@ function isPublicJsonRpcRequest(parsedBody) {
         return typeof params?.name === "string" && isPublicToolName(params.name);
     });
 }
+function isEmptyMcpBootstrapProbe(req, parsedBody) {
+    if (req.method !== "POST") {
+        return false;
+    }
+    if (parsedBody !== undefined) {
+        return false;
+    }
+    const contentLengthHeader = getFirstHeaderValue(req.headers["content-length"]);
+    if (contentLengthHeader === undefined) {
+        return true;
+    }
+    return contentLengthHeader === "0";
+}
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (Array.isArray(sessionId)) {
@@ -637,7 +650,10 @@ export async function startHttpServer(options) {
                 next();
                 return;
             }
-            if (isPublicJsonRpcRequest(req.body) || req.method === "GET" || req.method === "DELETE") {
+            if (isPublicJsonRpcRequest(req.body) ||
+                isEmptyMcpBootstrapProbe(req, req.body) ||
+                req.method === "GET" ||
+                req.method === "DELETE") {
                 next();
                 return;
             }
