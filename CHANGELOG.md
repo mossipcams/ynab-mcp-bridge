@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.9](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.8...ynab-mcp-bridge-v0.6.9) (2026-03-17)
+
+
+### Bug Fixes
+
+* add path-aware oauth discovery metadata aliases ([#64](https://github.com/mossipcams/ynab-mcp-bridge/issues/64)) ([32852b2](https://github.com/mossipcams/ynab-mcp-bridge/commit/32852b237fc97e2ee2aa99f03eb15f80772e6d19))
+
 ## [0.6.8](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.7...ynab-mcp-bridge-v0.6.8) (2026-03-17)
 
 
