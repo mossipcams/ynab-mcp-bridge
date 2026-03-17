@@ -45,6 +45,7 @@ export type StartedHttpServer = {
 };
 
 const HTTP_ALLOWED_METHODS = ["POST"] as const;
+const OAUTH_HTTP_ALLOWED_METHODS = ["DELETE", "GET", "POST"] as const;
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 
 type ManagedRequest = {
@@ -529,7 +530,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   });
 
   app.use((_req, res, next) => {
-    applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
+    applyCorsHeaders(
+      res,
+      typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined,
+      auth.mode === "oauth" ? ["OPTIONS", ...OAUTH_HTTP_ALLOWED_METHODS] : ["OPTIONS", ...HTTP_ALLOWED_METHODS],
+    );
     next();
   });
 
@@ -551,7 +556,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   app.use((req, res, next) => {
     if (req.method === "OPTIONS") {
       logHttpDebug("request.preflight", getRequestDebugDetails(req));
-      applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
+      applyCorsHeaders(
+        res,
+        typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined,
+        auth.mode === "oauth" ? ["OPTIONS", ...OAUTH_HTTP_ALLOWED_METHODS] : ["OPTIONS", ...HTTP_ALLOWED_METHODS],
+      );
       res.status(204).end();
       return;
     }
@@ -620,7 +629,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     }
 
     const allowedMethods: readonly string[] = auth.mode === "oauth"
-      ? ["DELETE", "GET", "POST"]
+      ? OAUTH_HTTP_ALLOWED_METHODS
       : HTTP_ALLOWED_METHODS;
 
     if (!allowedMethods.includes(req.method)) {

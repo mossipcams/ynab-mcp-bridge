@@ -12,6 +12,7 @@ import { applyCorsHeaders, getFirstHeaderValue, isLoopbackHostname, normalizeOri
 import { createServer, isPublicToolName } from "./server.js";
 import { createYnabApi } from "./ynabApi.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
+const OAUTH_HTTP_ALLOWED_METHODS = ["DELETE", "GET", "POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 function applyCloudflareAccessAuthorizationHeader(req) {
     const existingAuthorization = getFirstHeaderValue(req.headers.authorization);
@@ -351,7 +352,7 @@ export async function startHttpServer(options) {
         next();
     });
     app.use((_req, res, next) => {
-        applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
+        applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined, auth.mode === "oauth" ? ["OPTIONS", ...OAUTH_HTTP_ALLOWED_METHODS] : ["OPTIONS", ...HTTP_ALLOWED_METHODS]);
         next();
     });
     if (auth.mode === "oauth") {
@@ -370,7 +371,7 @@ export async function startHttpServer(options) {
     app.use((req, res, next) => {
         if (req.method === "OPTIONS") {
             logHttpDebug("request.preflight", getRequestDebugDetails(req));
-            applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
+            applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined, auth.mode === "oauth" ? ["OPTIONS", ...OAUTH_HTTP_ALLOWED_METHODS] : ["OPTIONS", ...HTTP_ALLOWED_METHODS]);
             res.status(204).end();
             return;
         }
@@ -426,7 +427,7 @@ export async function startHttpServer(options) {
             return;
         }
         const allowedMethods = auth.mode === "oauth"
-            ? ["DELETE", "GET", "POST"]
+            ? OAUTH_HTTP_ALLOWED_METHODS
             : HTTP_ALLOWED_METHODS;
         if (!allowedMethods.includes(req.method)) {
             logHttpDebug("request.rejected", {
