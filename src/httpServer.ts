@@ -241,6 +241,54 @@ function getMetadataRouteAliases(prefix: string, pathname: string) {
   return Array.from(aliases);
 }
 
+function getOAuthRouteLabel(pathname: string, callbackPath: string) {
+  if (
+    pathname === "/.well-known/oauth-authorization-server" ||
+    pathname.endsWith("/.well-known/oauth-authorization-server") ||
+    pathname.includes("/.well-known/oauth-authorization-server/")
+  ) {
+    return "oauth-authorization-server";
+  }
+
+  if (
+    pathname === "/.well-known/oauth-protected-resource" ||
+    pathname.endsWith("/.well-known/oauth-protected-resource") ||
+    pathname.includes("/.well-known/oauth-protected-resource/")
+  ) {
+    return "oauth-protected-resource";
+  }
+
+  if (
+    pathname === "/.well-known/openid-configuration" ||
+    pathname.endsWith("/.well-known/openid-configuration") ||
+    pathname.includes("/.well-known/openid-configuration/")
+  ) {
+    return "openid-configuration";
+  }
+
+  if (pathname === "/register") {
+    return "register";
+  }
+
+  if (pathname === "/authorize") {
+    return "authorize";
+  }
+
+  if (pathname === "/authorize/consent") {
+    return "consent";
+  }
+
+  if (pathname === "/token") {
+    return "token";
+  }
+
+  if (pathname === callbackPath) {
+    return "callback";
+  }
+
+  return undefined;
+}
+
 function getOpenIdConfiguration(
   auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>,
   provider: OAuthServerProvider,
@@ -256,9 +304,7 @@ function getOpenIdConfiguration(
     authorization_endpoint: oauthMetadata.authorization_endpoint,
     code_challenge_methods_supported: oauthMetadata.code_challenge_methods_supported,
     grant_types_supported: oauthMetadata.grant_types_supported,
-    id_token_signing_alg_values_supported: ["HS256"],
     issuer: oauthMetadata.issuer,
-    jwks_uri: new URL("/.well-known/jwks.json", issuerUrl).href,
     registration_endpoint: oauthMetadata.registration_endpoint,
     response_types_supported: oauthMetadata.response_types_supported,
     scopes_supported: oauthMetadata.scopes_supported,
@@ -317,6 +363,25 @@ function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
   }
 
   return details;
+}
+
+function getErrorDebugDetails(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return {
+      errorName: undefined,
+      message: undefined,
+    };
+  }
+
+  const namedError = error as {
+    message?: unknown;
+    name?: unknown;
+  };
+
+  return {
+    errorName: typeof namedError.name === "string" ? namedError.name : undefined,
+    message: typeof namedError.message === "string" ? namedError.message : undefined,
+  };
 }
 
 function isPublicJsonRpcRequest(parsedBody: unknown) {
@@ -664,9 +729,26 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     });
     const protectedResourceMetadata = getProtectedResourceMetadata(auth);
 
-    app.get("/.well-known/jwks.json", (_req, res) => {
-      writeJson(res, 200, { keys: [] });
+    app.use((req, res, next) => {
+      const requestDetails = getRequestDebugDetails(req);
+      const oauthRoute = getOAuthRouteLabel(requestDetails.path as string, oauthBroker!.callbackPath);
+
+      if (!oauthRoute) {
+        next();
+        return;
+      }
+
+      res.once("finish", () => {
+        logHttpDebug("oauth.route_completed", {
+          ...requestDetails,
+          oauthRoute,
+          statusCode: res.statusCode,
+        });
+      });
+
+      next();
     });
+
     for (const route of getMetadataRouteAliases("openid-configuration", publicServerUrl.pathname)) {
       app.get(route, (_req, res) => {
         writeJson(res, 200, getOpenIdConfiguration(auth, oauthBroker!.provider));
@@ -739,6 +821,10 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
       applyCloudflareAccessAuthorizationHeader(req);
       if (isDirectUpstreamBearerToken(req, auth)) {
+        logHttpDebug("oauth.mcp_auth_decision", {
+          ...getRequestDebugDetails(req),
+          decision: "strip-direct-upstream-bearer",
+        });
         delete req.headers.authorization;
       }
 
@@ -860,6 +946,18 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       logHttpDebug("request.payload_too_large", getRequestDebugDetails(req));
       writePayloadTooLarge(res);
       return;
+    }
+
+    if (auth.mode === "oauth") {
+      const oauthRoute = getOAuthRouteLabel(getRequestPath(req), oauthBroker!.callbackPath);
+
+      if (oauthRoute) {
+        logHttpDebug("oauth.route_failed", {
+          ...getRequestDebugDetails(req),
+          ...getErrorDebugDetails(error),
+          oauthRoute,
+        });
+      }
     }
 
     console.error("Error handling MCP request:", {

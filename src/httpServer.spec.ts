@@ -1532,19 +1532,21 @@ describe("startHttpServer", () => {
         Origin: "https://claude.ai",
       },
     });
+    const metadata = await response.json();
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    expect(metadata).toMatchObject({
       authorization_endpoint: "https://mcp.example.com/authorize",
       grant_types_supported: expect.arrayContaining(["authorization_code", "refresh_token"]),
       issuer: "https://mcp.example.com/",
-      jwks_uri: "https://mcp.example.com/.well-known/jwks.json",
       registration_endpoint: "https://mcp.example.com/register",
       response_types_supported: ["code"],
       subject_types_supported: ["public"],
       token_endpoint: "https://mcp.example.com/token",
       token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
     });
+    expect(metadata).not.toHaveProperty("jwks_uri");
+    expect(metadata).not.toHaveProperty("id_token_signing_alg_values_supported");
   });
 
   it("supports ChatGPT-style OAuth metadata probes for both root and MCP-path discovery shapes", async () => {
@@ -1596,14 +1598,37 @@ describe("startHttpServer", () => {
     ]);
 
     for (const response of openIdResponses) {
+      const metadata = await response.json();
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({
+      expect(metadata).toMatchObject({
         authorization_endpoint: "https://mcp.example.com/authorize",
         issuer: "https://mcp.example.com/",
-        jwks_uri: "https://mcp.example.com/.well-known/jwks.json",
         token_endpoint: "https://mcp.example.com/token",
       });
+      expect(metadata).not.toHaveProperty("jwks_uri");
+      expect(metadata).not.toHaveProperty("id_token_signing_alg_values_supported");
     }
+  });
+
+  it("does not expose a JWKS endpoint for brokered oauth mode", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/jwks.json", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(404);
   });
 
   it("registers OAuth clients with the requested public metadata", async () => {
@@ -1627,6 +1652,34 @@ describe("startHttpServer", () => {
     expect(registration.redirect_uris).toEqual(["https://claude.ai/oauth/callback"]);
     expect(registration.response_types).toEqual(["code"]);
     expect(registration.token_endpoint_auth_method).toBe("none");
+  });
+
+  it("logs oauth route outcomes for successful client registration", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://chatgpt.com"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const registration = await registerOAuthClient(httpServer.url, {
+      origin: "https://chatgpt.com",
+    });
+
+    expect(registration.client_id).toEqual(expect.any(String));
+    expect(findLogCall(consoleErrorSpy, "oauth.route_completed", (details) => (
+      details.oauthRoute === "register" &&
+      details.path === "/register" &&
+      details.statusCode === 201
+    ))).toBeTruthy();
   });
 
   it("rejects client registrations with insecure redirect URIs", async () => {
@@ -1985,6 +2038,7 @@ describe("startHttpServer", () => {
   });
 
   it("fails closed when the upstream callback contains ambiguous auth results", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -1999,7 +2053,10 @@ describe("startHttpServer", () => {
       path: "/mcp",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
@@ -2020,6 +2077,12 @@ describe("startHttpServer", () => {
     await expect(callbackResponse.json()).resolves.toMatchObject({
       error: "invalid_request",
     });
+    expect(findLogCall(consoleErrorSpy, "oauth.callback_failed", (details) => (
+      details.path === "/oauth/callback" &&
+      details.reason === "invalid_request" &&
+      typeof details.message === "string" &&
+      !String(details.message).includes("upstream-code-123")
+    ))).toBeTruthy();
   });
 
   it("supports oauth provider discovery from the configured issuer", async () => {
@@ -2084,6 +2147,105 @@ describe("startHttpServer", () => {
     const tokens = await tokenResponse.json();
     expect(tokens.access_token).toEqual(expect.any(String));
     expect(tokens.refresh_token).toEqual(expect.any(String));
+  });
+
+  it("logs oauth callback server failures when upstream token exchange fails", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const upstream = createNodeHttpServer((req, res) => {
+      const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+
+      if (requestUrl.pathname === "/authorize") {
+        res.statusCode = 200;
+        res.end("ok");
+        return;
+      }
+
+      if (requestUrl.pathname === "/jwks") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ keys: [] }));
+        return;
+      }
+
+      if (requestUrl.pathname === "/token" && req.method === "POST") {
+        res.statusCode = 502;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({
+          error: "temporarily_unavailable",
+        }));
+        return;
+      }
+
+      res.statusCode = 404;
+      res.end();
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      upstream.once("error", reject);
+      upstream.listen(0, "127.0.0.1", () => {
+        upstream.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = upstream.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Upstream OAuth test server did not expose a TCP address");
+    }
+
+    const origin = `http://127.0.0.1:${address.port}`;
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await new Promise<void>((resolve, reject) => {
+        upstream.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    });
+
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({
+        authorizationUrl: `${origin}/authorize`,
+        issuer: origin,
+        jwksUrl: `${origin}/jwks`,
+        tokenUrl: `${origin}/token`,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(callbackResponse.status).toBe(500);
+    expect(findLogCall(consoleErrorSpy, "oauth.route_failed", (details) => (
+      details.oauthRoute === "callback" &&
+      details.path === "/oauth/callback" &&
+      details.errorName === "ServerError" &&
+      typeof details.message === "string" &&
+      !String(details.message).includes("upstream-code-123")
+    ))).toBeTruthy();
   });
 
   it("falls back to explicit provider metadata when discovery startup fails", async () => {
@@ -2434,6 +2596,7 @@ describe("startHttpServer", () => {
   });
 
   it("rejects upstream OAuth bearer tokens passed directly on protected MCP tool calls", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { jwksUrl, privateKey } = await startJwksServer();
     const token = await createOAuthTestToken(privateKey, {
       iss: "https://id.example.com",
@@ -2448,7 +2611,10 @@ describe("startHttpServer", () => {
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -2472,6 +2638,10 @@ describe("startHttpServer", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    expect(findLogCall(consoleErrorSpy, "oauth.mcp_auth_decision", (details) => (
+      details.path === "/mcp" &&
+      details.decision === "strip-direct-upstream-bearer"
+    ))).toBeTruthy();
   });
 
   it("still rejects null origins on non-oauth MCP requests", async () => {

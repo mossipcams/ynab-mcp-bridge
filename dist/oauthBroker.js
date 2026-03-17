@@ -57,6 +57,9 @@ function buildConsentPageHeaders(scriptNonce, formActionSources) {
         "content-security-policy": `default-src 'none'; connect-src 'self'; script-src 'nonce-${scriptNonce}'; form-action ${formActionSources.join(" ")}; frame-ancestors 'none'; base-uri 'none'`,
     };
 }
+function logOAuthBrokerDebug(event, details) {
+    console.error("[http]", event, details);
+}
 export async function createOAuthBroker(config) {
     const resourceUrl = new URL(config.publicUrl);
     const issuerUrl = new URL(resourceUrl.origin);
@@ -292,9 +295,10 @@ export async function createOAuthBroker(config) {
         verifyAccessToken,
     };
     const handleConsent = async (req, res, next) => {
+        const action = typeof req.body?.action === "string" ? req.body.action : undefined;
+        const requestPath = req.baseUrl || req.path;
         try {
             const consentChallenge = typeof req.body?.consent_challenge === "string" ? req.body.consent_challenge : undefined;
-            const action = typeof req.body?.action === "string" ? req.body.action : undefined;
             if (!consentChallenge) {
                 throw new InvalidRequestError("Missing consent challenge.");
             }
@@ -303,6 +307,12 @@ export async function createOAuthBroker(config) {
         }
         catch (error) {
             if (error instanceof InvalidRequestError) {
+                logOAuthBrokerDebug("oauth.consent_failed", {
+                    action,
+                    message: error.message,
+                    path: requestPath,
+                    reason: "invalid_request",
+                });
                 res.status(400).json(error.toResponseObject());
                 return;
             }
@@ -317,6 +327,11 @@ export async function createOAuthBroker(config) {
         }
         catch (error) {
             if (error instanceof InvalidRequestError) {
+                logOAuthBrokerDebug("oauth.callback_failed", {
+                    message: error.message,
+                    path: req.baseUrl || req.path,
+                    reason: "invalid_request",
+                });
                 res.status(400).json(error.toResponseObject());
                 return;
             }
