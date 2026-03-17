@@ -1450,6 +1450,59 @@ describe("startHttpServer", () => {
     ]);
   });
 
+  it("allows unauthenticated tools/list in oauth mode when discovery posts omit JSON content-type headers", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("application/json");
+    const payload = JSON.parse(response.body) as {
+      result: {
+        tools: Array<{
+          _meta?: {
+            securitySchemes?: Array<{ scopes?: string[]; type: string }>;
+          };
+          name: string;
+        }>;
+      };
+    };
+    const versionTool = payload.result.tools.find((tool) => tool.name === "ynab_get_mcp_version");
+    const userTool = payload.result.tools.find((tool) => tool.name === "ynab_get_user");
+
+    expect(versionTool?._meta?.securitySchemes).toEqual([
+      {
+        type: "noauth",
+      },
+    ]);
+    expect(userTool?._meta?.securitySchemes).toEqual([
+      {
+        scopes: ["openid", "profile"],
+        type: "oauth2",
+      },
+    ]);
+  });
+
   it("allows unauthenticated public tool calls in oauth mode while still challenging protected tools", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
