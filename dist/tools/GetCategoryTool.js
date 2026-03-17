@@ -3,7 +3,7 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 export const name = "ynab_get_category";
 export const description = "Gets a single category by ID.";
 export const inputSchema = {
-    planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
+    planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
     categoryId: z.string().describe("The category ID to fetch."),
 };
 export async function execute(input, api) {

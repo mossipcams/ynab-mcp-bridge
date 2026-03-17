@@ -9,11 +9,9 @@ import {
   localhostHostValidation,
 } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import {
-  createOAuthMetadata,
   getOAuthProtectedResourceMetadataUrl,
   mcpAuthRouter,
 } from "@modelcontextprotocol/sdk/server/auth/router.js";
-import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -121,14 +119,6 @@ function getFirstHeaderValue(value: string | string[] | undefined) {
   return value?.[0]?.split(",")[0]?.trim();
 }
 
-function getHeaderValue(value: string | string[] | undefined) {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  return value?.[0];
-}
-
 function getBearerToken(authorizationHeader: string | undefined) {
   if (!authorizationHeader?.startsWith("Bearer ")) {
     return undefined;
@@ -216,112 +206,6 @@ function getPublicResourceServerUrl(auth: Extract<RuntimeAuthConfig, { mode: "oa
   return new URL(auth.publicUrl);
 }
 
-function getIssuerBaseUrl(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
-  return new URL(new URL(auth.publicUrl).origin);
-}
-
-function getResourcePathAliases(pathname: string) {
-  if (pathname === "/") {
-    return [];
-  }
-
-  const normalizedPath = pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
-  return [normalizedPath];
-}
-
-function getProtectedResourceMetadata(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
-  return {
-    authorization_servers: [getIssuerBaseUrl(auth).href],
-    resource: getPublicResourceServerUrl(auth).href,
-    resource_name: "YNAB MCP Bridge",
-    scopes_supported: auth.scopes.length > 0 ? auth.scopes : undefined,
-  };
-}
-
-function getMetadataRouteAliases(prefix: string, pathname: string) {
-  const aliases = new Set<string>([`/.well-known/${prefix}`]);
-
-  for (const resourcePath of getResourcePathAliases(pathname)) {
-    aliases.add(`/.well-known/${prefix}${resourcePath}`);
-    aliases.add(`${resourcePath}/.well-known/${prefix}`);
-  }
-
-  return Array.from(aliases);
-}
-
-function getOAuthRouteLabel(pathname: string, callbackPath: string) {
-  if (
-    pathname === "/.well-known/oauth-authorization-server" ||
-    pathname.endsWith("/.well-known/oauth-authorization-server") ||
-    pathname.includes("/.well-known/oauth-authorization-server/")
-  ) {
-    return "oauth-authorization-server";
-  }
-
-  if (
-    pathname === "/.well-known/oauth-protected-resource" ||
-    pathname.endsWith("/.well-known/oauth-protected-resource") ||
-    pathname.includes("/.well-known/oauth-protected-resource/")
-  ) {
-    return "oauth-protected-resource";
-  }
-
-  if (
-    pathname === "/.well-known/openid-configuration" ||
-    pathname.endsWith("/.well-known/openid-configuration") ||
-    pathname.includes("/.well-known/openid-configuration/")
-  ) {
-    return "openid-configuration";
-  }
-
-  if (pathname === "/register") {
-    return "register";
-  }
-
-  if (pathname === "/authorize") {
-    return "authorize";
-  }
-
-  if (pathname === "/authorize/consent") {
-    return "consent";
-  }
-
-  if (pathname === "/token") {
-    return "token";
-  }
-
-  if (pathname === callbackPath) {
-    return "callback";
-  }
-
-  return undefined;
-}
-
-function getOpenIdConfiguration(
-  auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>,
-  provider: OAuthServerProvider,
-) {
-  const issuerUrl = getIssuerBaseUrl(auth);
-  const oauthMetadata = createOAuthMetadata({
-    issuerUrl,
-    provider,
-    scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
-  });
-
-  return {
-    authorization_endpoint: oauthMetadata.authorization_endpoint,
-    code_challenge_methods_supported: oauthMetadata.code_challenge_methods_supported,
-    grant_types_supported: oauthMetadata.grant_types_supported,
-    issuer: oauthMetadata.issuer,
-    registration_endpoint: oauthMetadata.registration_endpoint,
-    response_types_supported: oauthMetadata.response_types_supported,
-    scopes_supported: oauthMetadata.scopes_supported,
-    subject_types_supported: ["public"],
-    token_endpoint: oauthMetadata.token_endpoint,
-    token_endpoint_auth_methods_supported: oauthMetadata.token_endpoint_auth_methods_supported,
-  };
-}
-
 function getSessionId(req: Pick<Request, "headers">) {
   const sessionId = req.headers["mcp-session-id"];
 
@@ -373,52 +257,6 @@ function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
   return details;
 }
 
-function getJsonRpcShape(parsedBody: unknown) {
-  if (Array.isArray(parsedBody)) {
-    return "batch";
-  }
-
-  if (parsedBody && typeof parsedBody === "object") {
-    return "single";
-  }
-
-  return undefined;
-}
-
-function getMcpRejectionDebugDetails(req: Request, parsedBody: unknown): HttpDebugDetails {
-  const contentLengthHeader = getFirstHeaderValue(req.headers["content-length"]);
-  const contentLength = contentLengthHeader === undefined ? undefined : Number.parseInt(contentLengthHeader, 10);
-
-  return {
-    accept: getHeaderValue(req.headers.accept),
-    authorizationPresent: Boolean(getFirstHeaderValue(req.headers.authorization)),
-    cfAccessJwtAssertionPresent: Boolean(getFirstHeaderValue(req.headers["cf-access-jwt-assertion"])),
-    contentLength: Number.isFinite(contentLength) ? contentLength : undefined,
-    contentType: getHeaderValue(req.headers["content-type"]),
-    jsonRpcShape: getJsonRpcShape(parsedBody),
-    ...getJsonRpcDebugDetails(parsedBody),
-  };
-}
-
-function getErrorDebugDetails(error: unknown) {
-  if (!error || typeof error !== "object") {
-    return {
-      errorName: undefined,
-      message: undefined,
-    };
-  }
-
-  const namedError = error as {
-    message?: unknown;
-    name?: unknown;
-  };
-
-  return {
-    errorName: typeof namedError.name === "string" ? namedError.name : undefined,
-    message: typeof namedError.message === "string" ? namedError.message : undefined,
-  };
-}
-
 function isPublicJsonRpcRequest(parsedBody: unknown) {
   const messages = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
 
@@ -445,24 +283,6 @@ function isPublicJsonRpcRequest(parsedBody: unknown) {
 
     return typeof params?.name === "string" && isPublicToolName(params.name);
   });
-}
-
-function isEmptyMcpBootstrapProbe(req: Request, parsedBody: unknown) {
-  if (req.method !== "POST") {
-    return false;
-  }
-
-  if (parsedBody !== undefined) {
-    return false;
-  }
-
-  const contentLengthHeader = getFirstHeaderValue(req.headers["content-length"]);
-
-  if (contentLengthHeader === undefined) {
-    return true;
-  }
-
-  return contentLengthHeader === "0";
 }
 
 function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">) {
@@ -499,45 +319,6 @@ function isPayloadTooLargeError(error: unknown) {
       ("status" in error && error.status === 413) ||
       ("statusCode" in error && error.statusCode === 413)
     );
-}
-
-function createMcpBodyParser() {
-  const textParser = express.text({ type: () => true });
-
-  return (req: Request, res: Response, next: express.NextFunction) => {
-    textParser(req, res, (error) => {
-      if (error) {
-        next(error);
-        return;
-      }
-
-      if (typeof req.body !== "string") {
-        next();
-        return;
-      }
-
-      const trimmedBody = req.body.trim();
-
-      if (!trimmedBody) {
-        req.body = undefined;
-        next();
-        return;
-      }
-
-      try {
-        req.body = JSON.parse(trimmedBody);
-        if (!getFirstHeaderValue(req.headers["content-type"])) {
-          req.headers["content-type"] = "application/json";
-          if (Array.isArray((req as Request & { rawHeaders?: string[] }).rawHeaders)) {
-            (req as Request & { rawHeaders: string[] }).rawHeaders.push("content-type", "application/json");
-          }
-        }
-        next();
-      } catch (parseError) {
-        next(parseError);
-      }
-    });
-  };
 }
 
 async function createManagedRequest(config: YnabConfig, auth?: RuntimeAuthConfig) {
@@ -720,39 +501,29 @@ async function closeNodeServer(server: NodeHttpServer) {
 export async function startHttpServer(options: HttpServerOptions): Promise<StartedHttpServer> {
   const allowedHosts = options.allowedHosts ?? [];
   const auth = options.auth ?? { deployment: "authless", mode: "none" };
-  const explicitAuthorizationUrl = auth.mode === "oauth" && typeof auth.authorizationUrl === "string"
-    ? auth.authorizationUrl
-    : undefined;
-  const explicitJwksUrl = auth.mode === "oauth" && typeof auth.jwksUrl === "string"
-    ? auth.jwksUrl
-    : undefined;
-  const explicitTokenUrl = auth.mode === "oauth" && typeof auth.tokenUrl === "string"
-    ? auth.tokenUrl
-    : undefined;
-
-  if (auth.mode === "oauth" && explicitAuthorizationUrl && explicitJwksUrl && explicitTokenUrl) {
-    validateCloudflareAccessOAuthSettings({
-      authorizationUrl: explicitAuthorizationUrl,
-      issuer: auth.issuer,
-      jwksUrl: explicitJwksUrl,
-      tokenUrl: explicitTokenUrl,
-    });
-  }
-
   const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
   const host = options.host ?? "127.0.0.1";
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
   const ynab = assertYnabConfig(options.ynab);
-  const oauthBroker = auth.mode === "oauth" ? await createOAuthBroker(auth) : undefined;
+  const oauthBroker = auth.mode === "oauth" ? createOAuthBroker(auth) : undefined;
   const persistentRequests = new Map<string, ManagedRequest>();
 
   if (auth.mode === "oauth") {
     allowedOrigins.add(new URL(auth.publicUrl).origin);
   }
 
+  if (auth.mode === "oauth") {
+    validateCloudflareAccessOAuthSettings({
+      authorizationUrl: auth.authorizationUrl,
+      issuer: auth.issuer,
+      jwksUrl: auth.jwksUrl,
+      tokenUrl: auth.tokenUrl,
+    });
+  }
+
   const app = express();
-  const mcpBodyParser = createMcpBodyParser();
+  const jsonParser = express.json();
   const urlencodedParser = express.urlencoded({ extended: false });
 
   app.disable("x-powered-by");
@@ -814,48 +585,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   if (auth.mode === "oauth") {
     const publicServerUrl = getPublicResourceServerUrl(auth);
-    const oauthMetadata = createOAuthMetadata({
-      issuerUrl: getIssuerBaseUrl(auth),
-      provider: oauthBroker!.provider,
-      scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
-    });
-    const protectedResourceMetadata = getProtectedResourceMetadata(auth);
 
-    app.use((req, res, next) => {
-      const requestDetails = getRequestDebugDetails(req);
-      const oauthRoute = getOAuthRouteLabel(requestDetails.path as string, oauthBroker!.callbackPath);
-
-      if (!oauthRoute) {
-        next();
-        return;
-      }
-
-      res.once("finish", () => {
-        logHttpDebug("oauth.route_completed", {
-          ...requestDetails,
-          oauthRoute,
-          statusCode: res.statusCode,
-        });
-      });
-
-      next();
-    });
-
-    for (const route of getMetadataRouteAliases("openid-configuration", publicServerUrl.pathname)) {
-      app.get(route, (_req, res) => {
-        writeJson(res, 200, getOpenIdConfiguration(auth, oauthBroker!.provider));
-      });
-    }
-    for (const route of getMetadataRouteAliases("oauth-authorization-server", publicServerUrl.pathname)) {
-      app.get(route, (_req, res) => {
-        writeJson(res, 200, oauthMetadata);
-      });
-    }
-    for (const route of getMetadataRouteAliases("oauth-protected-resource", publicServerUrl.pathname)) {
-      app.get(route, (_req, res) => {
-        writeJson(res, 200, protectedResourceMetadata);
-      });
-    }
     app.use(oauthBroker!.callbackPath, oauthBroker!.handleCallback);
     app.post("/authorize/consent", urlencodedParser, oauthBroker!.handleConsent);
     app.use(mcpAuthRouter({
@@ -885,7 +615,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
         applyCloudflareAccessAuthorizationHeader(req);
       }
 
-      mcpBodyParser(req, res, next);
+      jsonParser(req, res, next);
       return;
     }
 
@@ -906,22 +636,16 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
         return;
       }
 
-      if (
-        isPublicJsonRpcRequest(req.body) ||
-        isEmptyMcpBootstrapProbe(req, req.body) ||
-        req.method === "GET" ||
-        req.method === "DELETE"
-      ) {
+      if (isPublicJsonRpcRequest(req.body) || req.method === "GET" || req.method === "DELETE") {
         next();
         return;
       }
 
       applyCloudflareAccessAuthorizationHeader(req);
+      if (getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]) === "cf-access-jwt-assertion") {
+        delete req.headers.authorization;
+      }
       if (isDirectUpstreamBearerToken(req, auth)) {
-        logHttpDebug("oauth.mcp_auth_decision", {
-          ...getRequestDebugDetails(req),
-          decision: "strip-direct-upstream-bearer",
-        });
         delete req.headers.authorization;
       }
 
@@ -932,7 +656,6 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
         logHttpDebug("request.rejected", {
           ...getRequestDebugDetails(req),
-          ...getMcpRejectionDebugDetails(req, req.body),
           reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope",
         });
       });
@@ -1044,18 +767,6 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       logHttpDebug("request.payload_too_large", getRequestDebugDetails(req));
       writePayloadTooLarge(res);
       return;
-    }
-
-    if (auth.mode === "oauth") {
-      const oauthRoute = getOAuthRouteLabel(getRequestPath(req), oauthBroker!.callbackPath);
-
-      if (oauthRoute) {
-        logHttpDebug("oauth.route_failed", {
-          ...getRequestDebugDetails(req),
-          ...getErrorDebugDetails(error),
-          oauthRoute,
-        });
-      }
     }
 
     console.error("Error handling MCP request:", {

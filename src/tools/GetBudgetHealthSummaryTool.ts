@@ -8,9 +8,9 @@ export const name = "ynab_get_budget_health_summary";
 export const description =
   "Returns a compact budget health summary with available funds, overspending, underfunding, and assigned versus spent.";
 export const inputSchema = {
-  planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
+  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
   month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe(
-    "Month as YYYY-MM-DD or 'current'.",
+    "The month in ISO format or the string 'current'.",
   ),
   topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of category rollups to include."),
 };

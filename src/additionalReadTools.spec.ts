@@ -22,10 +22,9 @@ import * as ListPayeeLocationsTool from "./tools/ListPayeeLocationsTool.js";
 import * as ListPayeesTool from "./tools/ListPayeesTool.js";
 import * as ListPlanCategoriesTool from "./tools/ListPlanCategoriesTool.js";
 import * as ListScheduledTransactionsTool from "./tools/ListScheduledTransactionsTool.js";
-import { parsePipeDelimited } from "./testHelpers.js";
 
 function parseText(result: Awaited<ReturnType<typeof GetAccountTool.execute>>) {
-  return parsePipeDelimited(result.content[0].text);
+  return JSON.parse(result.content[0].text);
 }
 
 describe("additional read-only tools", () => {
@@ -68,9 +67,6 @@ describe("additional read-only tools", () => {
           categories: [{ id: "cat-1", name: "Rent" }],
         },
       ],
-      returned_count: 1,
-      total_count: 1,
-      has_more: false,
     });
   });
 
@@ -170,14 +166,6 @@ describe("additional read-only tools", () => {
               },
               {
                 id: "acct-2",
-                name: "Savings",
-                type: "savings",
-                deleted: false,
-                closed: false,
-                balance: 50000,
-              },
-              {
-                id: "acct-3",
                 name: "Old Savings",
                 type: "savings",
                 deleted: true,
@@ -190,7 +178,7 @@ describe("additional read-only tools", () => {
       },
     };
 
-    const result = await ListAccountsTool.execute({ planId: "plan-1", limit: 1 }, api as any);
+    const result = await ListAccountsTool.execute({ planId: "plan-1" }, api as any);
 
     expect(api.accounts.getAccounts).toHaveBeenCalledWith("plan-1");
     expect(parseText(result)).toEqual({
@@ -203,9 +191,7 @@ describe("additional read-only tools", () => {
           balance: "125.00",
         },
       ],
-      returned_count: 1,
-      total_count: 2,
-      has_more: true,
+      account_count: 1,
     });
   });
 
@@ -269,9 +255,7 @@ describe("additional read-only tools", () => {
           transfer_account_id: null,
         },
       ],
-      returned_count: 1,
-      total_count: 1,
-      has_more: false,
+      payee_count: 1,
     });
   });
 
@@ -313,9 +297,7 @@ describe("additional read-only tools", () => {
           longitude: "-87.6298",
         },
       ],
-      returned_count: 1,
-      total_count: 1,
-      has_more: false,
+      payee_location_count: 1,
     });
   });
 
@@ -446,15 +428,15 @@ describe("additional read-only tools", () => {
           payee_name: "Grocer",
           category_name: "Food",
           account_name: "Checking",
+          approved: true,
+          cleared: "cleared",
         },
       ],
-      returned_count: 1,
-      total_count: 1,
-      has_more: false,
+      transaction_count: 1,
     });
   });
 
-  it("gets all transactions with compact bounded results", async () => {
+  it("gets all transactions and filters deleted rows", async () => {
     const api = {
       transactions: {
         getTransactions: vi.fn().mockResolvedValue({
@@ -475,29 +457,7 @@ describe("additional read-only tools", () => {
                 id: "txn-2",
                 date: "2026-03-02",
                 amount: -5000,
-                payee_name: "Cafe",
-                category_name: "Food",
-                account_name: "Checking",
-                approved: false,
-                cleared: "uncleared",
-                deleted: false,
-              },
-              {
-                id: "txn-3",
-                date: "2026-03-03",
-                amount: -5000,
                 deleted: true,
-              },
-              {
-                id: "txn-4",
-                date: "2026-03-04",
-                amount: -8500,
-                payee_name: "Transit",
-                category_name: "Transport",
-                account_name: "Checking",
-                approved: true,
-                cleared: "cleared",
-                deleted: false,
               },
             ],
           },
@@ -505,7 +465,7 @@ describe("additional read-only tools", () => {
       },
     };
 
-    const result = await ListTransactionsTool.execute({ planId: "plan-1", limit: 2 }, api as any);
+    const result = await ListTransactionsTool.execute({ planId: "plan-1" }, api as any);
 
     expect(api.transactions.getTransactions).toHaveBeenCalledWith(
       "plan-1",
@@ -522,65 +482,11 @@ describe("additional read-only tools", () => {
           payee_name: "Grocer",
           category_name: "Food",
           account_name: "Checking",
-        },
-        {
-          id: "txn-2",
-          date: "2026-03-02",
-          amount: "-5.00",
-          payee_name: "Cafe",
-          category_name: "Food",
-          account_name: "Checking",
-        },
-      ],
-      returned_count: 2,
-      total_count: 3,
-      has_more: true,
-    });
-  });
-
-  it("returns full transaction details when requested", async () => {
-    const api = {
-      transactions: {
-        getTransactions: vi.fn().mockResolvedValue({
-          data: {
-            transactions: [
-              {
-                id: "txn-1",
-                date: "2026-03-01",
-                amount: -12500,
-                payee_name: "Grocer",
-                category_name: "Food",
-                account_name: "Checking",
-                approved: true,
-                cleared: "cleared",
-                memo: "Weekly grocery run",
-                deleted: false,
-              },
-            ],
-          },
-        }),
-      },
-    };
-
-    const result = await ListTransactionsTool.execute({ planId: "plan-1", includeFullDetails: true }, api as any);
-
-    expect(parseText(result)).toEqual({
-      transactions: [
-        {
-          id: "txn-1",
-          date: "2026-03-01",
-          amount: "-12.50",
-          payee_name: "Grocer",
-          category_name: "Food",
-          account_name: "Checking",
           approved: true,
           cleared: "cleared",
-          memo: "Weekly grocery run",
         },
       ],
-      returned_count: 1,
-      total_count: 1,
-      has_more: false,
+      transaction_count: 1,
     });
   });
 
@@ -672,11 +578,11 @@ describe("additional read-only tools", () => {
           payee_name: "Grocer",
           category_name: "Food",
           account_name: "Checking",
+          approved: true,
+          cleared: "cleared",
         },
       ],
-      returned_count: 1,
-      total_count: 1,
-      has_more: false,
+      transaction_count: 1,
     });
   });
 
@@ -728,11 +634,11 @@ describe("additional read-only tools", () => {
           payee_name: "Grocer",
           category_name: "Food",
           account_name: "Checking",
+          approved: true,
+          cleared: "cleared",
         },
       ],
-      returned_count: 1,
-      total_count: 1,
-      has_more: false,
+      transaction_count: 1,
     });
   });
 
@@ -784,11 +690,11 @@ describe("additional read-only tools", () => {
           payee_name: "Grocer",
           category_name: "Food",
           account_name: "Checking",
+          approved: true,
+          cleared: "cleared",
         },
       ],
-      returned_count: 1,
-      total_count: 1,
-      has_more: false,
+      transaction_count: 1,
     });
   });
 

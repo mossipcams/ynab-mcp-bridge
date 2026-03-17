@@ -96,91 +96,12 @@ describe("resolveRuntimeConfig", () => {
         deployment: "oauth-single-tenant",
         issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
         jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
-        metadataMode: "explicit",
         mode: "oauth",
         publicUrl: "https://mcp.example.com/mcp",
         scopes: ["openid", "profile", "email"],
         storePath: "/tmp/ynab-mcp-oauth-store.json",
         tokenSigningSecret: "test-signing-secret",
         tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
-      },
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 3000,
-      transport: "http",
-    });
-  });
-
-  it("resolves oauth discovery mode from issuer-based settings", () => {
-    expect(resolveRuntimeConfig([], {
-      MCP_AUTH_MODE: "oauth",
-      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
-      MCP_OAUTH_CLIENT_ID: "oauth-client-id",
-      MCP_OAUTH_CLIENT_SECRET: "oauth-client-secret",
-      MCP_OAUTH_DISCOVERY: "true",
-      MCP_OAUTH_ISSUER: "https://id.example.com",
-      MCP_OAUTH_SCOPES: "openid,profile,email",
-      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
-      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
-      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
-    })).toEqual({
-      allowedHosts: [],
-      allowedOrigins: [],
-      auth: {
-        audience: "https://mcp.example.com",
-        callbackPath: "/oauth/callback",
-        clientId: "oauth-client-id",
-        clientSecret: "oauth-client-secret",
-        deployment: "oauth-single-tenant",
-        issuer: "https://id.example.com",
-        metadataMode: "discovery",
-        mode: "oauth",
-        publicUrl: "https://mcp.example.com/mcp",
-        scopes: ["openid", "profile", "email"],
-        storePath: "/tmp/ynab-mcp-oauth-store.json",
-        tokenSigningSecret: "test-signing-secret",
-      },
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 3000,
-      transport: "http",
-    });
-  });
-
-  it("resolves oauth discovery mode with explicit fallback metadata", () => {
-    expect(resolveRuntimeConfig([], {
-      MCP_AUTH_MODE: "oauth",
-      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
-      MCP_OAUTH_AUTHORIZATION_URL: "https://fallback.example.com/oauth/authorize",
-      MCP_OAUTH_CLIENT_ID: "oauth-client-id",
-      MCP_OAUTH_CLIENT_SECRET: "oauth-client-secret",
-      MCP_OAUTH_DISCOVERY: "true",
-      MCP_OAUTH_ISSUER: "https://id.example.com",
-      MCP_OAUTH_JWKS_URL: "https://fallback.example.com/.well-known/jwks.json",
-      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
-      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
-      MCP_OAUTH_TOKEN_URL: "https://fallback.example.com/oauth/token",
-      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
-    })).toEqual({
-      allowedHosts: [],
-      allowedOrigins: [],
-      auth: {
-        audience: "https://mcp.example.com",
-        authorizationUrl: "https://fallback.example.com/oauth/authorize",
-        callbackPath: "/oauth/callback",
-        clientId: "oauth-client-id",
-        clientSecret: "oauth-client-secret",
-        deployment: "oauth-single-tenant",
-        fallbackToExplicit: true,
-        issuer: "https://id.example.com",
-        jwksUrl: "https://fallback.example.com/.well-known/jwks.json",
-        metadataMode: "discovery",
-        mode: "oauth",
-        publicUrl: "https://mcp.example.com/mcp",
-        scopes: [],
-        storePath: "/tmp/ynab-mcp-oauth-store.json",
-        tokenSigningSecret: "test-signing-secret",
-        tokenUrl: "https://fallback.example.com/oauth/token",
       },
       host: "127.0.0.1",
       path: "/mcp",
@@ -241,7 +162,7 @@ describe("resolveRuntimeConfig", () => {
       MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
       MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
     })).toThrow(
-      "OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, MCP_OAUTH_TOKEN_SIGNING_SECRET, and either MCP_OAUTH_DISCOVERY=true or the explicit MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, and MCP_OAUTH_JWKS_URL settings.",
+      "OAuth mode requires MCP_PUBLIC_URL, MCP_OAUTH_ISSUER, MCP_OAUTH_AUTHORIZATION_URL, MCP_OAUTH_TOKEN_URL, MCP_OAUTH_JWKS_URL, MCP_OAUTH_AUDIENCE, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_CLIENT_SECRET, MCP_OAUTH_STORE_PATH, and MCP_OAUTH_TOKEN_SIGNING_SECRET.",
     );
   });
 

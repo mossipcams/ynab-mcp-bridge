@@ -6,7 +6,7 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 export const name = "ynab_get_money_movements";
 export const description = "Gets all money movements for a single YNAB plan.";
 export const inputSchema = {
-  planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
+  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
 };
 
 export async function execute(input: { planId?: string }, api: ynab.API) {

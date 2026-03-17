@@ -4,9 +4,9 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 export const name = "ynab_get_category_trend_summary";
 export const description = "Returns a compact assigned, spent, and available trend for a category or category group across months.";
 export const inputSchema = {
-    planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
-    fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("Start month as YYYY-MM-DD or 'current'."),
-    toMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).optional().describe("End month as YYYY-MM-DD. Defaults to fromMonth."),
+    planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
+    fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("The first month in ISO format or the string 'current'."),
+    toMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).optional().describe("The last month in ISO format. Defaults to fromMonth."),
     categoryId: z.string().optional().describe("Optional category id to summarize."),
     categoryGroupName: z.string().optional().describe("Optional category group name to summarize."),
 };

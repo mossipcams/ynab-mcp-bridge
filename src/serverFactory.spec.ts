@@ -119,14 +119,8 @@ describe("createServer", () => {
     expect(registerTool).toHaveBeenCalledTimes(39);
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_mcp_version",
-      expect.not.objectContaining({
-        title: expect.anything(),
-      }),
-      expect.any(Function),
-    );
-    expect(registerTool).toHaveBeenCalledWith(
-      "ynab_get_70_20_10_summary",
       expect.objectContaining({
+        title: "Get MCP Version",
         description: expect.any(String),
         inputSchema: expect.any(Object),
       }),
@@ -134,8 +128,8 @@ describe("createServer", () => {
     );
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_70_20_10_summary",
-      expect.not.objectContaining({
-        title: expect.anything(),
+      expect.objectContaining({
+        title: "Get 70/20/10 Summary",
       }),
       expect.any(Function),
     );
@@ -234,7 +228,11 @@ describe("createServer", () => {
 
     const result = await (server as any)._registeredTools.ynab_get_plan.handler({});
 
-    expect(result.content[0].text).toBe("plan.id|plan-1");
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      plan: {
+        id: "plan-1",
+      },
+    });
     expect(calls).toEqual([
       ["getPlanById", "plan-1"],
     ]);

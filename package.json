@@ -1,6 +1,6 @@
 {
   "name": "ynab-mcp-bridge",
-  "version": "0.7.5",
+  "version": "0.6.5",
   "description": "ynab-mcp-bridge MCP server",
   "author": "Matt",
   "repository": {
@@ -37,7 +37,6 @@
     "commander": "^14.0.1",
     "express": "^5.2.1",
     "jose": "^6.2.1",
-    "openid-client": "^6.8.2",
     "ynab": "^4.0.0",
     "zod": "^3.23.8"
   },

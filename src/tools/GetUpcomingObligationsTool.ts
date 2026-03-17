@@ -8,7 +8,7 @@ export const name = "ynab_get_upcoming_obligations";
 export const description =
   "Returns compact 7, 14, and 30 day upcoming obligation windows from scheduled transactions.";
 export const inputSchema = {
-  planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
+  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
   asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("The anchor date in ISO format."),
   topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of due items to include."),
 };

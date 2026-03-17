@@ -3,11 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import * as GetBudgetHealthSummaryTool from "./tools/GetBudgetHealthSummaryTool.js";
 import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
 import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";
-import { parsePipeDelimited } from "./testHelpers.js";
 import * as GetSpendingSummaryTool from "./tools/GetSpendingSummaryTool.js";
 
 function parseText(result: Awaited<ReturnType<typeof GetFinancialSnapshotTool.execute>>) {
-  return parsePipeDelimited(result.content[0].text);
+  return JSON.parse(result.content[0].text);
 }
 
 describe("finance summary tools", () => {
