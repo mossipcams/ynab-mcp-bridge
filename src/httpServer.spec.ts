@@ -1483,7 +1483,6 @@ describe("startHttpServer", () => {
 
     expect(response.statusCode).not.toBe(401);
   });
-
   it("allows unauthenticated public tool calls in oauth mode while still challenging protected tools", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
