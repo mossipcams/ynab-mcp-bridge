@@ -1588,6 +1588,34 @@ describe("startHttpServer", () => {
     });
   });
 
+  it("aliases OpenID discovery to the OAuth authorization server metadata endpoint", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createGenericOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/openid-configuration", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      authorization_endpoint: "https://mcp.example.com/authorize",
+      issuer: "https://mcp.example.com/",
+      registration_endpoint: "https://mcp.example.com/register",
+      token_endpoint: "https://mcp.example.com/token",
+      token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
+    });
+  });
+
   it("registers OAuth clients with the requested public metadata", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
