@@ -3,7 +3,7 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 export const name = "ynab_get_transaction";
 export const description = "Gets a single transaction by ID.";
 export const inputSchema = {
-    planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
+    planId: z.string().optional().describe("YNAB plan ID. Defaults to YNAB_PLAN_ID."),
     transactionId: z.string().describe("The transaction ID to fetch."),
 };
 export async function execute(input, api) {

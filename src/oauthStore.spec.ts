@@ -179,6 +179,36 @@ describe("oauth store", () => {
     expect(Object.keys(persistedState.grants)).toEqual(["grant-1"]);
   });
 
+  it("does not expose consent replay challenges through compatibility pending-consent helpers", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
+    const storePath = path.join(tempDir, "oauth-store.json");
+    cleanups.push(async () => {
+      await rm(tempDir, { force: true, recursive: true });
+    });
+
+    const store = createOAuthStore(storePath);
+    store.saveGrant({
+      clientId: "client-1",
+      codeChallenge: "challenge",
+      consentApprovalReplay: {
+        challenge: "consent-1",
+        expiresAt: Date.now() + 60_000,
+        location: "https://upstream.example.com/authorize?state=upstream-state-1",
+      },
+      grantId: "grant-1",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    expect(store.getPendingConsent("consent-1")).toBeUndefined();
+
+    store.deletePendingConsent("consent-1");
+
+    expect(store.getGrant("grant-1")).toBeDefined();
+  });
+
   it("migrates legacy OAuth state into the grant model on load", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
     const storePath = path.join(tempDir, "oauth-store.json");

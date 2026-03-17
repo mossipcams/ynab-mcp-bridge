@@ -7,6 +7,7 @@ import {
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import type { OAuthGrant } from "./oauthGrant.js";
+import type { ProviderAuthorizationResponse } from "./providerClient.js";
 
 export type PendingAuthorization = {
   clientId: string;
@@ -63,7 +64,9 @@ type OAuthCoreDependencies = {
     scopes: string[];
     upstreamState: string;
   }) => string;
-  exchangeUpstreamAuthorizationCode: (code: string) => Promise<OAuthTokens>;
+  exchangeUpstreamAuthorizationResponse: (
+    response: Extract<ProviderAuthorizationResponse, { type: "success" }>,
+  ) => Promise<OAuthTokens>;
   exchangeUpstreamRefreshToken: (refreshToken: string) => Promise<OAuthTokens>;
   mintAccessToken: (record: {
     clientId: string;
@@ -87,13 +90,6 @@ type AuthorizationRequest = {
   resource?: URL;
   scopes?: string[];
   state?: string;
-};
-
-type CallbackInput = {
-  code?: string;
-  error?: string;
-  errorDescription?: string;
-  upstreamState: string;
 };
 
 function clampExpiresIn(expiresIn: number | undefined) {
@@ -208,6 +204,29 @@ function toPendingConsent(grant: OAuthGrant): PendingConsent {
 }
 
 export function createOAuthCore({ config, dependencies, store }: OAuthCoreOptions) {
+  const refreshTokenLocks = new Map<string, Promise<void>>();
+
+  async function withRefreshTokenLock<T>(refreshToken: string, action: () => Promise<T>) {
+    const previous = refreshTokenLocks.get(refreshToken) ?? Promise.resolve();
+    let release: (() => void) | undefined;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    refreshTokenLocks.set(refreshToken, current);
+    await previous;
+
+    try {
+      return await action();
+    } finally {
+      release?.();
+
+      if (refreshTokenLocks.get(refreshToken) === current) {
+        refreshTokenLocks.delete(refreshToken);
+      }
+    }
+  }
+
   async function registerClient(
     client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">,
   ) {
@@ -357,7 +376,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     };
   }
 
-  async function handleCallback(params: CallbackInput) {
+  async function handleCallback(params: ProviderAuthorizationResponse) {
     const grant = store.getPendingAuthorizationGrant(params.upstreamState);
 
     if (!grant || isExpired(grant.pendingAuthorization?.expiresAt, dependencies.now())) {
@@ -369,7 +388,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
 
     store.deleteGrant(grant.grantId);
 
-    if (params.error) {
+    if (params.type === "error") {
       return {
         type: "redirect" as const,
         location: createErrorRedirect(grant.redirectUri, {
@@ -380,12 +399,8 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       };
     }
 
-    if (!params.code) {
-      throw new InvalidRequestError("Missing upstream OAuth code.");
-    }
-
     const authorizationCode = dependencies.createId();
-    const upstreamTokens = await dependencies.exchangeUpstreamAuthorizationCode(params.code);
+    const upstreamTokens = await dependencies.exchangeUpstreamAuthorizationResponse(params);
 
     store.saveGrant({
       ...grant,
@@ -497,71 +512,73 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     scopes: string[] | undefined,
     resource: URL | undefined,
   ) {
-    const grant = store.getRefreshTokenGrant(refreshToken);
+    return await withRefreshTokenLock(refreshToken, async () => {
+      const grant = store.getRefreshTokenGrant(refreshToken);
 
-    if (!grant || !grant.refreshToken || grant.clientId !== client.client_id) {
-      throw new InvalidGrantError("Unknown refresh token.");
-    }
+      if (!grant || !grant.refreshToken || grant.clientId !== client.client_id) {
+        throw new InvalidGrantError("Unknown refresh token.");
+      }
 
-    if (isExpired(grant.refreshToken.expiresAt, dependencies.now())) {
-      store.deleteGrant(grant.grantId);
-      throw new InvalidGrantError("Refresh token has expired.");
-    }
+      if (isExpired(grant.refreshToken.expiresAt, dependencies.now())) {
+        store.deleteGrant(grant.grantId);
+        throw new InvalidGrantError("Refresh token has expired.");
+      }
 
-    const grantedScopes = scopes && scopes.length > 0 ? scopes : grant.scopes;
+      const grantedScopes = scopes && scopes.length > 0 ? scopes : grant.scopes;
 
-    if (!grantedScopes.every((scope) => grant.scopes.includes(scope))) {
-      throw new InvalidScopeError("Requested scope exceeds the original grant.");
-    }
+      if (!grantedScopes.every((scope) => grant.scopes.includes(scope))) {
+        throw new InvalidScopeError("Requested scope exceeds the original grant.");
+      }
 
-    if (resource?.href && resource.href !== grant.resource) {
-      throw new InvalidGrantError("resource does not match the refresh token.");
-    }
+      if (resource?.href && resource.href !== grant.resource) {
+        throw new InvalidGrantError("resource does not match the refresh token.");
+      }
 
-    const upstreamRefreshToken = grant.upstreamTokens?.refresh_token;
+      const upstreamRefreshToken = grant.upstreamTokens?.refresh_token;
 
-    if (!upstreamRefreshToken) {
-      throw new InvalidGrantError("Refresh token is missing upstream refresh context.");
-    }
+      if (!upstreamRefreshToken) {
+        throw new InvalidGrantError("Refresh token is missing upstream refresh context.");
+      }
 
-    const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(upstreamRefreshToken);
-    const nextUpstreamTokens: OAuthTokens = {
-      ...grant.upstreamTokens,
-      ...refreshedUpstreamTokens,
-      refresh_token: refreshedUpstreamTokens.refresh_token ?? grant.upstreamTokens?.refresh_token,
-    };
+      const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(upstreamRefreshToken);
+      const nextUpstreamTokens: OAuthTokens = {
+        ...grant.upstreamTokens,
+        ...refreshedUpstreamTokens,
+        refresh_token: refreshedUpstreamTokens.refresh_token ?? grant.upstreamTokens?.refresh_token,
+      };
 
-    if (!grant.subject) {
-      store.deleteGrant(grant.grantId);
-      throw new InvalidGrantError("Refresh token is missing grant context.");
-    }
+      if (!grant.subject) {
+        store.deleteGrant(grant.grantId);
+        throw new InvalidGrantError("Refresh token is missing grant context.");
+      }
 
-    const expiresInSeconds = clampExpiresIn(nextUpstreamTokens.expires_in);
-    const accessToken = await dependencies.mintAccessToken({
-      clientId: grant.clientId,
-      expiresInSeconds,
-      resource: grant.resource,
-      scopes: grantedScopes,
-      subject: grant.subject,
+      const expiresInSeconds = clampExpiresIn(nextUpstreamTokens.expires_in);
+      const accessToken = await dependencies.mintAccessToken({
+        clientId: grant.clientId,
+        expiresInSeconds,
+        resource: grant.resource,
+        scopes: grantedScopes,
+        subject: grant.subject,
+      });
+      const nextRefreshToken = dependencies.createId();
+
+      store.saveGrant({
+        ...grant,
+        refreshToken: {
+          expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
+          token: nextRefreshToken,
+        },
+        upstreamTokens: nextUpstreamTokens,
+      });
+
+      return {
+        access_token: accessToken,
+        expires_in: expiresInSeconds,
+        refresh_token: nextRefreshToken,
+        scope: grantedScopes.join(" "),
+        token_type: "Bearer" as const,
+      };
     });
-    const nextRefreshToken = dependencies.createId();
-
-    store.saveGrant({
-      ...grant,
-      refreshToken: {
-        expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
-        token: nextRefreshToken,
-      },
-      upstreamTokens: nextUpstreamTokens,
-    });
-
-    return {
-      access_token: accessToken,
-      expires_in: expiresInSeconds,
-      refresh_token: nextRefreshToken,
-      scope: grantedScopes.join(" "),
-      token_type: "Bearer" as const,
-    };
   }
 
   return {

@@ -328,23 +328,32 @@ async function closeNodeServer(server) {
 export async function startHttpServer(options) {
     const allowedHosts = options.allowedHosts ?? [];
     const auth = options.auth ?? { deployment: "authless", mode: "none" };
+    const explicitAuthorizationUrl = auth.mode === "oauth" && typeof auth.authorizationUrl === "string"
+        ? auth.authorizationUrl
+        : undefined;
+    const explicitJwksUrl = auth.mode === "oauth" && typeof auth.jwksUrl === "string"
+        ? auth.jwksUrl
+        : undefined;
+    const explicitTokenUrl = auth.mode === "oauth" && typeof auth.tokenUrl === "string"
+        ? auth.tokenUrl
+        : undefined;
+    if (auth.mode === "oauth" && explicitAuthorizationUrl && explicitJwksUrl && explicitTokenUrl) {
+        validateCloudflareAccessOAuthSettings({
+            authorizationUrl: explicitAuthorizationUrl,
+            issuer: auth.issuer,
+            jwksUrl: explicitJwksUrl,
+            tokenUrl: explicitTokenUrl,
+        });
+    }
     const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
     const host = options.host ?? "127.0.0.1";
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
     const ynab = assertYnabConfig(options.ynab);
-    const oauthBroker = auth.mode === "oauth" ? createOAuthBroker(auth) : undefined;
+    const oauthBroker = auth.mode === "oauth" ? await createOAuthBroker(auth) : undefined;
     const persistentRequests = new Map();
     if (auth.mode === "oauth") {
         allowedOrigins.add(new URL(auth.publicUrl).origin);
-    }
-    if (auth.mode === "oauth") {
-        validateCloudflareAccessOAuthSettings({
-            authorizationUrl: auth.authorizationUrl,
-            issuer: auth.issuer,
-            jwksUrl: auth.jwksUrl,
-            tokenUrl: auth.tokenUrl,
-        });
     }
     const app = express();
     const jsonParser = express.json();

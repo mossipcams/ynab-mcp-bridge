@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import { SignJWT, createRemoteJWKSet, errors, jwtVerify } from "jose";
-import { InvalidRequestError, InvalidTokenError, ServerError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { InvalidRequestError, InvalidTokenError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { createOAuthCore } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
+import { createProviderClient } from "./providerClient.js";
 const CONSENT_PAGE_HEADERS = {
     "cache-control": "no-store",
     pragma: "no-cache",
@@ -56,13 +57,34 @@ function buildConsentPageHeaders(scriptNonce, formActionSources) {
         "content-security-policy": `default-src 'none'; connect-src 'self'; script-src 'nonce-${scriptNonce}'; form-action ${formActionSources.join(" ")}; frame-ancestors 'none'; base-uri 'none'`,
     };
 }
-export function createOAuthBroker(config) {
-    const store = createOAuthStore(config.storePath);
+export async function createOAuthBroker(config) {
     const resourceUrl = new URL(config.publicUrl);
     const issuerUrl = new URL(resourceUrl.origin);
     const callbackUrl = new URL(config.callbackPath, issuerUrl).href;
+    const providerClient = await createProviderClient({
+        callbackUrl,
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        issuer: config.issuer,
+        ...(config.metadataMode === "explicit"
+            ? {
+                authorizationUrl: config.authorizationUrl,
+                jwksUrl: config.jwksUrl,
+                metadataMode: "explicit",
+                tokenUrl: config.tokenUrl,
+            }
+            : {
+                authorizationUrl: config.authorizationUrl,
+                fallbackToExplicit: config.fallbackToExplicit,
+                jwksUrl: config.jwksUrl,
+                metadataMode: "discovery",
+                tokenUrl: config.tokenUrl,
+            }),
+    });
+    const providerMetadata = providerClient.getMetadata();
+    const store = createOAuthStore(config.storePath);
     const localTokenSecret = Buffer.from(config.tokenSigningSecret ?? crypto.randomBytes(32).toString("base64url"), "utf8");
-    const upstreamJwks = createRemoteJWKSet(new URL(config.jwksUrl));
+    const upstreamJwks = createRemoteJWKSet(new URL(providerMetadata.jwksUrl));
     const allowedAudiences = Array.from(new Set([config.audience, config.publicUrl]));
     async function verifyLocalAccessToken(token) {
         const { payload } = await jwtVerify(token, localTokenSecret, {
@@ -84,7 +106,7 @@ export function createOAuthBroker(config) {
     async function verifyUpstreamAccessToken(token) {
         const { payload } = await jwtVerify(token, upstreamJwks, {
             audience: config.audience,
-            issuer: config.issuer,
+            issuer: providerMetadata.issuer,
         });
         return {
             clientId: getClientId(payload),
@@ -138,59 +160,6 @@ export function createOAuthBroker(config) {
             .setSubject(record.subject)
             .sign(localTokenSecret);
     }
-    async function exchangeUpstreamAuthorizationCode(code) {
-        const body = new URLSearchParams({
-            grant_type: "authorization_code",
-            code,
-            client_id: config.clientId,
-            client_secret: config.clientSecret,
-            redirect_uri: callbackUrl,
-        });
-        const response = await fetch(config.tokenUrl, {
-            method: "POST",
-            headers: {
-                Accept: "application/json",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body,
-        });
-        if (!response.ok) {
-            throw new ServerError(`Upstream token exchange failed with status ${response.status}.`);
-        }
-        return await response.json();
-    }
-    async function exchangeUpstreamRefreshToken(refreshToken) {
-        const body = new URLSearchParams({
-            grant_type: "refresh_token",
-            refresh_token: refreshToken,
-            client_id: config.clientId,
-            client_secret: config.clientSecret,
-        });
-        const response = await fetch(config.tokenUrl, {
-            method: "POST",
-            headers: {
-                Accept: "application/json",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body,
-        });
-        if (!response.ok) {
-            throw new ServerError(`Upstream refresh exchange failed with status ${response.status}.`);
-        }
-        return await response.json();
-    }
-    function buildUpstreamAuthorizationUrl(pending) {
-        const upstreamAuthorizationUrl = new URL(config.authorizationUrl);
-        upstreamAuthorizationUrl.searchParams.set("client_id", config.clientId);
-        upstreamAuthorizationUrl.searchParams.set("redirect_uri", callbackUrl);
-        upstreamAuthorizationUrl.searchParams.set("response_type", "code");
-        upstreamAuthorizationUrl.searchParams.set("state", pending.upstreamState);
-        if (pending.scopes.length > 0) {
-            upstreamAuthorizationUrl.searchParams.set("scope", pending.scopes.join(" "));
-        }
-        upstreamAuthorizationUrl.searchParams.set("resource", pending.resource);
-        return upstreamAuthorizationUrl;
-    }
     const core = createOAuthCore({
         config: {
             callbackUrl,
@@ -199,9 +168,9 @@ export function createOAuthBroker(config) {
         },
         dependencies: {
             createId: () => crypto.randomBytes(24).toString("base64url"),
-            createUpstreamAuthorizationUrl: (pending) => buildUpstreamAuthorizationUrl(pending).href,
-            exchangeUpstreamAuthorizationCode,
-            exchangeUpstreamRefreshToken,
+            createUpstreamAuthorizationUrl: (pending) => providerClient.buildAuthorizationUrl(pending).href,
+            exchangeUpstreamAuthorizationResponse: (response) => providerClient.exchangeAuthorizationCodeResponse(response),
+            exchangeUpstreamRefreshToken: (refreshToken) => providerClient.exchangeRefreshToken(refreshToken),
             mintAccessToken,
             now: () => Date.now(),
         },
@@ -285,7 +254,7 @@ export function createOAuthBroker(config) {
         const formActionSources = Array.from(new Set([
             "'self'",
             new URL(pending.redirectUri).origin,
-            new URL(config.authorizationUrl).origin,
+            new URL(providerMetadata.authorizationUrl).origin,
         ]));
         for (const [name, value] of Object.entries(buildConsentPageHeaders(scriptNonce, formActionSources))) {
             res.setHeader(name, value);
@@ -342,16 +311,8 @@ export function createOAuthBroker(config) {
     };
     const handleCallback = async (req, res, next) => {
         try {
-            const upstreamState = typeof req.query.state === "string" ? req.query.state : undefined;
-            if (!upstreamState) {
-                throw new InvalidRequestError("Missing upstream OAuth state.");
-            }
-            const result = await core.handleCallback({
-                code: typeof req.query.code === "string" && req.query.code.length > 0 ? req.query.code : undefined,
-                error: typeof req.query.error === "string" ? req.query.error : undefined,
-                errorDescription: typeof req.query.error_description === "string" ? req.query.error_description : undefined,
-                upstreamState,
-            });
+            const callbackRequestUrl = new URL(req.originalUrl || req.url || config.callbackPath, issuerUrl);
+            const result = await core.handleCallback(providerClient.parseAuthorizationResponse(callbackRequestUrl));
             res.redirect(302, result.location);
         }
         catch (error) {

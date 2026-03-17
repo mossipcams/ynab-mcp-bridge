@@ -1316,12 +1316,17 @@ describe("startHttpServer", () => {
       auth: {
         audience: "https://mcp.example.com/mcp",
         authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        callbackPath: "/oauth/callback",
+        clientId: "cloudflare-client-id",
+        clientSecret: "cloudflare-client-secret",
         deployment: "oauth-single-tenant",
         issuer: "https://example.cloudflareaccess.com",
         jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/certs",
+        metadataMode: "explicit",
         mode: "oauth",
         publicUrl: "https://mcp.example.com/mcp",
         scopes: ["openid", "profile"],
+        tokenSigningSecret: "test-signing-secret",
         tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/token",
       },
       allowedOrigins: ["https://claude.ai"],
@@ -1886,6 +1891,177 @@ describe("startHttpServer", () => {
     expect(upstream.getLastTokenRequest()?.body.get("client_id")).toBe("cloudflare-client-id");
     expect(upstream.getLastTokenRequest()?.body.get("client_secret")).toBe("cloudflare-client-secret");
     expect(upstream.getLastTokenRequest()?.body.get("redirect_uri")).toBe("https://mcp.example.com/oauth/callback");
+  });
+
+  it("fails closed when the upstream callback contains ambiguous auth results", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&error=access_denied&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(callbackResponse.status).toBe(400);
+    await expect(callbackResponse.json()).resolves.toMatchObject({
+      error: "invalid_request",
+    });
+  });
+
+  it("supports oauth provider discovery from the configured issuer", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        callbackPath: "/oauth/callback",
+        clientId: "oauth-client-id",
+        clientSecret: "oauth-client-secret",
+        deployment: "oauth-single-tenant",
+        issuer: upstream.issuer,
+        metadataMode: "discovery",
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: ["openid", "profile"],
+        tokenSigningSecret: "test-signing-secret",
+      },
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const codeVerifier = "test-code-verifier-123456789";
+    const codeChallenge = createCodeChallenge(codeVerifier);
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
+
+    const tokenResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        code: localAuthorizationCode!,
+        code_verifier: codeVerifier,
+        grant_type: "authorization_code",
+        redirect_uri: "https://claude.ai/oauth/callback",
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(tokenResponse.status).toBe(200);
+    const tokens = await tokenResponse.json();
+    expect(tokens.access_token).toEqual(expect.any(String));
+    expect(tokens.refresh_token).toEqual(expect.any(String));
+  });
+
+  it("falls back to explicit provider metadata when discovery startup fails", async () => {
+    const discoveryUpstream = await startUpstreamOAuthServer(cleanups, {
+      discoveryStatus: 500,
+    });
+    const explicitUpstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: explicitUpstream.authorizationUrl,
+        callbackPath: "/oauth/callback",
+        clientId: "oauth-client-id",
+        clientSecret: "oauth-client-secret",
+        deployment: "oauth-single-tenant",
+        fallbackToExplicit: true,
+        issuer: discoveryUpstream.issuer,
+        jwksUrl: explicitUpstream.jwksUrl,
+        metadataMode: "discovery",
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: ["openid", "profile"],
+        tokenSigningSecret: "test-signing-secret",
+        tokenUrl: explicitUpstream.tokenUrl,
+      },
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const codeVerifier = "test-code-verifier-123456789";
+    const codeChallenge = createCodeChallenge(codeVerifier);
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
+
+    const tokenResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        code: localAuthorizationCode!,
+        code_verifier: codeVerifier,
+        grant_type: "authorization_code",
+        redirect_uri: "https://claude.ai/oauth/callback",
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(tokenResponse.status).toBe(200);
+    expect(explicitUpstream.getLastTokenRequest()?.body.get("code")).toBe("upstream-code-123");
   });
 
   it("exchanges a local authorization code for a bearer token and accepts it on MCP requests", async () => {
