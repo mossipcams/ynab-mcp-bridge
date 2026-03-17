@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.7.3...ynab-mcp-bridge-v0.7.4) (2026-03-17)
+
+
+### Bug Fixes
+
+* accept mcp bootstrap posts without json content type ([#78](https://github.com/mossipcams/ynab-mcp-bridge/issues/78)) ([772c9f1](https://github.com/mossipcams/ynab-mcp-bridge/commit/772c9f1ffdb4cf3198486b287c4123ce16225661))
+
 ## [0.7.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.7.2...ynab-mcp-bridge-v0.7.3) (2026-03-17)
 
 
