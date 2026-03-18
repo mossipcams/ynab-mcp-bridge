@@ -1853,6 +1853,7 @@ describe("startHttpServer", () => {
     expect(consentBody).not.toContain("<img src=x onerror=alert('boom')>");
     expect(authorizeResponse.headers.get("content-security-policy")).toContain("default-src 'none'");
     expect(authorizeResponse.headers.get("content-security-policy")).toContain("form-action 'self'");
+    expect(authorizeResponse.headers.get("content-security-policy")).toContain(`form-action 'self' ${new URL(upstream.authorizationUrl).origin}`);
     expect(authorizeResponse.headers.get("x-content-type-options")).toBe("nosniff");
     expect(authorizeResponse.headers.get("referrer-policy")).toBe("no-referrer");
     expect(authorizeResponse.headers.get("cache-control")).toContain("no-store");
