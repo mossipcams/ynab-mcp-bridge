@@ -3,9 +3,11 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createServer as createNodeHttpServer, request as httpRequest } from "node:http";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PassThrough } from "node:stream";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { startHttpServer } from "./httpServer.js";
+import { setLoggerDestinationForTests } from "./logger.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
@@ -23,17 +25,37 @@ describe("startHttpServer", () => {
   } as const;
 
   function findLogCall(
-    spy: ReturnType<typeof vi.spyOn>,
+    entries: Record<string, unknown>[],
+    scope: string,
     event: string,
     matcher: (details: Record<string, unknown>) => boolean = () => true,
   ) {
-    return spy.mock.calls.find(([scope, loggedEvent, details]) => (
-      scope === "[http]" &&
-      loggedEvent === event &&
-      typeof details === "object" &&
-      details !== null &&
-      matcher(details as Record<string, unknown>)
+    return entries.find((entry) => (
+      entry.scope === scope &&
+      entry.event === event &&
+      matcher(entry)
     ));
+  }
+
+  function createBufferedDestination() {
+    const destination = new PassThrough();
+    const chunks: string[] = [];
+
+    destination.on("data", (chunk) => {
+      chunks.push(chunk.toString("utf8"));
+    });
+
+    return {
+      destination,
+      readEntries() {
+        return chunks
+          .join("")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+      },
+    };
   }
 
   async function sendRawHttpRequest(url: string, options: {
@@ -162,6 +184,8 @@ describe("startHttpServer", () => {
   });
 
   afterEach(async () => {
+    setLoggerDestinationForTests();
+
     while (cleanups.length > 0) {
       const cleanup = cleanups.pop();
       await cleanup?.();
@@ -211,7 +235,8 @@ describe("startHttpServer", () => {
   });
 
   it("logs request ingress and session initialization details", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
@@ -219,10 +244,7 @@ describe("startHttpServer", () => {
       port: 0,
       path: "/mcp",
     });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
+    cleanups.push(() => httpServer.close());
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -248,12 +270,12 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
+    expect(findLogCall(sink.readEntries(), "http", "request.received", (details) => (
       details.method === "POST" &&
       details.path === "/mcp" &&
       details.origin === "https://claude.ai"
     ))).toBeTruthy();
-    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+    expect(findLogCall(sink.readEntries(), "http", "transport.handoff", (details) => (
       details.path === "/mcp" &&
       details.method === "POST" &&
       details.jsonRpcMethod === "initialize" &&
@@ -423,17 +445,15 @@ describe("startHttpServer", () => {
   });
 
   it("rejects requests from untrusted origins", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
+    cleanups.push(() => httpServer.close());
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -462,7 +482,7 @@ describe("startHttpServer", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Forbidden origin",
     });
-    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
+    expect(findLogCall(sink.readEntries(), "http", "request.rejected", (details) => (
       details.reason === "forbidden-origin" &&
       details.origin === "https://evil.example"
     ))).toBeTruthy();
@@ -803,7 +823,8 @@ describe("startHttpServer", () => {
   });
 
   it("returns the same explicit method contract for unsupported MCP endpoint methods", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
@@ -811,10 +832,7 @@ describe("startHttpServer", () => {
       port: 0,
       path: "/mcp",
     });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
+    cleanups.push(() => httpServer.close());
 
     const response = await fetch(httpServer.url, {
       method: "PUT",
@@ -833,7 +851,7 @@ describe("startHttpServer", () => {
       },
       id: null,
     });
-    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
+    expect(findLogCall(sink.readEntries(), "http", "request.rejected", (details) => (
       details.reason === "method-not-allowed" &&
       details.method === "PUT" &&
       details.path === "/mcp"
@@ -1009,16 +1027,14 @@ describe("startHttpServer", () => {
   });
 
   it("returns 404 for non-MCP paths", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const httpServer = await startHttpServer({
       ynab,
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
+    cleanups.push(() => httpServer.close());
 
     const response = await fetch(new URL("/health", httpServer.url));
 
@@ -1027,7 +1043,7 @@ describe("startHttpServer", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
-    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
+    expect(findLogCall(sink.readEntries(), "http", "request.rejected", (details) => (
       details.reason === "path-not-found" &&
       details.path === "/health"
     ))).toBeTruthy();
@@ -1065,7 +1081,8 @@ describe("startHttpServer", () => {
   });
 
   it("logs the JSON-RPC method for a sessionless tools/call request", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
@@ -1073,10 +1090,7 @@ describe("startHttpServer", () => {
       port: 0,
       path: "/mcp",
     });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
+    cleanups.push(() => httpServer.close());
 
     const followUpResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -1098,7 +1112,7 @@ describe("startHttpServer", () => {
     });
 
     expect(followUpResponse.status).toBe(200);
-    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+    expect(findLogCall(sink.readEntries(), "http", "transport.handoff", (details) => (
       details.method === "POST" &&
       details.path === "/mcp" &&
       details.cleanup === true &&
@@ -1108,16 +1122,14 @@ describe("startHttpServer", () => {
   });
 
   it("rejects repeated MCP session headers using the SDK transport contract", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const httpServer = await startHttpServer({
       ynab,
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
+    cleanups.push(() => httpServer.close());
 
     const headers = new Headers({
       Accept: "application/json, text/event-stream",
@@ -1147,23 +1159,21 @@ describe("startHttpServer", () => {
       },
       id: null,
     });
-    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
+    expect(findLogCall(sink.readEntries(), "http", "request.rejected", (details) => (
       details.reason === "invalid-session-header" &&
       details.path === "/mcp"
     ))).toBeTruthy();
   });
 
   it("returns a client error for malformed JSON without breaking later requests", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const httpServer = await startHttpServer({
       ynab,
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
+    cleanups.push(() => httpServer.close());
 
     const invalidResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -1177,7 +1187,7 @@ describe("startHttpServer", () => {
 
     expect(invalidResponse.status).toBe(400);
     expect(invalidResponse.headers.get("access-control-allow-origin")).toBeNull();
-    expect(findLogCall(consoleErrorSpy, "request.parse_error", (details) => (
+    expect(findLogCall(sink.readEntries(), "http", "request.parse_error", (details) => (
       details.method === "POST" &&
       details.path === "/mcp"
     ))).toBeTruthy();
@@ -1198,16 +1208,14 @@ describe("startHttpServer", () => {
   });
 
   it("returns 413 for oversized JSON requests instead of an internal server error", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const httpServer = await startHttpServer({
       ynab,
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
+    cleanups.push(() => httpServer.close());
 
     const response = await sendRawHttpRequest(httpServer.url, {
       method: "POST",
@@ -1239,10 +1247,7 @@ describe("startHttpServer", () => {
       },
       id: null,
     });
-    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
-      "Error handling MCP request:",
-      expect.anything(),
-    );
+    expect(findLogCall(sink.readEntries(), "http", "request.error")).toBeUndefined();
   });
 
   it("allows the started HTTP server to be closed more than once", async () => {
@@ -1922,7 +1927,8 @@ describe("startHttpServer", () => {
   });
 
   it("logs oauth auth failures without leaking token material", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -1934,10 +1940,7 @@ describe("startHttpServer", () => {
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
+    cleanups.push(() => httpServer.close());
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -1956,7 +1959,7 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(401);
-    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
+    expect(findLogCall(sink.readEntries(), "http", "request.rejected", (details) => (
       details.reason === "unauthorized" &&
       details.path === "/mcp" &&
       !("authorization" in details)

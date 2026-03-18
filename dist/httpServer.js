@@ -5,6 +5,7 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, } from "@modelcont
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import { createOAuthBroker } from "./oauthBroker.js";
 import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { createServer } from "./server.js";
@@ -102,7 +103,7 @@ function writeInternalServerError(res) {
     writeJsonRpcError(res, 500, -32603, "Internal server error");
 }
 function logHttpDebug(event, details) {
-    console.error("[http]", event, details);
+    logAppEvent("http", event, details);
 }
 function getPublicResourceServerUrl(auth) {
     return new URL(auth.publicUrl);
@@ -417,7 +418,7 @@ export async function startHttpServer(options) {
             writePayloadTooLarge(res);
             return;
         }
-        console.error("Error handling MCP request:", {
+        logAppEvent("http", "request.error", {
             ...getRequestDebugDetails(req),
             error,
         });

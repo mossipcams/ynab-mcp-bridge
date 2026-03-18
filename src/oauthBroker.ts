@@ -12,6 +12,7 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import type { RuntimeAuthConfig } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
 
@@ -29,6 +30,20 @@ const CONSENT_PAGE_HEADERS = {
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
 } as const;
+
+function getErrorDetails(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      errorMessage: error.message,
+      errorName: error.name,
+    };
+  }
+
+  return {
+    errorMessage: String(error),
+    errorName: "UnknownError",
+  };
+}
 
 function parseScopes(scopeClaim: unknown) {
   if (typeof scopeClaim !== "string") {
@@ -373,6 +388,11 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       });
       res.redirect(302, result.location);
     } catch (error) {
+      logAppEvent("oauth", "callback.failed", {
+        ...getErrorDetails(error),
+        path: req.path,
+      });
+
       if (error instanceof InvalidRequestError) {
         res.status(400).json(error.toResponseObject());
         return;

@@ -20,6 +20,7 @@ import {
   type RuntimeAuthConfig,
   type YnabConfig,
 } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import { createOAuthBroker } from "./oauthBroker.js";
 import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { createServer } from "./server.js";
@@ -184,7 +185,7 @@ function writeInternalServerError(res: Response) {
 }
 
 function logHttpDebug(event: string, details: HttpDebugDetails) {
-  console.error("[http]", event, details);
+  logAppEvent("http", event, details);
 }
 
 function getPublicResourceServerUrl(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
@@ -582,7 +583,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       return;
     }
 
-    console.error("Error handling MCP request:", {
+    logAppEvent("http", "request.error", {
       ...getRequestDebugDetails(req),
       error,
     });

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { SignJWT, createRemoteJWKSet, errors, jwtVerify } from "jose";
 import { InvalidRequestError, InvalidTokenError, ServerError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { logAppEvent } from "./logger.js";
 import { createOAuthCore } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
 const CONSENT_PAGE_HEADERS = {
@@ -10,6 +11,18 @@ const CONSENT_PAGE_HEADERS = {
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
 };
+function getErrorDetails(error) {
+    if (error instanceof Error) {
+        return {
+            errorMessage: error.message,
+            errorName: error.name,
+        };
+    }
+    return {
+        errorMessage: String(error),
+        errorName: "UnknownError",
+    };
+}
 function parseScopes(scopeClaim) {
     if (typeof scopeClaim !== "string") {
         return [];
@@ -294,6 +307,10 @@ export function createOAuthBroker(config) {
             res.redirect(302, result.location);
         }
         catch (error) {
+            logAppEvent("oauth", "callback.failed", {
+                ...getErrorDetails(error),
+                path: req.path,
+            });
             if (error instanceof InvalidRequestError) {
                 res.status(400).json(error.toResponseObject());
                 return;
