@@ -5,13 +5,16 @@ import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthCore } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
-const CONSENT_PAGE_HEADERS = {
-    "cache-control": "no-store",
-    "content-security-policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-    pragma: "no-cache",
-    "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-};
+function getConsentPageHeaders(authorizationUrl) {
+    const authorizationOrigin = new URL(authorizationUrl).origin;
+    return {
+        "cache-control": "no-store",
+        "content-security-policy": `default-src 'none'; form-action 'self' ${authorizationOrigin}; frame-ancestors 'none'; base-uri 'none'`,
+        pragma: "no-cache",
+        "referrer-policy": "no-referrer",
+        "x-content-type-options": "nosniff",
+    };
+}
 function logOAuthDebug(event, details) {
     console.error("[oauth]", event, details);
 }
@@ -71,6 +74,7 @@ export function createOAuthBroker(config) {
     const resourceUrl = new URL(config.publicUrl);
     const issuerUrl = new URL(resourceUrl.origin);
     const callbackUrl = new URL(config.callbackPath, issuerUrl).href;
+    const consentPageHeaders = getConsentPageHeaders(config.authorizationUrl);
     const effectiveScopes = getEffectiveOAuthScopes(config.scopes);
     const localTokenSecret = Buffer.from(config.tokenSigningSecret ?? crypto.randomBytes(32).toString("base64url"), "utf8");
     const allowedAudiences = Array.from(new Set([config.audience, config.publicUrl]));
@@ -135,7 +139,7 @@ export function createOAuthBroker(config) {
 </html>`;
     }
     function sendConsentPage(res, consentChallenge, pending) {
-        for (const [name, value] of Object.entries(CONSENT_PAGE_HEADERS)) {
+        for (const [name, value] of Object.entries(consentPageHeaders)) {
             res.setHeader(name, value);
         }
         res.status(200)
