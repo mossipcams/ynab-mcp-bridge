@@ -23,6 +23,7 @@ export function createCloudflareOAuthAuth(overrides = {}) {
         mode: "oauth",
         publicUrl: DEFAULT_RESOURCE,
         scopes: ["openid", "profile"],
+        tokenSigningSecret: "test-oauth-signing-secret",
         tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
         ...overrides,
     };
