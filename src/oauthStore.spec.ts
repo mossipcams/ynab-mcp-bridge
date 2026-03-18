@@ -51,7 +51,7 @@ describe("oauth store", () => {
       resource: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile"],
       state: "client-state",
-      subject: "client-1",
+      principalId: "client-1",
       upstreamTokens: {
         access_token: "upstream-token",
         token_type: "Bearer",
@@ -62,7 +62,7 @@ describe("oauth store", () => {
       expiresAt: expiredAt,
       resource: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile"],
-      subject: "client-1",
+      principalId: "client-1",
       upstreamTokens: {
         access_token: "upstream-token",
         token_type: "Bearer",
@@ -130,7 +130,7 @@ describe("oauth store", () => {
       resource: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile"],
       state: "client-state",
-      subject: "client-1",
+      principalId: "client-1",
       upstreamTokens,
       authorizationCode: {
         code: "code-1",
@@ -154,7 +154,7 @@ describe("oauth store", () => {
       resource: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile"],
       state: "client-state",
-      subject: "client-1",
+      principalId: "client-1",
       upstreamTokens,
       refreshToken: {
         token: "refresh-1",
@@ -177,6 +177,38 @@ describe("oauth store", () => {
 
     expect(persistedState.version).toBe(2);
     expect(Object.keys(persistedState.grants)).toEqual(["grant-1"]);
+  });
+
+  it("normalizes legacy subject fields into a grant principal identity", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
+    const storePath = path.join(tempDir, "oauth-store.json");
+    cleanups.push(async () => {
+      await rm(tempDir, { force: true, recursive: true });
+    });
+
+    const store = createOAuthStore(storePath);
+    store.saveGrant({
+      grantId: "grant-1",
+      clientId: "client-1",
+      codeChallenge: "challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile"],
+      subject: "client-1",
+      upstreamTokens: {
+        access_token: "upstream-token",
+        token_type: "Bearer",
+      },
+      authorizationCode: {
+        code: "code-1",
+        expiresAt: Date.now() + 60_000,
+      },
+    });
+
+    expect(store.getGrant("grant-1")).toMatchObject({
+      principalId: "client-1",
+    });
+    expect(store.getGrant("grant-1")).not.toHaveProperty("subject");
   });
 
   it("migrates legacy OAuth state into the grant model on load", async () => {

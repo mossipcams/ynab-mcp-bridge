@@ -25,17 +25,25 @@ export type OAuthGrant = {
   resource: string;
   scopes: string[];
   state?: string;
-  subject?: string;
+  principalId?: string;
   upstreamTokens?: OAuthTokens;
+};
+
+export type OAuthGrantInput = OAuthGrant & {
+  subject?: string;
 };
 
 export function normalizeScopes(scopes: string[]) {
   return [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))].sort();
 }
 
-export function normalizeGrant(grant: OAuthGrant): OAuthGrant {
+export function normalizeGrant(grant: OAuthGrantInput): OAuthGrant {
+  const { subject: _subject, ...normalizedGrant } = grant;
+  const principalId = grant.principalId ?? grant.subject;
+
   return {
-    ...grant,
+    ...normalizedGrant,
+    principalId,
     scopes: normalizeScopes(grant.scopes),
   };
 }

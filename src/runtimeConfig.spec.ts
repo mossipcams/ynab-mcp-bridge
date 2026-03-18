@@ -101,7 +101,7 @@ describe("resolveRuntimeConfig", () => {
         jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
         mode: "oauth",
         publicUrl: "https://mcp.example.com/mcp",
-        scopes: ["openid", "profile", "email"],
+        scopes: ["openid", "profile", "email", "offline_access"],
         storePath: "/tmp/ynab-mcp-oauth-store.json",
         tokenSigningSecret: "test-signing-secret",
         tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
@@ -110,6 +110,46 @@ describe("resolveRuntimeConfig", () => {
       path: "/mcp",
       port: 3000,
       transport: "http",
+    });
+  });
+
+  it("adds offline_access to oauth scopes when it is not explicitly configured", () => {
+    expect(resolveRuntimeConfig([], {
+      MCP_AUTH_MODE: "oauth",
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      MCP_OAUTH_SCOPES: "openid,profile,email",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+    }).auth).toMatchObject({
+      mode: "oauth",
+      scopes: ["openid", "profile", "email", "offline_access"],
+    });
+  });
+
+  it("deduplicates offline_access when it is already configured", () => {
+    expect(resolveRuntimeConfig([], {
+      MCP_AUTH_MODE: "oauth",
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      MCP_OAUTH_SCOPES: "openid,offline_access,profile,offline_access",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+    }).auth).toMatchObject({
+      mode: "oauth",
+      scopes: ["openid", "offline_access", "profile"],
     });
   });
 
@@ -227,7 +267,7 @@ describe("resolveRuntimeConfig", () => {
         jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
         mode: "oauth",
         publicUrl: "https://mcp.example.com/mcp",
-        scopes: [],
+        scopes: ["offline_access"],
         storePath: path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json"),
         tokenSigningSecret: createHash("sha256")
           .update("cloudflare-client-secret\nhttps://mcp.example.com/mcp\nclient-123")

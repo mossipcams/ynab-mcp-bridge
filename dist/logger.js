@@ -44,10 +44,21 @@ export function sanitizeLogValue(value) {
     const sanitizedEntries = Object.entries(value).map(([key, entryValue]) => ([key, isSensitiveKey(key) ? REDACTED_VALUE : sanitizeLogValue(entryValue)]));
     return Object.fromEntries(sanitizedEntries);
 }
+function getDefaultDestination() {
+    return {
+        write(chunk) {
+            const line = typeof chunk === "string"
+                ? chunk.trimEnd()
+                : Buffer.from(chunk).toString("utf8").trimEnd();
+            console.error(line);
+            return true;
+        },
+    };
+}
 export function createLogger(options = {}) {
     return pino({
         base: undefined,
-    }, options.destination ?? process.stderr);
+    }, options.destination ?? getDefaultDestination());
 }
 let appLogger = createLogger();
 export function getAppLogger() {

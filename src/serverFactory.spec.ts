@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { createServer, registerServerTools } from "./server.js";
 
 describe("createServer", () => {
@@ -133,6 +134,15 @@ describe("createServer", () => {
       }),
       expect.any(Function),
     );
+  });
+
+  it("defines an explicit tool registry instead of passing whole tool modules around", () => {
+    const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("name: GetMcpVersionTool.name");
+    expect(source).toContain("GetAccountTool.execute(");
+    expect(source).not.toContain("module: GetAccountTool");
+    expect(source).not.toContain("module.execute");
   });
 
   it("requires explicit config instead of reading the API token from environment", () => {

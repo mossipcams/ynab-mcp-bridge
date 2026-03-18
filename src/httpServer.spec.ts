@@ -3,11 +3,9 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createServer as createNodeHttpServer, request as httpRequest } from "node:http";
-import { PassThrough } from "node:stream";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startHttpServer } from "./httpServer.js";
-import { setLoggerDestinationForTests } from "./logger.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
@@ -24,38 +22,80 @@ describe("startHttpServer", () => {
     apiToken: "test-token",
   } as const;
 
+  function getStructuredLogEntry(call: unknown[]) {
+    if (call.length !== 1 || typeof call[0] !== "string") {
+      return undefined;
+    }
+
+    try {
+      const parsed = JSON.parse(call[0]);
+      return typeof parsed === "object" && parsed !== null
+        ? parsed as Record<string, unknown>
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   function findLogCall(
-    entries: Record<string, unknown>[],
-    scope: string,
+    spy: ReturnType<typeof vi.spyOn>,
     event: string,
     matcher: (details: Record<string, unknown>) => boolean = () => true,
   ) {
-    return entries.find((entry) => (
-      entry.scope === scope &&
-      entry.event === event &&
-      matcher(entry)
-    ));
+    return spy.mock.calls.find((call) => {
+      const structuredEntry = getStructuredLogEntry(call);
+
+      if (structuredEntry) {
+        return structuredEntry.scope === "http" &&
+          structuredEntry.event === event &&
+          matcher(structuredEntry);
+      }
+
+      const [scope, loggedEvent, details] = call;
+
+      return scope === "[http]" &&
+        loggedEvent === event &&
+        typeof details === "object" &&
+        details !== null &&
+        matcher(details as Record<string, unknown>);
+    });
   }
 
-  function createBufferedDestination() {
-    const destination = new PassThrough();
-    const chunks: string[] = [];
+  function findProfileLogCall(
+    spy: ReturnType<typeof vi.spyOn>,
+    event: string,
+    matcher: (details: Record<string, unknown>) => boolean = () => true,
+  ) {
+    return spy.mock.calls.find(([scope, loggedEvent, details]) => (
+      scope === "[profile]" &&
+      loggedEvent === event &&
+      typeof details === "object" &&
+      details !== null &&
+      matcher(details as Record<string, unknown>)
+    ));
+  }
+  function findOAuthLogCall(
+    spy: ReturnType<typeof vi.spyOn>,
+    event: string,
+    matcher: (details: Record<string, unknown>) => boolean = () => true,
+  ) {
+    return spy.mock.calls.find((call) => {
+      const structuredEntry = getStructuredLogEntry(call);
 
-    destination.on("data", (chunk) => {
-      chunks.push(chunk.toString("utf8"));
+      if (structuredEntry) {
+        return structuredEntry.scope === "oauth" &&
+          structuredEntry.event === event &&
+          matcher(structuredEntry);
+      }
+
+      const [scope, loggedEvent, details] = call;
+
+      return scope === "[oauth]" &&
+        loggedEvent === event &&
+        typeof details === "object" &&
+        details !== null &&
+        matcher(details as Record<string, unknown>);
     });
-
-    return {
-      destination,
-      readEntries() {
-        return chunks
-          .join("")
-          .trim()
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as Record<string, unknown>);
-      },
-    };
   }
 
   async function sendRawHttpRequest(url: string, options: {
@@ -162,7 +202,7 @@ describe("startHttpServer", () => {
   } = {}) {
     return await new SignJWT({
       client_id: "client-123",
-      scope: overrides.scope ?? "openid profile",
+      scope: overrides.scope ?? "openid profile offline_access",
     })
       .setProtectedHeader({
         alg: "RS256",
@@ -184,8 +224,6 @@ describe("startHttpServer", () => {
   });
 
   afterEach(async () => {
-    setLoggerDestinationForTests();
-
     while (cleanups.length > 0) {
       const cleanup = cleanups.pop();
       await cleanup?.();
@@ -235,8 +273,7 @@ describe("startHttpServer", () => {
   });
 
   it("logs request ingress and session initialization details", async () => {
-    const sink = createBufferedDestination();
-    setLoggerDestinationForTests(sink.destination);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
@@ -244,7 +281,10 @@ describe("startHttpServer", () => {
       port: 0,
       path: "/mcp",
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -270,17 +310,142 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(findLogCall(sink.readEntries(), "http", "request.received", (details) => (
+    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
       details.method === "POST" &&
       details.path === "/mcp" &&
       details.origin === "https://claude.ai"
     ))).toBeTruthy();
-    expect(findLogCall(sink.readEntries(), "http", "transport.handoff", (details) => (
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
       details.path === "/mcp" &&
       details.method === "POST" &&
       details.jsonRpcMethod === "initialize" &&
       details.sessionId === undefined &&
       details.cleanup === true
+    ))).toBeTruthy();
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.profileId === "claude" &&
+      details.reason === "origin:claude.ai"
+    ))).toBeTruthy();
+  });
+
+  it("falls back to the generic client profile without changing stateless POST handling", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "generic-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.profileId === "generic" &&
+      details.reason === "fallback:generic"
+    ))).toBeTruthy();
+  });
+
+  it("logs a conservative profile reconciliation when initialize clientInfo disagrees with pre-auth detection", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "OpenAI Codex",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(findProfileLogCall(consoleErrorSpy, "profile.reconciled", (details) => (
+      details.path === "/mcp" &&
+      details.provisionalProfileId === "claude" &&
+      details.confirmedProfileId === "codex" &&
+      details.profileId === "generic" &&
+      details.reason === "reconciled:generic"
+    ))).toBeTruthy();
+  });
+
+  it("detects Codex-style OAuth probe paths without changing authless 404 behavior", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(new URL("/.well-known/oauth-authorization-server/sse", httpServer.url), {
+      headers: {
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+    });
+
+    expect(response.status).toBe(404);
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/.well-known/oauth-authorization-server/sse" &&
+      details.method === "GET" &&
+      details.profileId === "codex" &&
+      details.reason === "path:codex-oauth-probe"
     ))).toBeTruthy();
   });
 
@@ -445,15 +610,17 @@ describe("startHttpServer", () => {
   });
 
   it("rejects requests from untrusted origins", async () => {
-    const sink = createBufferedDestination();
-    setLoggerDestinationForTests(sink.destination);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -482,7 +649,7 @@ describe("startHttpServer", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Forbidden origin",
     });
-    expect(findLogCall(sink.readEntries(), "http", "request.rejected", (details) => (
+    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
       details.reason === "forbidden-origin" &&
       details.origin === "https://evil.example"
     ))).toBeTruthy();
@@ -823,8 +990,7 @@ describe("startHttpServer", () => {
   });
 
   it("returns the same explicit method contract for unsupported MCP endpoint methods", async () => {
-    const sink = createBufferedDestination();
-    setLoggerDestinationForTests(sink.destination);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
@@ -832,7 +998,10 @@ describe("startHttpServer", () => {
       port: 0,
       path: "/mcp",
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const response = await fetch(httpServer.url, {
       method: "PUT",
@@ -851,7 +1020,7 @@ describe("startHttpServer", () => {
       },
       id: null,
     });
-    expect(findLogCall(sink.readEntries(), "http", "request.rejected", (details) => (
+    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
       details.reason === "method-not-allowed" &&
       details.method === "PUT" &&
       details.path === "/mcp"
@@ -1027,14 +1196,16 @@ describe("startHttpServer", () => {
   });
 
   it("returns 404 for non-MCP paths", async () => {
-    const sink = createBufferedDestination();
-    setLoggerDestinationForTests(sink.destination);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const response = await fetch(new URL("/health", httpServer.url));
 
@@ -1043,7 +1214,7 @@ describe("startHttpServer", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
-    expect(findLogCall(sink.readEntries(), "http", "request.rejected", (details) => (
+    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
       details.reason === "path-not-found" &&
       details.path === "/health"
     ))).toBeTruthy();
@@ -1081,8 +1252,7 @@ describe("startHttpServer", () => {
   });
 
   it("logs the JSON-RPC method for a sessionless tools/call request", async () => {
-    const sink = createBufferedDestination();
-    setLoggerDestinationForTests(sink.destination);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
@@ -1090,7 +1260,10 @@ describe("startHttpServer", () => {
       port: 0,
       path: "/mcp",
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const followUpResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -1112,7 +1285,7 @@ describe("startHttpServer", () => {
     });
 
     expect(followUpResponse.status).toBe(200);
-    expect(findLogCall(sink.readEntries(), "http", "transport.handoff", (details) => (
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
       details.method === "POST" &&
       details.path === "/mcp" &&
       details.cleanup === true &&
@@ -1122,14 +1295,16 @@ describe("startHttpServer", () => {
   });
 
   it("rejects repeated MCP session headers using the SDK transport contract", async () => {
-    const sink = createBufferedDestination();
-    setLoggerDestinationForTests(sink.destination);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const headers = new Headers({
       Accept: "application/json, text/event-stream",
@@ -1159,21 +1334,23 @@ describe("startHttpServer", () => {
       },
       id: null,
     });
-    expect(findLogCall(sink.readEntries(), "http", "request.rejected", (details) => (
+    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
       details.reason === "invalid-session-header" &&
       details.path === "/mcp"
     ))).toBeTruthy();
   });
 
   it("returns a client error for malformed JSON without breaking later requests", async () => {
-    const sink = createBufferedDestination();
-    setLoggerDestinationForTests(sink.destination);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const invalidResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -1187,7 +1364,7 @@ describe("startHttpServer", () => {
 
     expect(invalidResponse.status).toBe(400);
     expect(invalidResponse.headers.get("access-control-allow-origin")).toBeNull();
-    expect(findLogCall(sink.readEntries(), "http", "request.parse_error", (details) => (
+    expect(findLogCall(consoleErrorSpy, "request.parse_error", (details) => (
       details.method === "POST" &&
       details.path === "/mcp"
     ))).toBeTruthy();
@@ -1208,14 +1385,16 @@ describe("startHttpServer", () => {
   });
 
   it("returns 413 for oversized JSON requests instead of an internal server error", async () => {
-    const sink = createBufferedDestination();
-    setLoggerDestinationForTests(sink.destination);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const response = await sendRawHttpRequest(httpServer.url, {
       method: "POST",
@@ -1247,7 +1426,7 @@ describe("startHttpServer", () => {
       },
       id: null,
     });
-    expect(findLogCall(sink.readEntries(), "http", "request.error")).toBeUndefined();
+    expect(findLogCall(consoleErrorSpy, "request.error")).toBeUndefined();
   });
 
   it("allows the started HTTP server to be closed more than once", async () => {
@@ -1285,7 +1464,7 @@ describe("startHttpServer", () => {
     await expect(response.json()).resolves.toMatchObject({
       authorization_servers: ["https://mcp.example.com/"],
       resource: "https://mcp.example.com/mcp",
-      scopes_supported: ["openid", "profile"],
+      scopes_supported: ["openid", "profile", "offline_access"],
     });
   });
 
@@ -1310,6 +1489,42 @@ describe("startHttpServer", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBe("https://mcp.example.com");
     expect(response.headers.get("vary")).toContain("Origin");
+  });
+
+  it("allows null-origin consent submissions without relaxing other OAuth routes", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
+      origin: "null",
+    });
+    const metadataResponse = await fetch(new URL("/.well-known/oauth-authorization-server", httpServer.url), {
+      headers: {
+        Origin: "null",
+      },
+    });
+
+    expect(consentResponse.status).toBe(302);
+    expect(consentResponse.headers.get("location")).toBeTruthy();
+    expect(metadataResponse.status).toBe(403);
+    await expect(metadataResponse.json()).resolves.toEqual({
+      error: "Forbidden origin",
+    });
   });
 
   it("rejects legacy Cloudflare Access oauth2 endpoints passed directly to the HTTP server", async () => {
@@ -1392,8 +1607,70 @@ describe("startHttpServer", () => {
       authorization_endpoint: "https://mcp.example.com/authorize",
       issuer: "https://mcp.example.com/",
       registration_endpoint: "https://mcp.example.com/register",
+      scopes_supported: expect.arrayContaining(["openid", "profile", "offline_access"]),
       token_endpoint: "https://mcp.example.com/token",
       token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
+    });
+  });
+
+  it("exposes a minimal OpenID configuration document when oauth mode is enabled", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/openid-configuration", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      authorization_endpoint: "https://mcp.example.com/authorize",
+      issuer: "https://mcp.example.com/",
+      registration_endpoint: "https://mcp.example.com/register",
+      scopes_supported: expect.arrayContaining(["openid", "profile", "offline_access"]),
+      subject_types_supported: ["public"],
+      token_endpoint: "https://mcp.example.com/token",
+      token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
+    });
+  });
+
+  it("serves OAuth authorization server metadata on Codex-style discovery probe paths", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const firstResponse = await fetch(new URL("/.well-known/oauth-authorization-server/sse", httpServer.url));
+    const secondResponse = await fetch(new URL("/sse/.well-known/oauth-authorization-server", httpServer.url));
+
+    expect(firstResponse.status).toBe(200);
+    await expect(firstResponse.json()).resolves.toMatchObject({
+      authorization_endpoint: "https://mcp.example.com/authorize",
+      issuer: "https://mcp.example.com/",
+      registration_endpoint: "https://mcp.example.com/register",
+      token_endpoint: "https://mcp.example.com/token",
+    });
+
+    expect(secondResponse.status).toBe(200);
+    await expect(secondResponse.json()).resolves.toMatchObject({
+      authorization_endpoint: "https://mcp.example.com/authorize",
+      issuer: "https://mcp.example.com/",
+      registration_endpoint: "https://mcp.example.com/register",
+      token_endpoint: "https://mcp.example.com/token",
     });
   });
 
@@ -1561,7 +1838,7 @@ describe("startHttpServer", () => {
     expect(redirectUrl.searchParams.get("client_id")).toBe("cloudflare-client-id");
     expect(redirectUrl.searchParams.get("redirect_uri")).toBe("https://mcp.example.com/oauth/callback");
     expect(redirectUrl.searchParams.get("response_type")).toBe("code");
-    expect(redirectUrl.searchParams.get("scope")).toBe("openid profile");
+    expect(redirectUrl.searchParams.get("scope")).toBe("offline_access openid profile");
     expect(redirectUrl.searchParams.get("state")).toBeTruthy();
   });
 
@@ -1608,6 +1885,7 @@ describe("startHttpServer", () => {
     expect(consentBody).not.toContain("<img src=x onerror=alert('boom')>");
     expect(authorizeResponse.headers.get("content-security-policy")).toContain("default-src 'none'");
     expect(authorizeResponse.headers.get("content-security-policy")).toContain("form-action 'self'");
+    expect(authorizeResponse.headers.get("content-security-policy")).toContain(`form-action 'self' ${new URL(upstream.authorizationUrl).origin}`);
     expect(authorizeResponse.headers.get("x-content-type-options")).toBe("nosniff");
     expect(authorizeResponse.headers.get("referrer-policy")).toBe("no-referrer");
     expect(authorizeResponse.headers.get("cache-control")).toContain("no-store");
@@ -1667,7 +1945,8 @@ describe("startHttpServer", () => {
     expect(upstream.getLastTokenRequest()?.body.get("redirect_uri")).toBe("https://mcp.example.com/oauth/callback");
   });
 
-  it("exchanges a local authorization code for a bearer token and accepts it on MCP requests", async () => {
+  it("returns a useful OAuth error response when the upstream callback omits state", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -1682,7 +1961,63 @@ describe("startHttpServer", () => {
       path: "/mcp",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+
+    expect(consentResponse.status).toBe(302);
+    expect(new URL(consentResponse.headers.get("location")!).searchParams.get("state")).toBeTruthy();
+
+    const callbackResponse = await fetch(new URL(
+      "/oauth/callback?error=access_denied&error_description=User%20cancelled%20access",
+      httpServer.url,
+    ), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(callbackResponse.status).toBe(400);
+    await expect(callbackResponse.json()).resolves.toEqual({
+      error: "invalid_request",
+      error_description: "Upstream OAuth callback returned error \"access_denied\" without state. User cancelled access",
+    });
+    expect(upstream.getLastTokenRequest()).toBeUndefined();
+    expect(findOAuthLogCall(consoleErrorSpy, "callback.failed", (details) => (
+      details.errorMessage === "Upstream OAuth callback returned error \"access_denied\" without state. User cancelled access" &&
+      details.errorName === "InvalidRequestError" &&
+      details.upstreamError === "access_denied" &&
+      details.upstreamErrorDescription === "User cancelled access"
+    ))).toBeTruthy();
+  });
+
+  it("exchanges a local authorization code for a bearer token and accepts it on MCP requests", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const tokenUserAgent = "chatgpt-token-client/1.0";
+    const mcpUserAgent = "chatgpt-mcp-client/1.0";
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const codeVerifier = "test-code-verifier-123456789";
     const codeChallenge = createCodeChallenge(codeVerifier);
@@ -1707,6 +2042,7 @@ describe("startHttpServer", () => {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Origin: "https://claude.ai",
+        "User-Agent": tokenUserAgent,
       },
       body: new URLSearchParams({
         client_id: registration.client_id,
@@ -1732,6 +2068,7 @@ describe("startHttpServer", () => {
         "Content-Type": "application/json",
         Origin: "https://claude.ai",
         "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "User-Agent": mcpUserAgent,
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -1742,9 +2079,78 @@ describe("startHttpServer", () => {
     });
 
     expect(mcpResponse.status).toBe(200);
+    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
+      details.path === "/token" &&
+      details.method === "POST" &&
+      details.userAgent === tokenUserAgent &&
+      !("authorization" in details)
+    ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.jsonRpcMethod === "tools/list" &&
+      details.userAgent === mcpUserAgent &&
+      !("authorization" in details)
+    ))).toBeTruthy();
+    expect(findOAuthLogCall(consoleErrorSpy, "token.exchange.succeeded", (details) => (
+      details.clientId === registration.client_id &&
+      details.grantType === "authorization_code" &&
+      details.hasAccessToken === true &&
+      details.hasExpiresIn === true &&
+      details.hasRefreshToken === true &&
+      details.hasScope === true &&
+      details.hasTokenType === true &&
+      Array.isArray(details.tokenResponseFields) &&
+      details.tokenResponseFields.includes("access_token") &&
+      details.tokenResponseFields.includes("expires_in") &&
+      details.tokenResponseFields.includes("refresh_token") &&
+      details.tokenResponseFields.includes("scope") &&
+      details.tokenResponseFields.includes("token_type") &&
+      !("accessToken" in details) &&
+      !("refreshToken" in details)
+    ))).toBeTruthy();
+    expect(findOAuthLogCall(consoleErrorSpy, "callback.completed", (details) => (
+      details.hasCode === true &&
+      details.hasError === false &&
+      details.hasState === true &&
+      details.issuedAuthorizationCode === true
+    ))).toBeTruthy();
+    expect(findOAuthLogCall(consoleErrorSpy, "token.exchange.succeeded", (details) => (
+      details.grantType === "authorization_code" &&
+      details.clientId === registration.client_id &&
+      details.hasRedirectUri === true &&
+      details.hasResource === true &&
+      details.issuedAccessToken === true &&
+      details.issuedRefreshToken === true &&
+      details.scopeCount === 3 &&
+      details.hasAccessToken === true &&
+      details.hasExpiresIn === true &&
+      details.hasRefreshToken === true &&
+      details.hasScope === true &&
+      details.hasTokenType === true &&
+      Array.isArray(details.tokenResponseFields) &&
+      details.tokenResponseFields.includes("access_token") &&
+      details.tokenResponseFields.includes("expires_in") &&
+      details.tokenResponseFields.includes("refresh_token") &&
+      details.tokenResponseFields.includes("scope") &&
+      details.tokenResponseFields.includes("token_type") &&
+      !("accessToken" in details) &&
+      !("refreshToken" in details)
+    ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.jsonRpcMethod === "tools/list" &&
+      details.userAgent === mcpUserAgent &&
+      details.authMode === "oauth" &&
+      details.authRequired === true &&
+      details.authClientId === registration.client_id &&
+      details.hasAuthorizationHeader === true
+    ))).toBeTruthy();
   });
 
-  it("brokers refresh-token exchanges through the upstream provider before issuing a fresh local token", async () => {
+  it("accepts token exchanges forwarded through a trusted proxy header", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -1759,7 +2165,76 @@ describe("startHttpServer", () => {
       path: "/mcp",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const codeVerifier = "test-code-verifier-123456789";
+    const codeChallenge = createCodeChallenge(codeVerifier);
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
+
+    const tokenResponse = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      path: "/token",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+        "X-Forwarded-For": "203.0.113.10",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        code: localAuthorizationCode!,
+        code_verifier: codeVerifier,
+        grant_type: "authorization_code",
+        redirect_uri: "https://claude.ai/oauth/callback",
+        resource: "https://mcp.example.com/mcp",
+      }).toString(),
+    });
+
+    expect(tokenResponse.statusCode).toBe(200);
+    expect(JSON.parse(tokenResponse.body)).toMatchObject({
+      access_token: expect.any(String),
+      refresh_token: expect.any(String),
+      token_type: "Bearer",
+    });
+    expect(consoleErrorSpy.mock.calls.some(([firstArg]) => String(firstArg).includes("ValidationError"))).toBe(false);
+  });
+
+  it("brokers refresh-token exchanges through the upstream provider before issuing a fresh local token", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const codeVerifier = "test-code-verifier-123456789";
     const codeChallenge = createCodeChallenge(codeVerifier);
@@ -1824,6 +2299,23 @@ describe("startHttpServer", () => {
     expect(upstream.getLastTokenRequest()?.body.get("refresh_token")).toBe("upstream-refresh-token");
     expect(upstream.getLastTokenRequest()?.body.get("client_id")).toBe("cloudflare-client-id");
     expect(upstream.getLastTokenRequest()?.body.get("client_secret")).toBe("cloudflare-client-secret");
+    expect(findOAuthLogCall(consoleErrorSpy, "token.refresh.succeeded", (details) => (
+      details.clientId === registration.client_id &&
+      details.grantType === "refresh_token" &&
+      details.hasAccessToken === true &&
+      details.hasExpiresIn === true &&
+      details.hasRefreshToken === true &&
+      details.hasScope === true &&
+      details.hasTokenType === true &&
+      Array.isArray(details.tokenResponseFields) &&
+      details.tokenResponseFields.includes("access_token") &&
+      details.tokenResponseFields.includes("expires_in") &&
+      details.tokenResponseFields.includes("refresh_token") &&
+      details.tokenResponseFields.includes("scope") &&
+      details.tokenResponseFields.includes("token_type") &&
+      !("accessToken" in details) &&
+      !("refreshToken" in details)
+    ))).toBeTruthy();
 
     const replayResponse = await fetch(new URL("/token", httpServer.url), {
       method: "POST",
@@ -1843,6 +2335,180 @@ describe("startHttpServer", () => {
     await expect(replayResponse.json()).resolves.toMatchObject({
       error: "invalid_grant",
     });
+  });
+
+  it("logs redacted refresh failures when the upstream provider rejects a refresh exchange", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const refreshUserAgent = "chatgpt-refresh-client/1.0";
+    let lastTokenRequestBody: URLSearchParams | undefined;
+    const upstreamServer = createNodeHttpServer((req, res) => {
+      const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+
+      if (requestUrl.pathname === "/authorize") {
+        res.statusCode = 200;
+        res.end("ok");
+        return;
+      }
+
+      if (requestUrl.pathname === "/jwks") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ keys: [] }));
+        return;
+      }
+
+      if (requestUrl.pathname !== "/token" || req.method !== "POST") {
+        res.statusCode = 404;
+        res.end();
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      req.on("end", () => {
+        lastTokenRequestBody = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+        res.setHeader("content-type", "application/json");
+
+        if (lastTokenRequestBody.get("grant_type") === "refresh_token") {
+          res.statusCode = 400;
+          res.end(JSON.stringify({
+            error: "invalid_grant",
+            error_description: "Refresh token is invalid.",
+          }));
+          return;
+        }
+
+        res.end(JSON.stringify({
+          access_token: "upstream-access-token",
+          expires_in: 3600,
+          refresh_token: "upstream-refresh-token",
+          scope: "openid profile",
+          token_type: "Bearer",
+        }));
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      upstreamServer.once("error", reject);
+      upstreamServer.listen(0, "127.0.0.1", () => {
+        upstreamServer.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = upstreamServer.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Upstream refresh failure test server did not expose a TCP address");
+    }
+
+    const upstreamOrigin = `http://127.0.0.1:${address.port}`;
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await new Promise<void>((resolve, reject) => {
+        upstreamServer.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    });
+
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: `${upstreamOrigin}/authorize`,
+        issuer: upstreamOrigin,
+        jwksUrl: `${upstreamOrigin}/jwks`,
+        tokenUrl: `${upstreamOrigin}/token`,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const codeVerifier = "test-code-verifier-123456789";
+    const codeChallenge = createCodeChallenge(codeVerifier);
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
+
+    const initialTokenResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        code: localAuthorizationCode!,
+        code_verifier: codeVerifier,
+        grant_type: "authorization_code",
+        redirect_uri: "https://claude.ai/oauth/callback",
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+    const initialTokens = await initialTokenResponse.json() as {
+      refresh_token: string;
+    };
+
+    expect(initialTokenResponse.status).toBe(200);
+
+    const refreshResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+        "User-Agent": refreshUserAgent,
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token,
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(refreshResponse.ok).toBe(false);
+    expect(lastTokenRequestBody?.get("grant_type")).toBe("refresh_token");
+    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
+      details.path === "/token" &&
+      details.method === "POST" &&
+      details.userAgent === refreshUserAgent
+    ))).toBeTruthy();
+    expect(findOAuthLogCall(consoleErrorSpy, "token.refresh.failed", (details) => (
+      details.clientId === registration.client_id &&
+      details.grantType === "refresh_token" &&
+      details.hasRefreshToken === true &&
+      details.hasResource === true &&
+      details.scopeCount === 0 &&
+      details.errorName === "ServerError" &&
+      details.errorMessage === "Upstream refresh exchange failed with status 400." &&
+      details.upstreamError === "invalid_grant" &&
+      details.upstreamErrorDescription === "Refresh token is invalid." &&
+      Array.isArray(details.upstreamErrorFields) &&
+      details.upstreamErrorFields.includes("error") &&
+      details.upstreamErrorFields.includes("error_description") &&
+      !("refreshToken" in details)
+    ))).toBeTruthy();
   });
 
   it("rejects upstream OAuth bearer tokens passed directly in the authorization header", async () => {
@@ -1927,8 +2593,7 @@ describe("startHttpServer", () => {
   });
 
   it("logs oauth auth failures without leaking token material", async () => {
-    const sink = createBufferedDestination();
-    setLoggerDestinationForTests(sink.destination);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -1940,7 +2605,10 @@ describe("startHttpServer", () => {
       host: "127.0.0.1",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -1959,9 +2627,13 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(401);
-    expect(findLogCall(sink.readEntries(), "http", "request.rejected", (details) => (
+    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
       details.reason === "unauthorized" &&
       details.path === "/mcp" &&
+      details.authMode === "oauth" &&
+      details.authRequired === true &&
+      details.hasAuthorizationHeader === false &&
+      details.hasCfAccessJwtAssertion === false &&
       !("authorization" in details)
     ))).toBeTruthy();
   });

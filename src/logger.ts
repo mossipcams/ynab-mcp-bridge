@@ -57,12 +57,25 @@ export function sanitizeLogValue(value: unknown): unknown {
   return Object.fromEntries(sanitizedEntries);
 }
 
+function getDefaultDestination(): DestinationStream {
+  return {
+    write(chunk: string | Uint8Array) {
+      const line = typeof chunk === "string"
+        ? chunk.trimEnd()
+        : Buffer.from(chunk).toString("utf8").trimEnd();
+
+      console.error(line);
+      return true;
+    },
+  } as DestinationStream;
+}
+
 export function createLogger(options: {
   destination?: DestinationStream;
 } = {}): Logger {
   return pino({
     base: undefined,
-  }, options.destination ?? process.stderr);
+  }, options.destination ?? getDefaultDestination());
 }
 
 let appLogger = createLogger();
