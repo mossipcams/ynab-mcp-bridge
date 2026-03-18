@@ -50,6 +50,20 @@ describe("startHttpServer", () => {
     ));
   }
 
+  function findOAuthLogCall(
+    spy: ReturnType<typeof vi.spyOn>,
+    event: string,
+    matcher: (details: Record<string, unknown>) => boolean = () => true,
+  ) {
+    return spy.mock.calls.find(([scope, loggedEvent, details]) => (
+      scope === "[oauth]" &&
+      loggedEvent === event &&
+      typeof details === "object" &&
+      details !== null &&
+      matcher(details as Record<string, unknown>)
+    ));
+  }
+
   async function sendRawHttpRequest(url: string, options: {
     body?: string;
     headers?: Record<string, string>;
@@ -1862,6 +1876,7 @@ describe("startHttpServer", () => {
   });
 
   it("exchanges a local authorization code for a bearer token and accepts it on MCP requests", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -1876,7 +1891,10 @@ describe("startHttpServer", () => {
       path: "/mcp",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const codeVerifier = "test-code-verifier-123456789";
     const codeChallenge = createCodeChallenge(codeVerifier);
@@ -1936,6 +1954,31 @@ describe("startHttpServer", () => {
     });
 
     expect(mcpResponse.status).toBe(200);
+    expect(findOAuthLogCall(consoleErrorSpy, "callback.completed", (details) => (
+      details.hasCode === true &&
+      details.hasError === false &&
+      details.hasState === true &&
+      details.issuedAuthorizationCode === true
+    ))).toBeTruthy();
+    expect(findOAuthLogCall(consoleErrorSpy, "token.exchange.succeeded", (details) => (
+      details.grantType === "authorization_code" &&
+      details.clientId === registration.client_id &&
+      details.hasRedirectUri === true &&
+      details.hasResource === true &&
+      details.issuedAccessToken === true &&
+      details.issuedRefreshToken === true &&
+      details.scopeCount === 2 &&
+      !("accessToken" in details) &&
+      !("refreshToken" in details)
+    ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.path === "/mcp" &&
+      details.jsonRpcMethod === "tools/list" &&
+      details.authMode === "oauth" &&
+      details.authRequired === true &&
+      details.authClientId === registration.client_id &&
+      details.hasAuthorizationHeader === true
+    ))).toBeTruthy();
   });
 
   it("accepts token exchanges forwarded through a trusted proxy header", async () => {
@@ -2224,6 +2267,10 @@ describe("startHttpServer", () => {
     expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
       details.reason === "unauthorized" &&
       details.path === "/mcp" &&
+      details.authMode === "oauth" &&
+      details.authRequired === true &&
+      details.hasAuthorizationHeader === false &&
+      details.hasCfAccessJwtAssertion === false &&
       !("authorization" in details)
     ))).toBeTruthy();
   });
