@@ -192,6 +192,16 @@ function parseCsv(value: string) {
     .filter(Boolean);
 }
 
+export function getEffectiveOAuthScopes(scopes: string[]) {
+  const normalizedScopes = [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))];
+
+  if (!normalizedScopes.includes("offline_access")) {
+    normalizedScopes.push("offline_access");
+  }
+
+  return normalizedScopes;
+}
+
 function readCsvFlag(args: string[], name: string) {
   const value = readFlag(args, name);
 
@@ -373,7 +383,7 @@ function resolveRuntimeAuthConfig(args: string[], env: EnvConfig): RuntimeAuthCo
     tokenUrl,
   });
 
-  const scopes = parseCsv(readFlag(args, "--oauth-scopes") ?? env.MCP_OAUTH_SCOPES ?? "");
+  const scopes = getEffectiveOAuthScopes(parseCsv(readFlag(args, "--oauth-scopes") ?? env.MCP_OAUTH_SCOPES ?? ""));
 
   return {
     audience,

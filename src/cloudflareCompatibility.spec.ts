@@ -108,7 +108,7 @@ describe("createCloudflareAccessCompatibilityMiddleware", () => {
     const origin = `http://127.0.0.1:${(appAddress as AddressInfo).port}`;
     const upstreamToken = await new SignJWT({
       client_id: "client-123",
-      scope: "openid profile",
+      scope: "openid profile offline_access",
     })
       .setProtectedHeader({
         alg: "RS256",

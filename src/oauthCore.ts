@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
+import { getEffectiveOAuthScopes } from "./config.js";
 import type { OAuthGrant } from "./oauthGrant.js";
 
 export type PendingAuthorization = {
@@ -212,7 +213,9 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
   async function startAuthorization(client: OAuthClientInformationFull, params: AuthorizationRequest) {
     assertRegisteredRedirectUri(client, params.redirectUri);
 
-    const scopes = params.scopes && params.scopes.length > 0 ? params.scopes : config.defaultScopes;
+    const scopes = getEffectiveOAuthScopes(
+      params.scopes && params.scopes.length > 0 ? params.scopes : config.defaultScopes,
+    );
     const resource = params.resource?.href ?? config.defaultResource;
 
     if (store.isClientApproved({
