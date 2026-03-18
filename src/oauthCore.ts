@@ -23,16 +23,16 @@ export type PendingConsent = PendingAuthorization & {
 };
 
 export type AuthorizationCodeRecord = PendingAuthorization & {
-  subject: string;
+  principalId: string;
   upstreamTokens: OAuthTokens;
 };
 
 export type RefreshTokenRecord = {
   clientId: string;
   expiresAt: number;
+  principalId: string;
   resource: string;
   scopes: string[];
-  subject: string;
   upstreamTokens: OAuthTokens;
 };
 
@@ -68,9 +68,9 @@ type OAuthCoreDependencies = {
   mintAccessToken: (record: {
     clientId: string;
     expiresInSeconds: number;
+    principalId: string;
     resource: string;
     scopes: string[];
-    subject: string;
   }) => Promise<string>;
   now: () => number;
 };
@@ -370,7 +370,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
         expiresAt: dependencies.now() + 5 * 60 * 1000,
       },
       pendingAuthorization: undefined,
-      subject: grant.clientId,
+      principalId: grant.clientId,
       upstreamTokens,
     });
 
@@ -427,7 +427,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       throw new InvalidGrantError("resource does not match the authorization request.");
     }
 
-    if (!grant.subject || !grant.upstreamTokens) {
+    if (!grant.principalId || !grant.upstreamTokens) {
       store.deleteGrant(grant.grantId);
       throw new InvalidGrantError("Authorization code is missing grant context.");
     }
@@ -438,9 +438,9 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     const accessToken = await dependencies.mintAccessToken({
       clientId: grant.clientId,
       expiresInSeconds,
+      principalId: grant.principalId,
       resource: grant.resource,
       scopes: grant.scopes,
-      subject: grant.subject,
     });
     const refreshToken = dependencies.createId();
 
@@ -496,7 +496,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       refresh_token: refreshedUpstreamTokens.refresh_token ?? grant.upstreamTokens?.refresh_token,
     };
 
-    if (!grant.subject) {
+    if (!grant.principalId) {
       store.deleteGrant(grant.grantId);
       throw new InvalidGrantError("Refresh token is missing grant context.");
     }
@@ -505,9 +505,9 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     const accessToken = await dependencies.mintAccessToken({
       clientId: grant.clientId,
       expiresInSeconds,
+      principalId: grant.principalId,
       resource: grant.resource,
       scopes: grantedScopes,
-      subject: grant.subject,
     });
     const nextRefreshToken = dependencies.createId();
 

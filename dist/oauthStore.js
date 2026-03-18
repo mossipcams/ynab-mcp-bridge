@@ -59,6 +59,7 @@ function parseGrantRecord(value) {
         resource: grant.resource,
         scopes: grant.scopes,
         state: grant.state,
+        principalId: grant.principalId,
         subject: grant.subject,
         upstreamTokens: grant.upstreamTokens,
     });
@@ -145,7 +146,7 @@ function migrateLegacyState(parsed) {
                 typeof authorizationCode.redirectUri === "string" &&
                 typeof authorizationCode.resource === "string" &&
                 Array.isArray(authorizationCode.scopes) &&
-                typeof authorizationCode.subject === "string" &&
+                typeof (authorizationCode.principalId ?? authorizationCode.subject) === "string" &&
                 authorizationCode.upstreamTokens &&
                 typeof authorizationCode.upstreamTokens === "object") {
                 pushGrant({
@@ -160,7 +161,7 @@ function migrateLegacyState(parsed) {
                     resource: authorizationCode.resource,
                     scopes: authorizationCode.scopes,
                     state: authorizationCode.state,
-                    subject: authorizationCode.subject,
+                    principalId: authorizationCode.principalId ?? authorizationCode.subject,
                     upstreamTokens: authorizationCode.upstreamTokens,
                 });
             }
@@ -173,7 +174,7 @@ function migrateLegacyState(parsed) {
                 typeof refreshToken.expiresAt === "number" &&
                 typeof refreshToken.resource === "string" &&
                 Array.isArray(refreshToken.scopes) &&
-                typeof refreshToken.subject === "string" &&
+                typeof (refreshToken.principalId ?? refreshToken.subject) === "string" &&
                 refreshToken.upstreamTokens &&
                 typeof refreshToken.upstreamTokens === "object") {
                 pushGrant({
@@ -187,7 +188,7 @@ function migrateLegacyState(parsed) {
                     },
                     resource: refreshToken.resource,
                     scopes: refreshToken.scopes,
-                    subject: refreshToken.subject,
+                    principalId: refreshToken.principalId ?? refreshToken.subject,
                     upstreamTokens: refreshToken.upstreamTokens,
                 });
             }
@@ -268,7 +269,7 @@ function toPendingAuthorizationRecord(grant) {
     };
 }
 function toAuthorizationCodeRecord(grant) {
-    if (!grant.authorizationCode || !grant.subject || !grant.upstreamTokens) {
+    if (!grant.authorizationCode || !grant.principalId || !grant.upstreamTokens) {
         return undefined;
     }
     return {
@@ -279,12 +280,12 @@ function toAuthorizationCodeRecord(grant) {
         resource: grant.resource,
         scopes: grant.scopes,
         state: grant.state,
-        subject: grant.subject,
+        principalId: grant.principalId,
         upstreamTokens: grant.upstreamTokens,
     };
 }
 function toRefreshTokenRecord(grant) {
-    if (!grant.refreshToken || !grant.subject || !grant.upstreamTokens) {
+    if (!grant.refreshToken || !grant.principalId || !grant.upstreamTokens) {
         return undefined;
     }
     return {
@@ -292,7 +293,7 @@ function toRefreshTokenRecord(grant) {
         expiresAt: grant.refreshToken.expiresAt,
         resource: grant.resource,
         scopes: grant.scopes,
-        subject: grant.subject,
+        principalId: grant.principalId,
         upstreamTokens: grant.upstreamTokens,
     };
 }
@@ -440,7 +441,7 @@ export function createOAuthStore(storePath) {
                         resource: record.resource,
                         scopes: record.scopes,
                         state: record.state,
-                        subject: record.subject,
+                        principalId: record.principalId,
                         upstreamTokens: record.upstreamTokens,
                     }),
                 },
@@ -528,7 +529,7 @@ export function createOAuthStore(storePath) {
                         },
                         resource: record.resource,
                         scopes: record.scopes,
-                        subject: record.subject,
+                        principalId: record.principalId,
                         upstreamTokens: record.upstreamTokens,
                     }),
                 },

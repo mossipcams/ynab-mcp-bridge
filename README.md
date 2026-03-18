@@ -40,10 +40,21 @@ Set these environment variables before starting the server:
 
 HTTP mode validates the `Origin` header when one is present. Loopback origins are allowed automatically for loopback hosts, but remote/browser deployments should set `MCP_ALLOWED_ORIGINS` explicitly, for example `https://claude.ai`.
 The default HTTP transport is stateless: clients should use `POST /mcp` requests directly and should not rely on returned `Mcp-Session-Id` headers, session-scoped `GET` streams, or `DELETE` session teardown.
-In OAuth deployment modes the server acts as the MCP authorization server for clients such as Claude Web. It exposes local `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`, and `/.well-known/oauth-protected-resource/mcp` endpoints, requires an MCP-side consent step before redirecting upstream, brokers the upstream authorization-code and refresh-token exchanges, and enforces broker-issued bearer tokens on `POST /mcp`. If Cloudflare Access injects `Cf-Access-Jwt-Assertion`, the server will still bridge that header into the MCP request path as an explicit compatibility mode.
+In OAuth deployment modes the server acts as the MCP authorization server for clients such as Claude Web. It exposes local `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`, and `/.well-known/oauth-protected-resource/mcp` endpoints, requires an MCP-side consent step before redirecting upstream, exchanges the upstream authorization-code and refresh-token grants through a small upstream adapter, and enforces bridge-issued bearer tokens on `POST /mcp`. If Cloudflare Access injects `Cf-Access-Jwt-Assertion`, the server can still translate that assertion into a bridge-local token as an explicit compatibility mode.
 
 If `YNAB_PLAN_ID` is not set, the bridge automatically resolves YNAB's `default_plan` when one exists or the only available plan when there is exactly one. If a configured plan becomes stale, the bridge retries once with a fresh plan resolution.
-OAuth here protects access to a shared backend YNAB token configured through `YNAB_API_TOKEN`; it does not yet perform per-user YNAB OAuth delegation.
+OAuth here protects access to a shared backend YNAB token configured through `YNAB_API_TOKEN`; it does not yet perform per-user YNAB OAuth delegation. Internally, the authenticated entity is a client-grant principal for access to the shared bridge, not an end-user YNAB identity.
+
+## Auth Architecture
+
+In OAuth deployment modes the auth stack is intentionally split into small pieces:
+
+* the MCP resource server protects `POST /mcp` and trusts bridge-local bearer tokens by default
+* the local MCP auth server exposes discovery, registration, authorization, consent, callback, and token endpoints
+* the upstream IdP adapter handles redirect construction plus upstream code and refresh exchanges
+* the Cloudflare Access path is an explicit compatibility layer that converts `Cf-Access-Jwt-Assertion` into a bridge-local token before the normal bearer middleware runs
+
+This keeps the trust boundary narrower than a single all-in-one broker. Direct upstream bearer tokens are rejected on the MCP resource path. The bridge remains a protected shared-backend MCP server, not a full per-user OpenID identity provider.
 
 ## Available MCP Tools
 
@@ -163,7 +174,7 @@ Use the public MCP URL for both `MCP_PUBLIC_URL` and `MCP_OAUTH_AUDIENCE` unless
 Set `MCP_OAUTH_CLIENT_ID` and `MCP_OAUTH_CLIENT_SECRET` to the confidential client credentials for the upstream Access application, and make sure the Access application allows the bridge callback URL built from `MCP_PUBLIC_URL` and `MCP_OAUTH_CALLBACK_PATH` such as `https://mcp.example.com/oauth/callback`.
 The callback must match exactly, including scheme, hostname, path, and any trailing slash behavior expected by the upstream Access application.
 If you need to control persistence or token signing explicitly, override `MCP_OAUTH_STORE_PATH` and `MCP_OAUTH_TOKEN_SIGNING_SECRET`. Otherwise, the defaults are enough for a local or simple remote deployment.
-The bridge advertises itself as the MCP authorization server from `/.well-known/oauth-authorization-server`, dynamically registers MCP clients at `/register`, presents an MCP-side consent step at `/authorize`, exchanges the upstream code at the callback URL, refreshes the upstream grant when Claude refreshes, and issues MCP bearer tokens from `/token`.
+The bridge advertises itself as the MCP authorization server from `/.well-known/oauth-authorization-server`, dynamically registers MCP clients at `/register`, presents an MCP-side consent step at `/authorize`, exchanges the upstream code at the callback URL, refreshes the upstream grant when Claude refreshes, and issues bridge-local MCP bearer tokens from `/token`.
 Do not use the older tenant-wide `/cdn-cgi/access/sso/oauth2/*` or `/cdn-cgi/access/certs` endpoints here. With current MCP clients, that legacy configuration can break the authorization-code redirect and surface errors like `code: Field required`.
 When deployed behind Cloudflare, keep `MCP_PUBLIC_URL` on the external HTTPS hostname even if the local bind address is `127.0.0.1` or `0.0.0.0`; discovery metadata must describe the public URL, not the internal listener.
 
