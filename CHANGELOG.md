@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.8.5...ynab-mcp-bridge-v0.9.0) (2026-03-18)
+
+
+### Features
+
+* add structured pino logging ([70cca52](https://github.com/mossipcams/ynab-mcp-bridge/commit/70cca5298155635463b201662c90fcdd638ebcb4))
+
+
+### Bug Fixes
+
+* remove unused logger export ([3487c1e](https://github.com/mossipcams/ynab-mcp-bridge/commit/3487c1e3e538688d5d8af676d4a6d82c55edb42f))
+* type startup catch callback as unknown ([a39fcf6](https://github.com/mossipcams/ynab-mcp-bridge/commit/a39fcf6c2ba8546ed7889ea8c4612ee832f70c02))
+
 ## [0.8.5](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.8.4...ynab-mcp-bridge-v0.8.5) (2026-03-18)
 
 
