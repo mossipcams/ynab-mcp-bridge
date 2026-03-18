@@ -113,4 +113,11 @@ describe("release-please automation", () => {
     expect(manifest["."]).toBe(highestPublishedTagVersion);
     expect(config).not.toHaveProperty("last-release-sha");
   });
+
+  it("fetches repository tags in CI before enforcing release metadata invariants", () => {
+    const workflow = readFileSync(new URL("../.github/workflows/test.yml", import.meta.url), "utf8");
+
+    expect(workflow).toContain("uses: actions/checkout@v4");
+    expect(workflow).toContain("fetch-depth: 0");
+  });
 });
