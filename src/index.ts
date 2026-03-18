@@ -20,6 +20,10 @@ async function main() {
   await startStdioServer(config.ynab);
 }
 
-main().catch((error) => {
+export function handleStartupFailure(error: unknown) {
   logStartupFailure(error);
+}
+
+main().catch((error: unknown) => {
+  handleStartupFailure(error);
 });
