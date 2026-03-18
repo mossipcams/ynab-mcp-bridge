@@ -228,11 +228,25 @@ function getSessionId(req: Pick<Request, "headers">) {
   return values[0];
 }
 
-function getRequestDebugDetails(req: Request): HttpDebugDetails {
+function hasHeaderValue(value: string | string[] | undefined) {
+  return Boolean(getFirstHeaderValue(value));
+}
+
+function getRequestDebugDetails(
+  req: Request,
+  options: {
+    authMode?: RuntimeAuthConfig["mode"];
+    authRequired?: boolean;
+  } = {},
+): HttpDebugDetails {
   const authSubject = req.auth?.extra?.subject;
   return {
+    authMode: options.authMode,
     authClientId: req.auth?.clientId,
+    authRequired: options.authRequired,
     authSubject: typeof authSubject === "string" ? authSubject : undefined,
+    hasAuthorizationHeader: hasHeaderValue(req.headers.authorization),
+    hasCfAccessJwtAssertion: hasHeaderValue(req.headers["cf-access-jwt-assertion"]),
     method: req.method ?? "UNKNOWN",
     origin: getFirstHeaderValue(req.headers.origin),
     path: getRequestPath(req),
@@ -407,11 +421,20 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const app = express();
   const jsonParser = express.json();
 
+  function getRequestAuthDebugOptions(req: Pick<Request, "path" | "url">) {
+    const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
+
+    return {
+      authMode: auth.mode,
+      authRequired: isProtectedMcpRequest || undefined,
+    };
+  }
+
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
 
   app.use((req, _res, next) => {
-    logHttpDebug("request.received", getRequestDebugDetails(req));
+    logHttpDebug("request.received", getRequestDebugDetails(req, getRequestAuthDebugOptions(req)));
     next();
   });
 
@@ -460,7 +483,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
     if (!resolution.allowed) {
       logHttpDebug("request.rejected", {
-        ...getRequestDebugDetails(req),
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         reason: "forbidden-origin",
       });
       writeForbiddenOrigin(res);
@@ -546,7 +569,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
         }
 
         logHttpDebug("request.rejected", {
-          ...getRequestDebugDetails(req),
+          ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
           reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope",
         });
       });
@@ -563,7 +586,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
     if (req.method !== "POST") {
       logHttpDebug("request.rejected", {
-        ...getRequestDebugDetails(req),
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         reason: "method-not-allowed",
       });
       writeMethodNotAllowed(res, HTTP_ALLOWED_METHODS);
@@ -578,7 +601,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
     if (resolution.status !== "ready") {
       logHttpDebug("request.rejected", {
-        ...getRequestDebugDetails(req),
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         reason: resolution.status,
       });
       writeRequestResolution(res, resolution);
@@ -625,7 +648,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       }
 
       logHttpDebug("transport.handoff", {
-        ...getRequestDebugDetails(req),
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         ...getJsonRpcDebugDetails(parsedBody),
         cleanup: Boolean(resolution.cleanup),
       });
@@ -639,7 +662,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   app.use((req, res) => {
     logHttpDebug("request.rejected", {
-      ...getRequestDebugDetails(req),
+      ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
       reason: "path-not-found",
     });
     writeNotFound(res);
@@ -664,7 +687,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     }
 
     console.error("Error handling MCP request:", {
-      ...getRequestDebugDetails(req),
+      ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
       error,
     });
 
