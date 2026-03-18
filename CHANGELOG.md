@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.3...ynab-mcp-bridge-v0.6.4) (2026-03-18)
+
+
+### Bug Fixes
+
+* narrow auth broker boundaries ([9081669](https://github.com/mossipcams/ynab-mcp-bridge/commit/9081669f7fa5bed9d189c7a32d81d9aecaefdd34))
+* trust proxy headers during oauth token exchange ([92179cf](https://github.com/mossipcams/ynab-mcp-bridge/commit/92179cf1bebec691048a4fb1af9e2151e3ad8a0f))
+
 ## [0.6.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.2...ynab-mcp-bridge-v0.6.3) (2026-03-17)
 
 
