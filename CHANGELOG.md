@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.4...ynab-mcp-bridge-v0.7.0) (2026-03-18)
+
+
+### Features
+
+* add client-aware oauth setup profiles ([fe7bbee](https://github.com/mossipcams/ynab-mcp-bridge/commit/fe7bbeed6ba42f29a90733a5effd0373e21d25c9))
+
 ## [0.6.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.3...ynab-mcp-bridge-v0.6.4) (2026-03-18)
 
 
