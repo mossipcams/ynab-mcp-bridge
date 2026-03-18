@@ -34,7 +34,7 @@ function isSensitiveKey(key: string) {
     normalizedKey.endsWith("_token");
 }
 
-export function sanitizeLogValue(value: unknown): unknown {
+function sanitizeLogValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) => sanitizeLogValue(entry));
   }
