@@ -5,6 +5,7 @@ import {
   InvalidRequestError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import type { RuntimeAuthConfig } from "./config.js";
 import { createLocalTokenService } from "./localTokenService.js";
@@ -49,6 +50,16 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
+function getTokenResponseDebugDetails(tokens: OAuthTokens) {
+  return {
+    hasAccessToken: typeof tokens.access_token === "string" && tokens.access_token.length > 0,
+    hasExpiresIn: typeof tokens.expires_in === "number",
+    hasRefreshToken: typeof tokens.refresh_token === "string" && tokens.refresh_token.length > 0,
+    hasScope: typeof tokens.scope === "string" && tokens.scope.length > 0,
+    hasTokenType: typeof tokens.token_type === "string" && tokens.token_type.length > 0,
+    tokenResponseFields: Object.keys(tokens).sort(),
+  };
+}
 function getBodyStringValue(body: unknown, key: string) {
   if (!body || typeof body !== "object") {
     return undefined;
@@ -212,6 +223,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
           issuedAccessToken: typeof tokens.access_token === "string" && tokens.access_token.length > 0,
           issuedRefreshToken: typeof tokens.refresh_token === "string" && tokens.refresh_token.length > 0,
           scopeCount: tokens.scope ? tokens.scope.split(/\s+/).filter(Boolean).length : 0,
+          ...getTokenResponseDebugDetails(tokens),
         });
         return tokens;
       } catch (error) {
@@ -235,13 +247,16 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
           issuedAccessToken: typeof tokens.access_token === "string" && tokens.access_token.length > 0,
           issuedRefreshToken: typeof tokens.refresh_token === "string" && tokens.refresh_token.length > 0,
           scopeCount: tokens.scope ? tokens.scope.split(/\s+/).filter(Boolean).length : 0,
+          ...getTokenResponseDebugDetails(tokens),
         });
         return tokens;
       } catch (error) {
         logOAuthDebug("token.refresh.failed", {
           clientId: client.client_id,
           grantType: "refresh_token",
+          hasRefreshToken: typeof refreshToken === "string" && refreshToken.length > 0,
           hasResource: Boolean(resource?.href),
+          scopeCount: scopes?.length ?? 0,
           ...getErrorDetails(error),
         });
         throw error;

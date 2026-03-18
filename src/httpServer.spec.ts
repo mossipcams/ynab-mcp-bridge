@@ -49,7 +49,6 @@ describe("startHttpServer", () => {
       matcher(details as Record<string, unknown>)
     ));
   }
-
   function findOAuthLogCall(
     spy: ReturnType<typeof vi.spyOn>,
     event: string,
@@ -1877,6 +1876,8 @@ describe("startHttpServer", () => {
 
   it("exchanges a local authorization code for a bearer token and accepts it on MCP requests", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const tokenUserAgent = "chatgpt-token-client/1.0";
+    const mcpUserAgent = "chatgpt-mcp-client/1.0";
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -1919,6 +1920,7 @@ describe("startHttpServer", () => {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Origin: "https://claude.ai",
+        "User-Agent": tokenUserAgent,
       },
       body: new URLSearchParams({
         client_id: registration.client_id,
@@ -1944,6 +1946,7 @@ describe("startHttpServer", () => {
         "Content-Type": "application/json",
         Origin: "https://claude.ai",
         "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "User-Agent": mcpUserAgent,
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -1954,6 +1957,36 @@ describe("startHttpServer", () => {
     });
 
     expect(mcpResponse.status).toBe(200);
+    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
+      details.path === "/token" &&
+      details.method === "POST" &&
+      details.userAgent === tokenUserAgent &&
+      !("authorization" in details)
+    ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.jsonRpcMethod === "tools/list" &&
+      details.userAgent === mcpUserAgent &&
+      !("authorization" in details)
+    ))).toBeTruthy();
+    expect(findOAuthLogCall(consoleErrorSpy, "token.exchange.succeeded", (details) => (
+      details.clientId === registration.client_id &&
+      details.grantType === "authorization_code" &&
+      details.hasAccessToken === true &&
+      details.hasExpiresIn === true &&
+      details.hasRefreshToken === true &&
+      details.hasScope === true &&
+      details.hasTokenType === true &&
+      Array.isArray(details.tokenResponseFields) &&
+      details.tokenResponseFields.includes("access_token") &&
+      details.tokenResponseFields.includes("expires_in") &&
+      details.tokenResponseFields.includes("refresh_token") &&
+      details.tokenResponseFields.includes("scope") &&
+      details.tokenResponseFields.includes("token_type") &&
+      !("accessToken" in details) &&
+      !("refreshToken" in details)
+    ))).toBeTruthy();
     expect(findOAuthLogCall(consoleErrorSpy, "callback.completed", (details) => (
       details.hasCode === true &&
       details.hasError === false &&
@@ -1968,12 +2001,25 @@ describe("startHttpServer", () => {
       details.issuedAccessToken === true &&
       details.issuedRefreshToken === true &&
       details.scopeCount === 2 &&
+      details.hasAccessToken === true &&
+      details.hasExpiresIn === true &&
+      details.hasRefreshToken === true &&
+      details.hasScope === true &&
+      details.hasTokenType === true &&
+      Array.isArray(details.tokenResponseFields) &&
+      details.tokenResponseFields.includes("access_token") &&
+      details.tokenResponseFields.includes("expires_in") &&
+      details.tokenResponseFields.includes("refresh_token") &&
+      details.tokenResponseFields.includes("scope") &&
+      details.tokenResponseFields.includes("token_type") &&
       !("accessToken" in details) &&
       !("refreshToken" in details)
     ))).toBeTruthy();
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
       details.path === "/mcp" &&
+      details.method === "POST" &&
       details.jsonRpcMethod === "tools/list" &&
+      details.userAgent === mcpUserAgent &&
       details.authMode === "oauth" &&
       details.authRequired === true &&
       details.authClientId === registration.client_id &&
@@ -2048,6 +2094,7 @@ describe("startHttpServer", () => {
   });
 
   it("brokers refresh-token exchanges through the upstream provider before issuing a fresh local token", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -2062,7 +2109,10 @@ describe("startHttpServer", () => {
       path: "/mcp",
       port: 0,
     });
-    cleanups.push(() => httpServer.close());
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
 
     const codeVerifier = "test-code-verifier-123456789";
     const codeChallenge = createCodeChallenge(codeVerifier);
@@ -2127,6 +2177,23 @@ describe("startHttpServer", () => {
     expect(upstream.getLastTokenRequest()?.body.get("refresh_token")).toBe("upstream-refresh-token");
     expect(upstream.getLastTokenRequest()?.body.get("client_id")).toBe("cloudflare-client-id");
     expect(upstream.getLastTokenRequest()?.body.get("client_secret")).toBe("cloudflare-client-secret");
+    expect(findOAuthLogCall(consoleErrorSpy, "token.refresh.succeeded", (details) => (
+      details.clientId === registration.client_id &&
+      details.grantType === "refresh_token" &&
+      details.hasAccessToken === true &&
+      details.hasExpiresIn === true &&
+      details.hasRefreshToken === true &&
+      details.hasScope === true &&
+      details.hasTokenType === true &&
+      Array.isArray(details.tokenResponseFields) &&
+      details.tokenResponseFields.includes("access_token") &&
+      details.tokenResponseFields.includes("expires_in") &&
+      details.tokenResponseFields.includes("refresh_token") &&
+      details.tokenResponseFields.includes("scope") &&
+      details.tokenResponseFields.includes("token_type") &&
+      !("accessToken" in details) &&
+      !("refreshToken" in details)
+    ))).toBeTruthy();
 
     const replayResponse = await fetch(new URL("/token", httpServer.url), {
       method: "POST",
@@ -2146,6 +2213,174 @@ describe("startHttpServer", () => {
     await expect(replayResponse.json()).resolves.toMatchObject({
       error: "invalid_grant",
     });
+  });
+
+  it("logs redacted refresh failures when the upstream provider rejects a refresh exchange", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const refreshUserAgent = "chatgpt-refresh-client/1.0";
+    let lastTokenRequestBody: URLSearchParams | undefined;
+    const upstreamServer = createNodeHttpServer((req, res) => {
+      const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+
+      if (requestUrl.pathname === "/authorize") {
+        res.statusCode = 200;
+        res.end("ok");
+        return;
+      }
+
+      if (requestUrl.pathname === "/jwks") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ keys: [] }));
+        return;
+      }
+
+      if (requestUrl.pathname !== "/token" || req.method !== "POST") {
+        res.statusCode = 404;
+        res.end();
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      req.on("end", () => {
+        lastTokenRequestBody = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+        res.setHeader("content-type", "application/json");
+
+        if (lastTokenRequestBody.get("grant_type") === "refresh_token") {
+          res.statusCode = 400;
+          res.end(JSON.stringify({
+            error: "invalid_grant",
+          }));
+          return;
+        }
+
+        res.end(JSON.stringify({
+          access_token: "upstream-access-token",
+          expires_in: 3600,
+          refresh_token: "upstream-refresh-token",
+          scope: "openid profile",
+          token_type: "Bearer",
+        }));
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      upstreamServer.once("error", reject);
+      upstreamServer.listen(0, "127.0.0.1", () => {
+        upstreamServer.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = upstreamServer.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Upstream refresh failure test server did not expose a TCP address");
+    }
+
+    const upstreamOrigin = `http://127.0.0.1:${address.port}`;
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await new Promise<void>((resolve, reject) => {
+        upstreamServer.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    });
+
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: `${upstreamOrigin}/authorize`,
+        issuer: upstreamOrigin,
+        jwksUrl: `${upstreamOrigin}/jwks`,
+        tokenUrl: `${upstreamOrigin}/token`,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const codeVerifier = "test-code-verifier-123456789";
+    const codeChallenge = createCodeChallenge(codeVerifier);
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
+
+    const initialTokenResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        code: localAuthorizationCode!,
+        code_verifier: codeVerifier,
+        grant_type: "authorization_code",
+        redirect_uri: "https://claude.ai/oauth/callback",
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+    const initialTokens = await initialTokenResponse.json() as {
+      refresh_token: string;
+    };
+
+    expect(initialTokenResponse.status).toBe(200);
+
+    const refreshResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+        "User-Agent": refreshUserAgent,
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token,
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(refreshResponse.ok).toBe(false);
+    expect(lastTokenRequestBody?.get("grant_type")).toBe("refresh_token");
+    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
+      details.path === "/token" &&
+      details.method === "POST" &&
+      details.userAgent === refreshUserAgent
+    ))).toBeTruthy();
+    expect(findOAuthLogCall(consoleErrorSpy, "token.refresh.failed", (details) => (
+      details.clientId === registration.client_id &&
+      details.grantType === "refresh_token" &&
+      details.hasRefreshToken === true &&
+      details.hasResource === true &&
+      details.scopeCount === 0 &&
+      details.errorName === "ServerError" &&
+      details.errorMessage === "Upstream refresh exchange failed with status 400." &&
+      !("refreshToken" in details)
+    ))).toBeTruthy();
   });
 
   it("rejects upstream OAuth bearer tokens passed directly in the authorization header", async () => {

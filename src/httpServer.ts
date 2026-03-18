@@ -245,6 +245,7 @@ function getRequestDebugDetails(
     path: getRequestPath(req),
     protocolVersion: getFirstHeaderValue(req.headers["mcp-protocol-version"]),
     sessionId: getSessionId(req),
+    userAgent: getFirstHeaderValue(req.headers["user-agent"]),
   };
 }
 

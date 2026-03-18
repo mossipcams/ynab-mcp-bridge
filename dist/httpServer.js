@@ -126,16 +126,24 @@ function getSessionId(req) {
     }
     return values[0];
 }
-function getRequestDebugDetails(req) {
+function hasHeaderValue(value) {
+    return Boolean(getFirstHeaderValue(value));
+}
+function getRequestDebugDetails(req, options = {}) {
     const authSubject = req.auth?.extra?.subject;
     return {
+        authMode: options.authMode,
         authClientId: req.auth?.clientId,
+        authRequired: options.authRequired,
         authSubject: typeof authSubject === "string" ? authSubject : undefined,
-        method: req.method,
+        hasAuthorizationHeader: hasHeaderValue(req.headers.authorization),
+        hasCfAccessJwtAssertion: hasHeaderValue(req.headers["cf-access-jwt-assertion"]),
+        method: req.method ?? "UNKNOWN",
         origin: getFirstHeaderValue(req.headers.origin),
         path: getRequestPath(req),
         protocolVersion: getFirstHeaderValue(req.headers["mcp-protocol-version"]),
         sessionId: getSessionId(req),
+        userAgent: getFirstHeaderValue(req.headers["user-agent"]),
     };
 }
 function getJsonRpcDebugDetails(parsedBody) {
@@ -263,10 +271,17 @@ export async function startHttpServer(options) {
         : undefined;
     const app = express();
     const jsonParser = express.json();
+    function getRequestAuthDebugOptions(req) {
+        const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
+        return {
+            authMode: auth.mode,
+            authRequired: isProtectedMcpRequest || undefined,
+        };
+    }
     app.disable("x-powered-by");
     app.set("trust proxy", 1);
     app.use((req, _res, next) => {
-        logHttpDebug("request.received", getRequestDebugDetails(req));
+        logHttpDebug("request.received", getRequestDebugDetails(req, getRequestAuthDebugOptions(req)));
         next();
     });
     app.use((req, res, next) => {
@@ -304,7 +319,7 @@ export async function startHttpServer(options) {
         });
         if (!resolution.allowed) {
             logHttpDebug("request.rejected", {
-                ...getRequestDebugDetails(req),
+                ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                 reason: "forbidden-origin",
             });
             writeForbiddenOrigin(res);
@@ -368,7 +383,7 @@ export async function startHttpServer(options) {
                     return;
                 }
                 logHttpDebug("request.rejected", {
-                    ...getRequestDebugDetails(req),
+                    ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                     reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope",
                 });
             });
@@ -382,7 +397,7 @@ export async function startHttpServer(options) {
         }
         if (req.method !== "POST") {
             logHttpDebug("request.rejected", {
-                ...getRequestDebugDetails(req),
+                ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                 reason: "method-not-allowed",
             });
             writeMethodNotAllowed(res, HTTP_ALLOWED_METHODS);
@@ -392,7 +407,7 @@ export async function startHttpServer(options) {
         const resolution = await resolveRequest(req, () => createManagedRequest(ynab));
         if (resolution.status !== "ready") {
             logHttpDebug("request.rejected", {
-                ...getRequestDebugDetails(req),
+                ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                 reason: resolution.status,
             });
             writeRequestResolution(res, resolution);
@@ -431,7 +446,7 @@ export async function startHttpServer(options) {
                 }
             }
             logHttpDebug("transport.handoff", {
-                ...getRequestDebugDetails(req),
+                ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                 ...getJsonRpcDebugDetails(parsedBody),
                 cleanup: Boolean(resolution.cleanup),
             });
@@ -445,7 +460,7 @@ export async function startHttpServer(options) {
     });
     app.use((req, res) => {
         logHttpDebug("request.rejected", {
-            ...getRequestDebugDetails(req),
+            ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
             reason: "path-not-found",
         });
         writeNotFound(res);
@@ -467,7 +482,7 @@ export async function startHttpServer(options) {
             return;
         }
         console.error("Error handling MCP request:", {
-            ...getRequestDebugDetails(req),
+            ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
             error: requestError,
         });
         writeInternalServerError(res);
