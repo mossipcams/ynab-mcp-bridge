@@ -1,4 +1,46 @@
 import { ServerError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+class UpstreamTokenExchangeError extends ServerError {
+    upstreamError;
+    upstreamErrorDescription;
+    upstreamErrorFields;
+    upstreamStatus;
+    constructor(message, details) {
+        super(message);
+        this.name = "ServerError";
+        this.upstreamError = details.upstreamError;
+        this.upstreamErrorDescription = details.upstreamErrorDescription;
+        this.upstreamErrorFields = details.upstreamErrorFields;
+        this.upstreamStatus = details.upstreamStatus;
+    }
+}
+function summarizeUpstreamTokenError(bodyText, status) {
+    const details = {
+        upstreamStatus: status,
+    };
+    if (!bodyText.trim()) {
+        return details;
+    }
+    try {
+        const parsed = JSON.parse(bodyText);
+        const error = typeof parsed.error === "string" ? parsed.error : undefined;
+        const errorDescription = typeof parsed.error_description === "string"
+            ? parsed.error_description
+            : undefined;
+        const errorFields = [
+            ...(error ? ["error"] : []),
+            ...(errorDescription ? ["error_description"] : []),
+        ];
+        return {
+            ...details,
+            upstreamError: error,
+            upstreamErrorDescription: errorDescription,
+            upstreamErrorFields: errorFields.length > 0 ? errorFields : undefined,
+        };
+    }
+    catch {
+        return details;
+    }
+}
 async function exchangeTokens(url, body, failureMessage) {
     const response = await fetch(url, {
         method: "POST",
@@ -9,7 +51,8 @@ async function exchangeTokens(url, body, failureMessage) {
         body,
     });
     if (!response.ok) {
-        throw new ServerError(`${failureMessage} with status ${response.status}.`);
+        const bodyText = await response.text();
+        throw new UpstreamTokenExchangeError(`${failureMessage} with status ${response.status}.`, summarizeUpstreamTokenError(bodyText, response.status));
     }
     return await response.json();
 }

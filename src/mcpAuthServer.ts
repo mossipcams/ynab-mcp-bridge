@@ -2,7 +2,7 @@ import express from "express";
 import { createOAuthMetadata, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 
-import type { RuntimeAuthConfig } from "./config.js";
+import { getEffectiveOAuthScopes, type RuntimeAuthConfig } from "./config.js";
 import { createOAuthBroker } from "./oauthBroker.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
@@ -11,10 +11,11 @@ function getOpenIdConfiguration(
   auth: OAuthAuthConfig,
   oauthBroker: ReturnType<typeof createOAuthBroker>,
 ) {
+  const scopesSupported = getEffectiveOAuthScopes(auth.scopes);
   const oauthMetadata = createOAuthMetadata({
     issuerUrl: oauthBroker.getIssuerUrl(),
     provider: oauthBroker.provider,
-    scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
+    scopesSupported,
   });
 
   return {
@@ -35,6 +36,7 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
   const oauthBroker = createOAuthBroker(auth);
   const publicServerUrl = new URL(auth.publicUrl);
   const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(publicServerUrl);
+  const scopesSupported = getEffectiveOAuthScopes(auth.scopes);
   const router = express.Router();
 
   router.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
@@ -48,12 +50,12 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
     provider: oauthBroker.provider,
     resourceName: "YNAB MCP Bridge",
     resourceServerUrl: publicServerUrl,
-    scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
+    scopesSupported,
   }));
 
   return {
     authMiddleware: requireBearerAuth({
-      requiredScopes: auth.scopes,
+      requiredScopes: scopesSupported,
       resourceMetadataUrl,
       verifier: oauthBroker.provider,
     }),

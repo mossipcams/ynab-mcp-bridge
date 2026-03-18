@@ -7,7 +7,7 @@ import {
 import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
-import type { RuntimeAuthConfig } from "./config.js";
+import { getEffectiveOAuthScopes, type RuntimeAuthConfig } from "./config.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
@@ -29,9 +29,24 @@ function logOAuthDebug(event: string, details: Record<string, unknown>) {
 
 function getErrorDetails(error: unknown) {
   if (error instanceof Error) {
+    const upstreamError = "upstreamError" in error && typeof error.upstreamError === "string"
+      ? error.upstreamError
+      : undefined;
+    const upstreamErrorDescription = "upstreamErrorDescription" in error && typeof error.upstreamErrorDescription === "string"
+      ? error.upstreamErrorDescription
+      : undefined;
+    const upstreamErrorFields = "upstreamErrorFields" in error &&
+      Array.isArray(error.upstreamErrorFields) &&
+      error.upstreamErrorFields.every((field) => typeof field === "string")
+      ? error.upstreamErrorFields
+      : undefined;
+
     return {
       errorMessage: error.message,
       errorName: error.name,
+      upstreamError,
+      upstreamErrorDescription,
+      upstreamErrorFields,
     };
   }
 
@@ -81,6 +96,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
   const resourceUrl = new URL(config.publicUrl);
   const issuerUrl = new URL(resourceUrl.origin);
   const callbackUrl = new URL(config.callbackPath, issuerUrl).href;
+  const effectiveScopes = getEffectiveOAuthScopes(config.scopes);
   const localTokenSecret = Buffer.from(config.tokenSigningSecret ?? crypto.randomBytes(32).toString("base64url"), "utf8");
   const allowedAudiences = Array.from(new Set([config.audience, config.publicUrl]));
   const localTokenService = createLocalTokenService({
@@ -117,7 +133,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     config: {
       callbackUrl,
       defaultResource: config.publicUrl,
-      defaultScopes: config.scopes,
+      defaultScopes: effectiveScopes,
     },
     dependencies: {
       createId: () => crypto.randomBytes(24).toString("base64url"),
@@ -180,7 +196,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
         hasRedirectUri: typeof params.redirectUri === "string" && params.redirectUri.length > 0,
         hasResource: Boolean(params.resource?.href),
         hasState: typeof params.state === "string" && params.state.length > 0,
-        scopeCount: params.scopes?.length ?? config.scopes.length,
+        scopeCount: params.scopes?.length ?? effectiveScopes.length,
       });
 
       try {

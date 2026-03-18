@@ -256,7 +256,7 @@ describe("createOAuthCore", () => {
         expiresInSeconds: 1800,
         principalId: client.client_id,
         resource: "https://mcp.example.com/mcp",
-        scopes: ["openid", "profile"],
+        scopes: ["openid", "profile", "offline_access"],
       },
     ]);
     expect(store.state.grants.get("generated-2")).toMatchObject({

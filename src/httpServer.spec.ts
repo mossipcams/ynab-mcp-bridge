@@ -167,7 +167,7 @@ describe("startHttpServer", () => {
   } = {}) {
     return await new SignJWT({
       client_id: "client-123",
-      scope: overrides.scope ?? "openid profile",
+      scope: overrides.scope ?? "openid profile offline_access",
     })
       .setProtectedHeader({
         alg: "RS256",
@@ -1432,7 +1432,7 @@ describe("startHttpServer", () => {
     await expect(response.json()).resolves.toMatchObject({
       authorization_servers: ["https://mcp.example.com/"],
       resource: "https://mcp.example.com/mcp",
-      scopes_supported: ["openid", "profile"],
+      scopes_supported: ["openid", "profile", "offline_access"],
     });
   });
 
@@ -1575,6 +1575,7 @@ describe("startHttpServer", () => {
       authorization_endpoint: "https://mcp.example.com/authorize",
       issuer: "https://mcp.example.com/",
       registration_endpoint: "https://mcp.example.com/register",
+      scopes_supported: expect.arrayContaining(["openid", "profile", "offline_access"]),
       token_endpoint: "https://mcp.example.com/token",
       token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
     });
@@ -1603,6 +1604,7 @@ describe("startHttpServer", () => {
       authorization_endpoint: "https://mcp.example.com/authorize",
       issuer: "https://mcp.example.com/",
       registration_endpoint: "https://mcp.example.com/register",
+      scopes_supported: expect.arrayContaining(["openid", "profile", "offline_access"]),
       subject_types_supported: ["public"],
       token_endpoint: "https://mcp.example.com/token",
       token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
@@ -1804,7 +1806,7 @@ describe("startHttpServer", () => {
     expect(redirectUrl.searchParams.get("client_id")).toBe("cloudflare-client-id");
     expect(redirectUrl.searchParams.get("redirect_uri")).toBe("https://mcp.example.com/oauth/callback");
     expect(redirectUrl.searchParams.get("response_type")).toBe("code");
-    expect(redirectUrl.searchParams.get("scope")).toBe("openid profile");
+    expect(redirectUrl.searchParams.get("scope")).toBe("offline_access openid profile");
     expect(redirectUrl.searchParams.get("state")).toBeTruthy();
   });
 
@@ -2036,7 +2038,7 @@ describe("startHttpServer", () => {
       details.hasResource === true &&
       details.issuedAccessToken === true &&
       details.issuedRefreshToken === true &&
-      details.scopeCount === 2 &&
+      details.scopeCount === 3 &&
       details.hasAccessToken === true &&
       details.hasExpiresIn === true &&
       details.hasRefreshToken === true &&
@@ -2288,6 +2290,7 @@ describe("startHttpServer", () => {
           res.statusCode = 400;
           res.end(JSON.stringify({
             error: "invalid_grant",
+            error_description: "Refresh token is invalid.",
           }));
           return;
         }
@@ -2415,6 +2418,11 @@ describe("startHttpServer", () => {
       details.scopeCount === 0 &&
       details.errorName === "ServerError" &&
       details.errorMessage === "Upstream refresh exchange failed with status 400." &&
+      details.upstreamError === "invalid_grant" &&
+      details.upstreamErrorDescription === "Refresh token is invalid." &&
+      Array.isArray(details.upstreamErrorFields) &&
+      details.upstreamErrorFields.includes("error") &&
+      details.upstreamErrorFields.includes("error_description") &&
       !("refreshToken" in details)
     ))).toBeTruthy();
   });

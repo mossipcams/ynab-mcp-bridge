@@ -1,4 +1,5 @@
 import { InvalidClientMetadataError, InvalidGrantError, InvalidRequestError, InvalidScopeError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { getEffectiveOAuthScopes } from "./config.js";
 function clampExpiresIn(expiresIn) {
     return Math.max(60, Math.min(expiresIn ?? 3600, 3600));
 }
@@ -101,7 +102,7 @@ export function createOAuthCore({ config, dependencies, store }) {
     }
     async function startAuthorization(client, params) {
         assertRegisteredRedirectUri(client, params.redirectUri);
-        const scopes = params.scopes && params.scopes.length > 0 ? params.scopes : config.defaultScopes;
+        const scopes = getEffectiveOAuthScopes(params.scopes && params.scopes.length > 0 ? params.scopes : config.defaultScopes);
         const resource = params.resource?.href ?? config.defaultResource;
         if (store.isClientApproved({
             clientId: client.client_id,

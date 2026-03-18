@@ -94,6 +94,13 @@ function parseCsv(value) {
         .map((entry) => entry.trim())
         .filter(Boolean);
 }
+export function getEffectiveOAuthScopes(scopes) {
+    const normalizedScopes = [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))];
+    if (!normalizedScopes.includes("offline_access")) {
+        normalizedScopes.push("offline_access");
+    }
+    return normalizedScopes;
+}
 function readCsvFlag(args, name) {
     const value = readFlag(args, name);
     if (!value) {
@@ -227,7 +234,7 @@ function resolveRuntimeAuthConfig(args, env) {
         jwksUrl,
         tokenUrl,
     });
-    const scopes = parseCsv(readFlag(args, "--oauth-scopes") ?? env.MCP_OAUTH_SCOPES ?? "");
+    const scopes = getEffectiveOAuthScopes(parseCsv(readFlag(args, "--oauth-scopes") ?? env.MCP_OAUTH_SCOPES ?? ""));
     return {
         audience,
         authorizationUrl,

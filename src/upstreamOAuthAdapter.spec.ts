@@ -108,4 +108,68 @@ describe("createUpstreamOAuthAdapter", () => {
     expect(lastRequestBody?.get("client_id")).toBe("cloudflare-client-id");
     expect(lastRequestBody?.get("client_secret")).toBe("cloudflare-client-secret");
   });
+
+  it("surfaces safe upstream token error details on refresh failures", async () => {
+    const server = createNodeHttpServer((req, res) => {
+      const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+
+      if (requestUrl.pathname === "/token" && req.method === "POST") {
+        res.statusCode = 400;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({
+          error: "invalid_grant",
+          error_description: "Refresh token is invalid.",
+          refresh_token: "secret-value-that-must-not-be-logged",
+        }));
+        return;
+      }
+
+      res.statusCode = 404;
+      res.end();
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    });
+
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Test server did not expose a TCP address");
+    }
+
+    const origin = `http://127.0.0.1:${address.port}`;
+    const adapter = createUpstreamOAuthAdapter({
+      authorizationUrl: `${origin}/authorize`,
+      callbackUrl: "https://mcp.example.com/oauth/callback",
+      clientId: "cloudflare-client-id",
+      clientSecret: "cloudflare-client-secret",
+      tokenUrl: `${origin}/token`,
+    });
+
+    await expect(adapter.exchangeRefreshToken("upstream-refresh-token")).rejects.toMatchObject({
+      message: "Upstream refresh exchange failed with status 400.",
+      name: "ServerError",
+      upstreamError: "invalid_grant",
+      upstreamErrorDescription: "Refresh token is invalid.",
+      upstreamErrorFields: ["error", "error_description"],
+    });
+  });
 });

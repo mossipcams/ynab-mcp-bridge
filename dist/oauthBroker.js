@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { InvalidRequestError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { getEffectiveOAuthScopes } from "./config.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthCore } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
@@ -16,9 +17,23 @@ function logOAuthDebug(event, details) {
 }
 function getErrorDetails(error) {
     if (error instanceof Error) {
+        const upstreamError = "upstreamError" in error && typeof error.upstreamError === "string"
+            ? error.upstreamError
+            : undefined;
+        const upstreamErrorDescription = "upstreamErrorDescription" in error && typeof error.upstreamErrorDescription === "string"
+            ? error.upstreamErrorDescription
+            : undefined;
+        const upstreamErrorFields = "upstreamErrorFields" in error &&
+            Array.isArray(error.upstreamErrorFields) &&
+            error.upstreamErrorFields.every((field) => typeof field === "string")
+            ? error.upstreamErrorFields
+            : undefined;
         return {
             errorMessage: error.message,
             errorName: error.name,
+            upstreamError,
+            upstreamErrorDescription,
+            upstreamErrorFields,
         };
     }
     return {
@@ -56,6 +71,7 @@ export function createOAuthBroker(config) {
     const resourceUrl = new URL(config.publicUrl);
     const issuerUrl = new URL(resourceUrl.origin);
     const callbackUrl = new URL(config.callbackPath, issuerUrl).href;
+    const effectiveScopes = getEffectiveOAuthScopes(config.scopes);
     const localTokenSecret = Buffer.from(config.tokenSigningSecret ?? crypto.randomBytes(32).toString("base64url"), "utf8");
     const allowedAudiences = Array.from(new Set([config.audience, config.publicUrl]));
     const localTokenService = createLocalTokenService({
@@ -83,7 +99,7 @@ export function createOAuthBroker(config) {
         config: {
             callbackUrl,
             defaultResource: config.publicUrl,
-            defaultScopes: config.scopes,
+            defaultScopes: effectiveScopes,
         },
         dependencies: {
             createId: () => crypto.randomBytes(24).toString("base64url"),
@@ -141,7 +157,7 @@ export function createOAuthBroker(config) {
                 hasRedirectUri: typeof params.redirectUri === "string" && params.redirectUri.length > 0,
                 hasResource: Boolean(params.resource?.href),
                 hasState: typeof params.state === "string" && params.state.length > 0,
-                scopeCount: params.scopes?.length ?? config.scopes.length,
+                scopeCount: params.scopes?.length ?? effectiveScopes.length,
             });
             try {
                 const result = await core.startAuthorization(client, params);

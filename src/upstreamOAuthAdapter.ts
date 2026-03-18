@@ -21,6 +21,60 @@ type UpstreamOAuthAdapter = {
   exchangeRefreshToken: (refreshToken: string) => Promise<OAuthTokens>;
 };
 
+type UpstreamTokenErrorDetails = {
+  upstreamError?: string;
+  upstreamErrorDescription?: string;
+  upstreamErrorFields?: string[];
+  upstreamStatus: number;
+};
+
+class UpstreamTokenExchangeError extends ServerError {
+  upstreamError?: string;
+  upstreamErrorDescription?: string;
+  upstreamErrorFields?: string[];
+  upstreamStatus: number;
+
+  constructor(message: string, details: UpstreamTokenErrorDetails) {
+    super(message);
+    this.name = "ServerError";
+    this.upstreamError = details.upstreamError;
+    this.upstreamErrorDescription = details.upstreamErrorDescription;
+    this.upstreamErrorFields = details.upstreamErrorFields;
+    this.upstreamStatus = details.upstreamStatus;
+  }
+}
+
+function summarizeUpstreamTokenError(bodyText: string, status: number): UpstreamTokenErrorDetails {
+  const details: UpstreamTokenErrorDetails = {
+    upstreamStatus: status,
+  };
+
+  if (!bodyText.trim()) {
+    return details;
+  }
+
+  try {
+    const parsed = JSON.parse(bodyText) as Record<string, unknown>;
+    const error = typeof parsed.error === "string" ? parsed.error : undefined;
+    const errorDescription = typeof parsed.error_description === "string"
+      ? parsed.error_description
+      : undefined;
+    const errorFields = [
+      ...(error ? ["error"] : []),
+      ...(errorDescription ? ["error_description"] : []),
+    ];
+
+    return {
+      ...details,
+      upstreamError: error,
+      upstreamErrorDescription: errorDescription,
+      upstreamErrorFields: errorFields.length > 0 ? errorFields : undefined,
+    };
+  } catch {
+    return details;
+  }
+}
+
 async function exchangeTokens(url: string, body: URLSearchParams, failureMessage: string) {
   const response = await fetch(url, {
     method: "POST",
@@ -32,7 +86,11 @@ async function exchangeTokens(url: string, body: URLSearchParams, failureMessage
   });
 
   if (!response.ok) {
-    throw new ServerError(`${failureMessage} with status ${response.status}.`);
+    const bodyText = await response.text();
+    throw new UpstreamTokenExchangeError(
+      `${failureMessage} with status ${response.status}.`,
+      summarizeUpstreamTokenError(bodyText, response.status),
+    );
   }
 
   return await response.json() as OAuthTokens;
