@@ -1,7 +1,6 @@
 import express from "express";
 import { decodeJwt } from "jose";
 import { hostHeaderValidation, localhostHostValidation, } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
-import { getOAuthProtectedResourceMetadataUrl, } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
@@ -113,9 +112,6 @@ function writeInternalServerError(res) {
 function logHttpDebug(event, details) {
     console.error("[http]", event, details);
 }
-function getPublicResourceServerUrl(auth) {
-    return new URL(auth.publicUrl);
-}
 function getSessionId(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (typeof sessionId !== "string") {
@@ -135,7 +131,7 @@ function getRequestDebugDetails(req) {
     return {
         authClientId: req.auth?.clientId,
         authSubject: typeof authSubject === "string" ? authSubject : undefined,
-        method: req.method ?? "UNKNOWN",
+        method: req.method,
         origin: getFirstHeaderValue(req.headers.origin),
         path: getRequestPath(req),
         protocolVersion: getFirstHeaderValue(req.headers["mcp-protocol-version"]),
@@ -359,7 +355,6 @@ export async function startHttpServer(options) {
         next();
     });
     if (auth.mode === "oauth") {
-        const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(getPublicResourceServerUrl(auth));
         app.use((req, res, next) => {
             if (getRequestPath(req) !== path || req.method !== "POST") {
                 next();
@@ -456,6 +451,7 @@ export async function startHttpServer(options) {
         writeNotFound(res);
     });
     const errorHandler = (error, req, res, next) => {
+        const requestError = error;
         if (res.headersSent) {
             next(error);
             return;
@@ -472,7 +468,7 @@ export async function startHttpServer(options) {
         }
         console.error("Error handling MCP request:", {
             ...getRequestDebugDetails(req),
-            error,
+            error: requestError,
         });
         writeInternalServerError(res);
     };

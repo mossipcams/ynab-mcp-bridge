@@ -1,6 +1,17 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { getGrantExpiry, hasActiveGrantStep, normalizeGrant, normalizeScopes, } from "./oauthGrant.js";
+function isRecord(value) {
+    return typeof value === "object" && value !== null;
+}
+function isApprovalRecord(value) {
+    if (!isRecord(value)) {
+        return false;
+    }
+    return typeof value.clientId === "string" &&
+        typeof value.resource === "string" &&
+        Array.isArray(value.scopes);
+}
 function normalizeApprovalRecord(record) {
     return {
         ...record,
@@ -20,11 +31,7 @@ function parseApprovals(value) {
         return [];
     }
     return value
-        .filter((approval) => (typeof approval === "object" &&
-        approval !== null &&
-        typeof approval.clientId === "string" &&
-        typeof approval.resource === "string" &&
-        Array.isArray(approval.scopes)))
+        .filter(isApprovalRecord)
         .map(normalizeApprovalRecord);
 }
 function parseClients(value) {

@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 
-export type RuntimeTransport = "http" | "stdio";
-export type DeploymentMode = "authless" | "oauth-single-tenant" | "oauth-hardened";
+type RuntimeTransport = "http" | "stdio";
+type DeploymentMode = "authless" | "oauth-single-tenant" | "oauth-hardened";
 
 export type RuntimeAuthConfig =
   | {
@@ -27,7 +27,7 @@ export type RuntimeAuthConfig =
       tokenUrl: string;
     };
 
-export type RuntimeConfig = {
+type RuntimeConfig = {
   allowedOrigins: string[];
   allowedHosts: string[];
   auth: RuntimeAuthConfig;
@@ -42,12 +42,12 @@ export type YnabConfig = {
   planId?: string;
 };
 
-export type AppConfig = {
+type AppConfig = {
   runtime: RuntimeConfig;
   ynab: YnabConfig;
 };
 
-export type EnvConfig = Record<string, string | undefined>;
+type EnvConfig = Record<string, string | undefined>;
 
 type BackendReadiness = {
   checks: {
@@ -58,7 +58,7 @@ type BackendReadiness = {
   status: "ok" | "misconfigured";
 };
 
-export const CLOUDFLARE_ACCESS_ERROR =
+const CLOUDFLARE_ACCESS_ERROR =
   "Cloudflare Access OAuth settings must use the per-application OIDC SaaS endpoints under /cdn-cgi/access/sso/oidc/<client-id> for issuer, authorization, token, and jwks URLs.";
 
 function isCloudflareAccessHostname(hostname: string) {

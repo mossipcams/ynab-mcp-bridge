@@ -73,8 +73,8 @@ export async function startUpstreamOAuthServer(cleanups: Cleanup[]) {
     if (requestUrl.pathname === "/token" && req.method === "POST") {
       const chunks: Buffer[] = [];
 
-      req.on("data", (chunk) => {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      req.on("data", (chunk: Buffer | string) => {
+        chunks.push(typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk);
       });
       req.on("end", () => {
         lastTokenRequest = {
@@ -187,8 +187,9 @@ export async function approveAuthorizationConsent(
   } = {},
 ) {
   const challengeMatch = consentBody.match(/name="consent_challenge" value="([^"]+)"/);
+  const consentChallenge = challengeMatch?.[1];
 
-  expect(challengeMatch?.[1]).toBeTruthy();
+  expect(consentChallenge).toBeTruthy();
 
   return await fetch(new URL("/authorize/consent", httpServerUrl), {
     method: "POST",
@@ -198,7 +199,7 @@ export async function approveAuthorizationConsent(
     },
     body: new URLSearchParams({
       action: overrides.action ?? "approve",
-      consent_challenge: challengeMatch![1],
+      consent_challenge: consentChallenge ?? "",
     }),
     redirect: "manual",
   });

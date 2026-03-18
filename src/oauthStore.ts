@@ -63,6 +63,20 @@ type PersistedOAuthState = {
   version: 2;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isApprovalRecord(value: unknown): value is ApprovalRecord {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return typeof value.clientId === "string" &&
+    typeof value.resource === "string" &&
+    Array.isArray(value.scopes);
+}
+
 function normalizeApprovalRecord(record: ApprovalRecord) {
   return {
     ...record,
@@ -85,13 +99,7 @@ function parseApprovals(value: unknown) {
   }
 
   return value
-    .filter((approval): approval is ApprovalRecord => (
-      typeof approval === "object" &&
-      approval !== null &&
-      typeof approval.clientId === "string" &&
-      typeof approval.resource === "string" &&
-      Array.isArray(approval.scopes)
-    ))
+    .filter(isApprovalRecord)
     .map(normalizeApprovalRecord);
 }
 

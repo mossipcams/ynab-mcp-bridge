@@ -7,9 +7,6 @@ import {
   hostHeaderValidation,
   localhostHostValidation,
 } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
-import {
-  getOAuthProtectedResourceMetadataUrl,
-} from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import {
@@ -32,7 +29,7 @@ import type { RequestContext as ClientProfileRequestContext } from "./clientProf
 import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { createServer } from "./server.js";
 
-export type HttpServerOptions = {
+type HttpServerOptions = {
   allowedHosts?: string[];
   allowedOrigins?: string[];
   auth?: RuntimeAuthConfig;
@@ -42,7 +39,7 @@ export type HttpServerOptions = {
   ynab: YnabConfig;
 };
 
-export type StartedHttpServer = {
+type StartedHttpServer = {
   close: () => Promise<void>;
   host: string;
   path: string;
@@ -203,10 +200,6 @@ function writeInternalServerError(res: Response) {
 
 function logHttpDebug(event: string, details: HttpDebugDetails) {
   console.error("[http]", event, details);
-}
-
-function getPublicResourceServerUrl(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
-  return new URL(auth.publicUrl);
 }
 
 function getSessionId(req: Pick<Request, "headers">) {
@@ -551,8 +544,6 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   });
 
   if (auth.mode === "oauth") {
-    const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(getPublicResourceServerUrl(auth));
-
     app.use((req, res, next) => {
       if (getRequestPath(req) !== path || req.method !== "POST") {
         next();
@@ -593,7 +584,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       return;
     }
 
-    const parsedBody = req.body;
+    const parsedBody: unknown = req.body;
     const resolution = await resolveRequest(
       req,
       () => createManagedRequest(ynab),
@@ -669,6 +660,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   });
 
   const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
+    const requestError: unknown = error;
+
     if (res.headersSent) {
       next(error);
       return;
@@ -688,7 +681,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
     console.error("Error handling MCP request:", {
       ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-      error,
+      error: requestError,
     });
 
     writeInternalServerError(res);
