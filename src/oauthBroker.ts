@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 
-import type { JWTPayload } from "jose";
 import type { RequestHandler } from "express";
 import {
   InvalidRequestError,
@@ -14,11 +13,6 @@ import { createOAuthStore } from "./oauthStore.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
-
-type LocalClaims = JWTPayload & {
-  client_id?: string;
-  scope?: string;
-};
 
 const CONSENT_PAGE_HEADERS = {
   "cache-control": "no-store",
@@ -35,6 +29,15 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function getBodyStringValue(body: unknown, key: string) {
+  if (!body || typeof body !== "object") {
+    return undefined;
+  }
+
+  const value = (body as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
 }
 
 export function createOAuthBroker(config: OAuthAuthConfig): {
@@ -166,8 +169,8 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
 
   const handleConsent: RequestHandler = async (req, res, next) => {
     try {
-      const consentChallenge = typeof req.body?.consent_challenge === "string" ? req.body.consent_challenge : undefined;
-      const action = typeof req.body?.action === "string" ? req.body.action : undefined;
+      const consentChallenge = getBodyStringValue(req.body as unknown, "consent_challenge");
+      const action = getBodyStringValue(req.body as unknown, "action");
 
       if (!consentChallenge) {
         throw new InvalidRequestError("Missing consent challenge.");

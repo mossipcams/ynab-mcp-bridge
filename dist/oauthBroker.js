@@ -19,6 +19,13 @@ function escapeHtml(value) {
         .replaceAll("\"", "&quot;")
         .replaceAll("'", "&#39;");
 }
+function getBodyStringValue(body, key) {
+    if (!body || typeof body !== "object") {
+        return undefined;
+    }
+    const value = body[key];
+    return typeof value === "string" ? value : undefined;
+}
 export function createOAuthBroker(config) {
     const store = createOAuthStore(config.storePath);
     const resourceUrl = new URL(config.publicUrl);
@@ -124,8 +131,8 @@ export function createOAuthBroker(config) {
     };
     const handleConsent = async (req, res, next) => {
         try {
-            const consentChallenge = typeof req.body?.consent_challenge === "string" ? req.body.consent_challenge : undefined;
-            const action = typeof req.body?.action === "string" ? req.body.action : undefined;
+            const consentChallenge = getBodyStringValue(req.body, "consent_challenge");
+            const action = getBodyStringValue(req.body, "action");
             if (!consentChallenge) {
                 throw new InvalidRequestError("Missing consent challenge.");
             }
