@@ -43,6 +43,18 @@ describe("release-please automation", () => {
     return tags.sort(compareVersions).at(-1);
   }
 
+  function getVersionSection(changelog: string, version: string) {
+    const marker = `## [${version}]`;
+    const start = changelog.indexOf(marker);
+
+    if (start === -1) {
+      throw new Error(`Expected changelog section for ${version}.`);
+    }
+
+    const nextSection = changelog.indexOf("\n## [", start + marker.length);
+    return changelog.slice(start, nextSection === -1 ? undefined : nextSection);
+  }
+
   it("defines a release-please workflow", () => {
     const workflow = readFileSync(new URL("../.github/workflows/release-please.yml", import.meta.url), "utf8");
 
@@ -119,5 +131,16 @@ describe("release-please automation", () => {
 
     expect(workflow).toContain("uses: actions/checkout@v4");
     expect(workflow).toContain("fetch-depth: 0");
+  });
+
+  it("keeps the 0.8.0 changelog entry aligned with the cleaned release notes", () => {
+    const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
+    const releaseSection = getVersionSection(changelog, "0.8.0");
+
+    expect(releaseSection).toContain("add client-aware oauth setup profiles");
+    expect(releaseSection).toContain("restore release-please baseline");
+    expect(releaseSection).not.toContain("restore v0.6.0 release");
+    expect(releaseSection).not.toContain("restore v0.6.5 release");
+    expect(releaseSection).not.toContain("### Reverts");
   });
 });
