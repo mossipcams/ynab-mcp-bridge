@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.8.3...ynab-mcp-bridge-v0.8.4) (2026-03-18)
+
+
+### Bug Fixes
+
+* allow upstream consent redirects in csp ([e0e16c3](https://github.com/mossipcams/ynab-mcp-bridge/commit/e0e16c3d7e127b30f941b08a0340f3f7fa4d1a79))
+
 ## [0.8.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.8.2...ynab-mcp-bridge-v0.8.3) (2026-03-18)
 
 
