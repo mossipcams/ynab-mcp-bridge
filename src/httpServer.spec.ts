@@ -1913,6 +1913,57 @@ describe("startHttpServer", () => {
     expect(upstream.getLastTokenRequest()?.body.get("redirect_uri")).toBe("https://mcp.example.com/oauth/callback");
   });
 
+  it("returns a useful OAuth error response when the upstream callback omits state", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+
+    expect(consentResponse.status).toBe(302);
+    expect(new URL(consentResponse.headers.get("location")!).searchParams.get("state")).toBeTruthy();
+
+    const callbackResponse = await fetch(new URL(
+      "/oauth/callback?error=access_denied&error_description=User%20cancelled%20access",
+      httpServer.url,
+    ), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(callbackResponse.status).toBe(400);
+    await expect(callbackResponse.json()).resolves.toEqual({
+      error: "invalid_request",
+      error_description: "Upstream OAuth callback returned error \"access_denied\" without state. User cancelled access",
+    });
+    expect(upstream.getLastTokenRequest()).toBeUndefined();
+    expect(findOAuthLogCall(consoleErrorSpy, "callback.failed", (details) => (
+      details.errorMessage === "Upstream OAuth callback returned error \"access_denied\" without state. User cancelled access" &&
+      details.errorName === "InvalidRequestError" &&
+      details.upstreamError === "access_denied" &&
+      details.upstreamErrorDescription === "User cancelled access"
+    ))).toBeTruthy();
+  });
+
   it("exchanges a local authorization code for a bearer token and accepts it on MCP requests", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const tokenUserAgent = "chatgpt-token-client/1.0";
