@@ -246,6 +246,11 @@ async function closeNodeServer(server) {
         });
     });
 }
+function allowsOpaqueNullOrigin(req, authMode) {
+    return authMode === "oauth" &&
+        req.method === "POST" &&
+        getRequestPath(req) === "/authorize/consent";
+}
 export async function startHttpServer(options) {
     const allowedHosts = options.allowedHosts ?? [];
     const auth = options.auth ?? { deployment: "authless", mode: "none" };
@@ -314,6 +319,7 @@ export async function startHttpServer(options) {
     }
     app.use((req, res, next) => {
         const resolution = resolveOriginPolicy({
+            allowOpaqueNullOrigin: allowsOpaqueNullOrigin(req, auth.mode),
             allowedOrigins,
             headers: req.headers,
         });
