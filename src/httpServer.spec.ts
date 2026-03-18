@@ -1459,6 +1459,42 @@ describe("startHttpServer", () => {
     expect(response.headers.get("vary")).toContain("Origin");
   });
 
+  it("allows null-origin consent submissions without relaxing other OAuth routes", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
+      origin: "null",
+    });
+    const metadataResponse = await fetch(new URL("/.well-known/oauth-authorization-server", httpServer.url), {
+      headers: {
+        Origin: "null",
+      },
+    });
+
+    expect(consentResponse.status).toBe(302);
+    expect(consentResponse.headers.get("location")).toBeTruthy();
+    expect(metadataResponse.status).toBe(403);
+    await expect(metadataResponse.json()).resolves.toEqual({
+      error: "Forbidden origin",
+    });
+  });
+
   it("rejects legacy Cloudflare Access oauth2 endpoints passed directly to the HTTP server", async () => {
     await expect(startHttpServer({
       ynab,

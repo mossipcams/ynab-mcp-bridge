@@ -385,6 +385,12 @@ async function closeNodeServer(server: NodeHttpServer) {
   });
 }
 
+function allowsOpaqueNullOrigin(req: Pick<Request, "method" | "path" | "url">, authMode: RuntimeAuthConfig["mode"]) {
+  return authMode === "oauth" &&
+    req.method === "POST" &&
+    getRequestPath(req) === "/authorize/consent";
+}
+
 export async function startHttpServer(options: HttpServerOptions): Promise<StartedHttpServer> {
   const allowedHosts = options.allowedHosts ?? [];
   const auth = options.auth ?? { deployment: "authless", mode: "none" };
@@ -471,6 +477,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   app.use((req, res, next) => {
     const resolution = resolveOriginPolicy({
+      allowOpaqueNullOrigin: allowsOpaqueNullOrigin(req, auth.mode),
       allowedOrigins,
       headers: req.headers,
     });
