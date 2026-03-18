@@ -36,6 +36,20 @@ describe("startHttpServer", () => {
     ));
   }
 
+  function findProfileLogCall(
+    spy: ReturnType<typeof vi.spyOn>,
+    event: string,
+    matcher: (details: Record<string, unknown>) => boolean = () => true,
+  ) {
+    return spy.mock.calls.find(([scope, loggedEvent, details]) => (
+      scope === "[profile]" &&
+      loggedEvent === event &&
+      typeof details === "object" &&
+      details !== null &&
+      matcher(details as Record<string, unknown>)
+    ));
+  }
+
   async function sendRawHttpRequest(url: string, options: {
     body?: string;
     headers?: Record<string, string>;
@@ -259,6 +273,131 @@ describe("startHttpServer", () => {
       details.jsonRpcMethod === "initialize" &&
       details.sessionId === undefined &&
       details.cleanup === true
+    ))).toBeTruthy();
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.profileId === "claude" &&
+      details.reason === "origin:claude.ai"
+    ))).toBeTruthy();
+  });
+
+  it("falls back to the generic client profile without changing stateless POST handling", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "generic-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.profileId === "generic" &&
+      details.reason === "fallback:generic"
+    ))).toBeTruthy();
+  });
+
+  it("logs a conservative profile reconciliation when initialize clientInfo disagrees with pre-auth detection", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "OpenAI Codex",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(findProfileLogCall(consoleErrorSpy, "profile.reconciled", (details) => (
+      details.path === "/mcp" &&
+      details.provisionalProfileId === "claude" &&
+      details.confirmedProfileId === "codex" &&
+      details.profileId === "generic" &&
+      details.reason === "reconciled:generic"
+    ))).toBeTruthy();
+  });
+
+  it("detects Codex-style OAuth probe paths without changing authless 404 behavior", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(new URL("/.well-known/oauth-authorization-server/sse", httpServer.url), {
+      headers: {
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+    });
+
+    expect(response.status).toBe(404);
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/.well-known/oauth-authorization-server/sse" &&
+      details.method === "GET" &&
+      details.profileId === "codex" &&
+      details.reason === "path:codex-oauth-probe"
     ))).toBeTruthy();
   });
 
@@ -1418,6 +1557,37 @@ describe("startHttpServer", () => {
       subject_types_supported: ["public"],
       token_endpoint: "https://mcp.example.com/token",
       token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
+    });
+  });
+
+  it("serves OAuth authorization server metadata on Codex-style discovery probe paths", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const firstResponse = await fetch(new URL("/.well-known/oauth-authorization-server/sse", httpServer.url));
+    const secondResponse = await fetch(new URL("/sse/.well-known/oauth-authorization-server", httpServer.url));
+
+    expect(firstResponse.status).toBe(200);
+    await expect(firstResponse.json()).resolves.toMatchObject({
+      authorization_endpoint: "https://mcp.example.com/authorize",
+      issuer: "https://mcp.example.com/",
+      registration_endpoint: "https://mcp.example.com/register",
+      token_endpoint: "https://mcp.example.com/token",
+    });
+
+    expect(secondResponse.status).toBe(200);
+    await expect(secondResponse.json()).resolves.toMatchObject({
+      authorization_endpoint: "https://mcp.example.com/authorize",
+      issuer: "https://mcp.example.com/",
+      registration_endpoint: "https://mcp.example.com/register",
+      token_endpoint: "https://mcp.example.com/token",
     });
   });
 

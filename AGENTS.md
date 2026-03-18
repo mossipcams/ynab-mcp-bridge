@@ -1,5 +1,32 @@
 # AGENTS.md
 
+## Workflow (STRICT)
+
+For ANY code change, follow this exact sequence:
+
+### Step 1: Plan
+- Break work into small tasks (5-15 min each)
+- Save the complete plan to a Markdown file in the repository before presenting it
+- For each task, specify:
+  * What test to write
+  * What code to implement
+  * How to verify it works
+- Show the complete plan
+- STOP and say: "Plan ready. Approve to proceed."
+- WAIT for approval
+
+### Step 2: Execute with TDD
+For each task after approval:
+1. Write failing test -> run it -> show failure
+2. Write minimal implementation -> run test -> show pass
+3. Ask: "Task N done. Continue?" -> wait for yes
+
+## Branch Rules
+
+For implementation work, always start a new branch from `main` unless the user explicitly says otherwise.
+If the current branch is not `main`, do not switch branches automatically when that could disturb existing work; pause and confirm first.
+Use `git worktree` when it makes sense to keep branch-based work isolated without disturbing the current working tree.
+
 ## PR Rules
 
 Default PR creation to `mossipcams/ynab-mcp-bridge`.
