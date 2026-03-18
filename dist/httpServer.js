@@ -6,6 +6,10 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
 import { createMcpAuthModule } from "./mcpAuthServer.js";
+import { detectClientProfile, detectInitializeClientProfile, reconcileClientProfile, } from "./clientProfiles/detectClient.js";
+import { getClientProfile } from "./clientProfiles/index.js";
+import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
+import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { createServer } from "./server.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
@@ -18,6 +22,23 @@ function getRequestPath(req) {
         return "/";
     }
     return new URL(req.url, "http://127.0.0.1").pathname;
+}
+function toClientProfileRequestContext(req) {
+    return {
+        headers: req.headers,
+        method: req.method ?? "GET",
+        path: getRequestPath(req),
+    };
+}
+function getCanonicalOAuthDiscoveryPath(pathname, profileId) {
+    const profile = getClientProfile(profileId);
+    const canonicalPath = "/.well-known/oauth-authorization-server";
+    if (!profile.oauth.tolerateExtraDiscoveryProbes || pathname === canonicalPath) {
+        return undefined;
+    }
+    return profile.oauth.discoveryPathVariants.includes(pathname)
+        ? canonicalPath
+        : undefined;
 }
 function getFirstHeaderValue(value) {
     if (typeof value === "string") {
@@ -135,6 +156,16 @@ function getJsonRpcDebugDetails(parsedBody) {
     }
     return details;
 }
+function getInitializeParams(parsedBody) {
+    if (!parsedBody || typeof parsedBody !== "object") {
+        return undefined;
+    }
+    const request = parsedBody;
+    if (request.method !== "initialize" || !request.params || typeof request.params !== "object") {
+        return undefined;
+    }
+    return request.params;
+}
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (Array.isArray(sessionId)) {
@@ -242,6 +273,17 @@ export async function startHttpServer(options) {
         logHttpDebug("request.received", getRequestDebugDetails(req));
         next();
     });
+    app.use((req, res, next) => {
+        const detectedProfile = detectClientProfile(toClientProfileRequestContext(req));
+        setResolvedClientProfile(res.locals, detectedProfile);
+        logClientProfileEvent("profile.detected", {
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+            profileId: detectedProfile.profileId,
+            reason: detectedProfile.reason,
+        });
+        next();
+    });
     app.use((_req, res, next) => {
         const originalSetHeader = res.setHeader.bind(res);
         res.setHeader = ((name, value) => {
@@ -280,6 +322,14 @@ export async function startHttpServer(options) {
         next();
     });
     if (auth.mode === "oauth") {
+        app.use((req, res, next) => {
+            const resolvedProfile = getResolvedClientProfile(res.locals);
+            const canonicalPath = getCanonicalOAuthDiscoveryPath(getRequestPath(req), resolvedProfile?.profileId ?? "generic");
+            if (canonicalPath) {
+                req.url = canonicalPath;
+            }
+            next();
+        });
         app.use(mcpAuthModule.router);
     }
     app.use((req, res, next) => {
@@ -365,6 +415,26 @@ export async function startHttpServer(options) {
             res.once("close", () => {
                 void cleanup();
             });
+            const provisionalProfile = getResolvedClientProfile(res.locals);
+            const initializeParams = getInitializeParams(parsedBody);
+            if (provisionalProfile && initializeParams) {
+                const confirmedProfile = detectInitializeClientProfile({
+                    capabilities: initializeParams.capabilities,
+                    clientInfo: initializeParams.clientInfo,
+                });
+                const reconciliation = reconcileClientProfile(provisionalProfile, confirmedProfile);
+                setResolvedClientProfile(res.locals, reconciliation.profile);
+                if (reconciliation.mismatch && confirmedProfile) {
+                    logClientProfileEvent("profile.reconciled", {
+                        confirmedProfileId: confirmedProfile.profileId,
+                        method: req.method ?? "GET",
+                        path: getRequestPath(req),
+                        profileId: reconciliation.profile.profileId,
+                        provisionalProfileId: provisionalProfile.profileId,
+                        reason: reconciliation.profile.reason,
+                    });
+                }
+            }
             logHttpDebug("transport.handoff", {
                 ...getRequestDebugDetails(req),
                 ...getJsonRpcDebugDetails(parsedBody),
