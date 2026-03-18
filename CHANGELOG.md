@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.8.1...ynab-mcp-bridge-v0.8.2) (2026-03-18)
+
+
+### Bug Fixes
+
+* add oauth debug logging ([27df59f](https://github.com/mossipcams/ynab-mcp-bridge/commit/27df59f821e51462b07e9a126c19670de6fd29d4))
+* align release metadata with published tag ([efc6070](https://github.com/mossipcams/ynab-mcp-bridge/commit/efc6070e7e6889386cb39210fc8ae3fac1c8ecc2))
+* allow null-origin oauth consent posts ([f5b21aa](https://github.com/mossipcams/ynab-mcp-bridge/commit/f5b21aab02d178d72667e89a85250ac2b44923f8))
+* rebuild dist for null-origin consent ([ff43d51](https://github.com/mossipcams/ynab-mcp-bridge/commit/ff43d51bc059d70f0ac6f47f151234becfec4e13))
+
 ## [0.8.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.8.0...ynab-mcp-bridge-v0.8.1) (2026-03-18)
 
 
