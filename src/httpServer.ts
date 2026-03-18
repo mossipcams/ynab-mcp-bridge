@@ -8,6 +8,7 @@ import {
   localhostHostValidation,
 } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import {
+  createOAuthMetadata,
   getOAuthProtectedResourceMetadataUrl,
   mcpAuthRouter,
 } from "@modelcontextprotocol/sdk/server/auth/router.js";
@@ -189,6 +190,27 @@ function logHttpDebug(event: string, details: HttpDebugDetails) {
 
 function getPublicResourceServerUrl(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
   return new URL(auth.publicUrl);
+}
+
+function getOpenIdConfiguration(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>, oauthBroker: NonNullable<ReturnType<typeof createOAuthBroker>>) {
+  const oauthMetadata = createOAuthMetadata({
+    issuerUrl: oauthBroker.getIssuerUrl(),
+    provider: oauthBroker.provider,
+    scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
+  });
+
+  return {
+    authorization_endpoint: oauthMetadata.authorization_endpoint,
+    code_challenge_methods_supported: oauthMetadata.code_challenge_methods_supported,
+    grant_types_supported: oauthMetadata.grant_types_supported,
+    issuer: oauthMetadata.issuer,
+    registration_endpoint: oauthMetadata.registration_endpoint,
+    response_types_supported: oauthMetadata.response_types_supported,
+    scopes_supported: oauthMetadata.scopes_supported,
+    subject_types_supported: ["public"],
+    token_endpoint: oauthMetadata.token_endpoint,
+    token_endpoint_auth_methods_supported: oauthMetadata.token_endpoint_auth_methods_supported,
+  };
 }
 
 function getSessionId(req: Pick<Request, "headers">) {
@@ -373,6 +395,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const urlencodedParser = express.urlencoded({ extended: false });
 
   app.disable("x-powered-by");
+  app.set("trust proxy", 1);
 
   app.use((req, _res, next) => {
     logHttpDebug("request.received", getRequestDebugDetails(req));
@@ -432,6 +455,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
     app.use(oauthBroker!.callbackPath, oauthBroker!.handleCallback);
     app.post("/authorize/consent", urlencodedParser, oauthBroker!.handleConsent);
+    app.get("/.well-known/openid-configuration", (_req, res) => {
+      writeJson(res, 200, getOpenIdConfiguration(auth, oauthBroker!));
+    });
     app.use(mcpAuthRouter({
       baseUrl: oauthBroker!.getIssuerUrl(),
       issuerUrl: oauthBroker!.getIssuerUrl(),

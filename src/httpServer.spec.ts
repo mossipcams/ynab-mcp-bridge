@@ -1392,6 +1392,35 @@ describe("startHttpServer", () => {
     });
   });
 
+  it("exposes a minimal OpenID configuration document when oauth mode is enabled", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/openid-configuration", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      authorization_endpoint: "https://mcp.example.com/authorize",
+      issuer: "https://mcp.example.com/",
+      registration_endpoint: "https://mcp.example.com/register",
+      subject_types_supported: ["public"],
+      token_endpoint: "https://mcp.example.com/token",
+      token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
+    });
+  });
+
   it("registers OAuth clients with the requested public metadata", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
@@ -1737,6 +1766,72 @@ describe("startHttpServer", () => {
     });
 
     expect(mcpResponse.status).toBe(200);
+  });
+
+  it("accepts token exchanges forwarded through a trusted proxy header", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const codeVerifier = "test-code-verifier-123456789";
+    const codeChallenge = createCodeChallenge(codeVerifier);
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
+
+    const tokenResponse = await sendRawHttpRequest(httpServer.url, {
+      method: "POST",
+      path: "/token",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+        "X-Forwarded-For": "203.0.113.10",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        code: localAuthorizationCode!,
+        code_verifier: codeVerifier,
+        grant_type: "authorization_code",
+        redirect_uri: "https://claude.ai/oauth/callback",
+        resource: "https://mcp.example.com/mcp",
+      }).toString(),
+    });
+
+    expect(tokenResponse.statusCode).toBe(200);
+    expect(JSON.parse(tokenResponse.body)).toMatchObject({
+      access_token: expect.any(String),
+      refresh_token: expect.any(String),
+      token_type: "Bearer",
+    });
+    expect(consoleErrorSpy.mock.calls.some(([firstArg]) => String(firstArg).includes("ValidationError"))).toBe(false);
   });
 
   it("brokers refresh-token exchanges through the upstream provider before issuing a fresh local token", async () => {
