@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.8.0...ynab-mcp-bridge-v0.8.1) (2026-03-18)
+
+
+### Bug Fixes
+
+* clean up 0.8.0 changelog entry ([7c7b2e5](https://github.com/mossipcams/ynab-mcp-bridge/commit/7c7b2e5709736764333f6a26a3024e5f193995ff))
+* improve oauth debugging and docs ([8eb2cfa](https://github.com/mossipcams/ynab-mcp-bridge/commit/8eb2cfa2840b2971dc4e6ba645c60af6f775662a))
+* resolve main merge conflicts ([03be239](https://github.com/mossipcams/ynab-mcp-bridge/commit/03be239d0ca4a84112bc7cd1f6e3353904b38c3b))
+
+## [0.8.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.7.6...ynab-mcp-bridge-v0.8.0) (2026-03-18)
+
+
+### Features
+
+* add client-aware oauth setup profiles ([fe7bbee](https://github.com/mossipcams/ynab-mcp-bridge/commit/fe7bbeed6ba42f29a90733a5effd0373e21d25c9))
+
+
+### Internal
+
+* add dependency guardrails for architecture, linting, and unused-code checks ([a465f35](https://github.com/mossipcams/ynab-mcp-bridge/commit/a465f35b5a8bdc69c85ea444c543048f7ad9b985))
+* restore release-please baseline ([#100](https://github.com/mossipcams/ynab-mcp-bridge/issues/100)) ([53bf09c](https://github.com/mossipcams/ynab-mcp-bridge/commit/53bf09c0fe99951a4c5d4e69d62ba1aa617e70d4))
+
+## [0.7.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.4...ynab-mcp-bridge-v0.7.0) (2026-03-18)
+
+
+### Features
+
+* add client-aware oauth setup profiles ([fe7bbee](https://github.com/mossipcams/ynab-mcp-bridge/commit/fe7bbeed6ba42f29a90733a5effd0373e21d25c9))
+
+## [0.6.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.3...ynab-mcp-bridge-v0.6.4) (2026-03-18)
+
+
+### Bug Fixes
+
+* narrow auth broker boundaries ([9081669](https://github.com/mossipcams/ynab-mcp-bridge/commit/9081669f7fa5bed9d189c7a32d81d9aecaefdd34))
+* trust proxy headers during oauth token exchange ([92179cf](https://github.com/mossipcams/ynab-mcp-bridge/commit/92179cf1bebec691048a4fb1af9e2151e3ad8a0f))
+
+## [0.6.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.2...ynab-mcp-bridge-v0.6.3) (2026-03-17)
+
+
+### Bug Fixes
+
+* clarify cloudflare callback matching ([ede869a](https://github.com/mossipcams/ynab-mcp-bridge/commit/ede869afe0f6f11640df229dfb174f4833b6545a))
+* clarify cloudflare callback matching ([d3dbfc3](https://github.com/mossipcams/ynab-mcp-bridge/commit/d3dbfc3c11394620955f4134a74076f5f4b455da))
+* reset release-please baseline after rollback ([8886114](https://github.com/mossipcams/ynab-mcp-bridge/commit/888611401e0ee0f364e405b436e293e61667782f))
+* reset release-please baseline after rollback ([d1b4cb4](https://github.com/mossipcams/ynab-mcp-bridge/commit/d1b4cb446a37c269092cbc730dcb07f086947020))
+
+## [0.6.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.1...ynab-mcp-bridge-v0.6.2) (2026-03-17)
+
+
+### Bug Fixes
+
+* clarify cloudflare callback matching ([ede869a](https://github.com/mossipcams/ynab-mcp-bridge/commit/ede869afe0f6f11640df229dfb174f4833b6545a))
+* clarify cloudflare callback matching ([d3dbfc3](https://github.com/mossipcams/ynab-mcp-bridge/commit/d3dbfc3c11394620955f4134a74076f5f4b455da))
+* reset release-please baseline after rollback ([8886114](https://github.com/mossipcams/ynab-mcp-bridge/commit/888611401e0ee0f364e405b436e293e61667782f))
+* reset release-please baseline after rollback ([d1b4cb4](https://github.com/mossipcams/ynab-mcp-bridge/commit/d1b4cb446a37c269092cbc730dcb07f086947020))
+
+## [0.6.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.6.0...ynab-mcp-bridge-v0.6.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* reset release-please baseline after rollback ([8886114](https://github.com/mossipcams/ynab-mcp-bridge/commit/888611401e0ee0f364e405b436e293e61667782f))
+* reset release-please baseline after rollback ([d1b4cb4](https://github.com/mossipcams/ynab-mcp-bridge/commit/d1b4cb446a37c269092cbc730dcb07f086947020))
+
 ## [0.6.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.5.0...ynab-mcp-bridge-v0.6.0) (2026-03-16)
 
 

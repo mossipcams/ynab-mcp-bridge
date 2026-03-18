@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
-export const CLOUDFLARE_ACCESS_ERROR = "Cloudflare Access OAuth settings must use the per-application OIDC SaaS endpoints under /cdn-cgi/access/sso/oidc/<client-id> for issuer, authorization, token, and jwks URLs.";
+const CLOUDFLARE_ACCESS_ERROR = "Cloudflare Access OAuth settings must use the per-application OIDC SaaS endpoints under /cdn-cgi/access/sso/oidc/<client-id> for issuer, authorization, token, and jwks URLs.";
 function isCloudflareAccessHostname(hostname) {
     return hostname === "cloudflareaccess.com" || hostname.endsWith(".cloudflareaccess.com");
 }

@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
@@ -28,6 +30,15 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Run dependency rules
+        run: npm run lint:deps
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Knip
+        run: npm run lint:unused
 
       - name: Build package
         run: npm run build

@@ -2,8 +2,11 @@ export function normalizeScopes(scopes) {
     return [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))].sort();
 }
 export function normalizeGrant(grant) {
+    const { subject: _subject, ...normalizedGrant } = grant;
+    const principalId = grant.principalId ?? grant.subject;
     return {
-        ...grant,
+        ...normalizedGrant,
+        principalId,
         scopes: normalizeScopes(grant.scopes),
     };
 }
