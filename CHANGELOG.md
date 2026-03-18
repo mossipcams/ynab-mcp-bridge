@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Bug Fixes
 
+* add oauth debug logging ([27df59f](https://github.com/mossipcams/ynab-mcp-bridge/commit/27df59f821e51462b07e9a126c19670de6fd29d4))
+* align release metadata with published tag ([efc6070](https://github.com/mossipcams/ynab-mcp-bridge/commit/efc6070e7e6889386cb39210fc8ae3fac1c8ecc2))
+* clean up 0.8.0 changelog entry ([7c7b2e5](https://github.com/mossipcams/ynab-mcp-bridge/commit/7c7b2e5709736764333f6a26a3024e5f193995ff))
+* improve oauth debugging and docs ([8eb2cfa](https://github.com/mossipcams/ynab-mcp-bridge/commit/8eb2cfa2840b2971dc4e6ba645c60af6f775662a))
+* resolve main merge conflicts ([03be239](https://github.com/mossipcams/ynab-mcp-bridge/commit/03be239d0ca4a84112bc7cd1f6e3353904b38c3b))
+
+## [0.8.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.8.0...ynab-mcp-bridge-v0.8.1) (2026-03-18)
+
+
+### Bug Fixes
+
 * clean up 0.8.0 changelog entry ([7c7b2e5](https://github.com/mossipcams/ynab-mcp-bridge/commit/7c7b2e5709736764333f6a26a3024e5f193995ff))
 * improve oauth debugging and docs ([8eb2cfa](https://github.com/mossipcams/ynab-mcp-bridge/commit/8eb2cfa2840b2971dc4e6ba645c60af6f775662a))
 * resolve main merge conflicts ([03be239](https://github.com/mossipcams/ynab-mcp-bridge/commit/03be239d0ca4a84112bc7cd1f6e3353904b38c3b))
