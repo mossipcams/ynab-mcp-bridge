@@ -3,6 +3,7 @@ import { decodeJwt } from "jose";
 import { hostHeaderValidation, localhostHostValidation, } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
 import { createMcpAuthModule } from "./mcpAuthServer.js";
 import { detectClientProfile, detectInitializeClientProfile, reconcileClientProfile, } from "./clientProfiles/detectClient.js";
@@ -110,7 +111,7 @@ function writeInternalServerError(res) {
     writeJsonRpcError(res, 500, -32603, "Internal server error");
 }
 function logHttpDebug(event, details) {
-    console.error("[http]", event, details);
+    logAppEvent("http", event, details);
 }
 function getSessionId(req) {
     const sessionId = req.headers["mcp-session-id"];
@@ -487,7 +488,7 @@ export async function startHttpServer(options) {
             writePayloadTooLarge(res);
             return;
         }
-        console.error("Error handling MCP request:", {
+        logAppEvent("http", "request.error", {
             ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
             error: requestError,
         });

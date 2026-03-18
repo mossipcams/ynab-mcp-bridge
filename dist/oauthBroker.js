@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { InvalidRequestError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { getEffectiveOAuthScopes } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthCore } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
@@ -320,7 +321,10 @@ export function createOAuthBroker(config) {
             res.redirect(302, result.location);
         }
         catch (error) {
-            logOAuthDebug("callback.failed", getErrorDetails(error));
+            logAppEvent("oauth", "callback.failed", {
+                ...getErrorDetails(error),
+                path: req.path,
+            });
             if (error instanceof InvalidRequestError) {
                 res.status(400).json(error.toResponseObject());
                 return;

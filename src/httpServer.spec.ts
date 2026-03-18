@@ -22,18 +22,43 @@ describe("startHttpServer", () => {
     apiToken: "test-token",
   } as const;
 
+  function getStructuredLogEntry(call: unknown[]) {
+    if (call.length !== 1 || typeof call[0] !== "string") {
+      return undefined;
+    }
+
+    try {
+      const parsed = JSON.parse(call[0]);
+      return typeof parsed === "object" && parsed !== null
+        ? parsed as Record<string, unknown>
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   function findLogCall(
     spy: ReturnType<typeof vi.spyOn>,
     event: string,
     matcher: (details: Record<string, unknown>) => boolean = () => true,
   ) {
-    return spy.mock.calls.find(([scope, loggedEvent, details]) => (
-      scope === "[http]" &&
-      loggedEvent === event &&
-      typeof details === "object" &&
-      details !== null &&
-      matcher(details as Record<string, unknown>)
-    ));
+    return spy.mock.calls.find((call) => {
+      const structuredEntry = getStructuredLogEntry(call);
+
+      if (structuredEntry) {
+        return structuredEntry.scope === "http" &&
+          structuredEntry.event === event &&
+          matcher(structuredEntry);
+      }
+
+      const [scope, loggedEvent, details] = call;
+
+      return scope === "[http]" &&
+        loggedEvent === event &&
+        typeof details === "object" &&
+        details !== null &&
+        matcher(details as Record<string, unknown>);
+    });
   }
 
   function findProfileLogCall(
@@ -54,13 +79,23 @@ describe("startHttpServer", () => {
     event: string,
     matcher: (details: Record<string, unknown>) => boolean = () => true,
   ) {
-    return spy.mock.calls.find(([scope, loggedEvent, details]) => (
-      scope === "[oauth]" &&
-      loggedEvent === event &&
-      typeof details === "object" &&
-      details !== null &&
-      matcher(details as Record<string, unknown>)
-    ));
+    return spy.mock.calls.find((call) => {
+      const structuredEntry = getStructuredLogEntry(call);
+
+      if (structuredEntry) {
+        return structuredEntry.scope === "oauth" &&
+          structuredEntry.event === event &&
+          matcher(structuredEntry);
+      }
+
+      const [scope, loggedEvent, details] = call;
+
+      return scope === "[oauth]" &&
+        loggedEvent === event &&
+        typeof details === "object" &&
+        details !== null &&
+        matcher(details as Record<string, unknown>);
+    });
   }
 
   async function sendRawHttpRequest(url: string, options: {
@@ -1391,10 +1426,7 @@ describe("startHttpServer", () => {
       },
       id: null,
     });
-    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
-      "Error handling MCP request:",
-      expect.anything(),
-    );
+    expect(findLogCall(consoleErrorSpy, "request.error")).toBeUndefined();
   });
 
   it("allows the started HTTP server to be closed more than once", async () => {

@@ -15,6 +15,7 @@ import {
   type RuntimeAuthConfig,
   type YnabConfig,
 } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
 import { createMcpAuthModule } from "./mcpAuthServer.js";
 import {
@@ -199,7 +200,7 @@ function writeInternalServerError(res: Response) {
 }
 
 function logHttpDebug(event: string, details: HttpDebugDetails) {
-  console.error("[http]", event, details);
+  logAppEvent("http", event, details);
 }
 
 function getSessionId(req: Pick<Request, "headers">) {
@@ -687,7 +688,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       return;
     }
 
-    console.error("Error handling MCP request:", {
+    logAppEvent("http", "request.error", {
       ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
       error: requestError,
     });

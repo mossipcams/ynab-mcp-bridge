@@ -8,6 +8,7 @@ import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { getEffectiveOAuthScopes, type RuntimeAuthConfig } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
@@ -369,7 +370,10 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       });
       res.redirect(302, result.location);
     } catch (error) {
-      logOAuthDebug("callback.failed", getErrorDetails(error));
+      logAppEvent("oauth", "callback.failed", {
+        ...getErrorDetails(error),
+        path: req.path,
+      });
       if (error instanceof InvalidRequestError) {
         res.status(400).json(error.toResponseObject());
         return;

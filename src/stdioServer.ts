@@ -2,6 +2,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 
 import { assertYnabConfig, type YnabConfig } from "./config.js";
 import { createServer } from "./server.js";
+import { logStdioServerStarted } from "./startupLogging.js";
 
 export async function startStdioServer(config: YnabConfig) {
   const server = createServer(assertYnabConfig(config));
@@ -9,5 +10,5 @@ export async function startStdioServer(config: YnabConfig) {
 
   await server.connect(transport);
 
-  console.error("YNAB MCP server running on stdio");
+  logStdioServerStarted();
 }

@@ -1,9 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { startHttpServer } from "./httpServer.js";
+import { setLoggerDestinationForTests } from "./logger.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
@@ -19,7 +21,30 @@ describe("oauth broker persistence", () => {
     apiToken: "test-token",
   } as const;
 
+  function createBufferedDestination() {
+    const destination = new PassThrough();
+    const chunks: string[] = [];
+
+    destination.on("data", (chunk) => {
+      chunks.push(chunk.toString("utf8"));
+    });
+
+    return {
+      destination,
+      readEntries() {
+        return chunks
+          .join("")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+      },
+    };
+  }
+
   afterEach(async () => {
+    setLoggerDestinationForTests();
+
     while (cleanups.length > 0) {
       const cleanup = cleanups.pop();
       await cleanup?.();
@@ -76,6 +101,41 @@ describe("oauth broker persistence", () => {
 
     expect(secondAuthorizeResponse.status).toBe(302);
     expect(secondAuthorizeResponse.headers.get("location")).toContain("/authorize");
+  });
+
+  it("logs callback failures through the shared oauth logger", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
+
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/oauth/callback?code=upstream-code-123", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        errorMessage: "Missing upstream OAuth state.",
+        event: "callback.failed",
+        msg: "callback.failed",
+        scope: "oauth",
+      }),
+    ]));
   });
 
   it("keeps unapproved clients on the consent screen after restart", async () => {
