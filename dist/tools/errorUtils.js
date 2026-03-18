@@ -1,3 +1,6 @@
+function isRecord(value) {
+    return typeof value === "object" && value !== null;
+}
 /**
  * Extracts a meaningful error message from various error types,
  * including YNAB API error responses.
@@ -9,16 +12,14 @@ export function getErrorMessage(error) {
     }
     // Handle YNAB API error responses which have the structure:
     // { error: { id: '...', name: '...', detail: '...' } }
-    if (typeof error === 'object' &&
-        error !== null &&
-        'error' in error &&
-        typeof error.error === 'object') {
-        const ynabError = error.error;
-        if (ynabError.detail) {
-            return ynabError.detail;
+    if (isRecord(error) && isRecord(error.error)) {
+        const detail = error.error.detail;
+        if (typeof detail === "string" && detail.length > 0) {
+            return detail;
         }
-        if (ynabError.name) {
-            return ynabError.name;
+        const name = error.error.name;
+        if (typeof name === "string" && name.length > 0) {
+            return name;
         }
     }
     // Fallback: try to stringify the error
@@ -31,5 +32,5 @@ export function getErrorMessage(error) {
     catch {
         // Ignore stringify errors
     }
-    return 'Unknown error occurred';
+    return "Unknown error occurred";
 }

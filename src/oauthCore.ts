@@ -22,21 +22,7 @@ export type PendingConsent = PendingAuthorization & {
   clientName?: string;
 };
 
-export type AuthorizationCodeRecord = PendingAuthorization & {
-  principalId: string;
-  upstreamTokens: OAuthTokens;
-};
-
-export type RefreshTokenRecord = {
-  clientId: string;
-  expiresAt: number;
-  principalId: string;
-  resource: string;
-  scopes: string[];
-  upstreamTokens: OAuthTokens;
-};
-
-export type OAuthCoreStore = {
+type OAuthCoreStore = {
   approveClient: (record: { clientId: string; resource: string; scopes: string[] }) => void;
   deleteGrant: (grantId: string) => void;
   getAuthorizationCodeGrant: (code: string) => OAuthGrant | undefined;

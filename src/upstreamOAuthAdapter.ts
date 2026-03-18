@@ -15,7 +15,7 @@ type CreateUpstreamOAuthAdapterOptions = {
   tokenUrl: string;
 };
 
-export type UpstreamOAuthAdapter = {
+type UpstreamOAuthAdapter = {
   buildAuthorizationUrl: (record: UpstreamAuthorizationRecord) => URL;
   exchangeAuthorizationCode: (code: string) => Promise<OAuthTokens>;
   exchangeRefreshToken: (refreshToken: string) => Promise<OAuthTokens>;
