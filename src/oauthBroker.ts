@@ -60,6 +60,24 @@ function getErrorDetails(error: unknown) {
   };
 }
 
+function createMissingUpstreamStateError(error: string | undefined, errorDescription: string | undefined) {
+  if (!error) {
+    return new InvalidRequestError("Missing upstream OAuth state.");
+  }
+
+  const message = errorDescription
+    ? `Upstream OAuth callback returned error "${error}" without state. ${errorDescription}`
+    : `Upstream OAuth callback returned error "${error}" without state.`;
+
+  return Object.assign(new InvalidRequestError(message), {
+    upstreamError: error,
+    upstreamErrorDescription: errorDescription,
+    upstreamErrorFields: errorDescription === undefined
+      ? ["error"]
+      : ["error", "error_description"],
+  });
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -319,8 +337,12 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
   const handleCallback: RequestHandler = async (req, res, next) => {
     try {
       const upstreamState = typeof req.query.state === "string" ? req.query.state : undefined;
+      const upstreamError = typeof req.query.error === "string" ? req.query.error : undefined;
+      const upstreamErrorDescription = typeof req.query.error_description === "string"
+        ? req.query.error_description
+        : undefined;
       const hasCode = typeof req.query.code === "string" && req.query.code.length > 0;
-      const hasError = typeof req.query.error === "string";
+      const hasError = typeof upstreamError === "string";
       const hasState = typeof upstreamState === "string" && upstreamState.length > 0;
 
       logOAuthDebug("callback.received", {
@@ -330,13 +352,13 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       });
 
       if (!upstreamState) {
-        throw new InvalidRequestError("Missing upstream OAuth state.");
+        throw createMissingUpstreamStateError(upstreamError, upstreamErrorDescription);
       }
 
       const result = await core.handleCallback({
         code: typeof req.query.code === "string" && req.query.code.length > 0 ? req.query.code : undefined,
-        error: typeof req.query.error === "string" ? req.query.error : undefined,
-        errorDescription: typeof req.query.error_description === "string" ? req.query.error_description : undefined,
+        error: upstreamError,
+        errorDescription: upstreamErrorDescription,
         upstreamState,
       });
       logOAuthDebug("callback.completed", {
