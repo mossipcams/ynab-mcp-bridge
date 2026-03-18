@@ -30,6 +30,8 @@ const CONSENT_PAGE_HEADERS = {
   "x-content-type-options": "nosniff",
 } as const;
 
+type OAuthDebugDetails = Record<string, unknown>;
+
 function parseScopes(scopeClaim: unknown) {
   if (typeof scopeClaim !== "string") {
     return [];
@@ -80,6 +82,35 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function logOAuthDebug(event: string, details: OAuthDebugDetails) {
+  console.error("[oauth]", event, details);
+}
+
+function getTokenResponseDebugDetails(tokens: OAuthTokens): OAuthDebugDetails {
+  return {
+    hasAccessToken: typeof tokens.access_token === "string" && tokens.access_token.length > 0,
+    hasExpiresIn: typeof tokens.expires_in === "number",
+    hasRefreshToken: typeof tokens.refresh_token === "string" && tokens.refresh_token.length > 0,
+    hasScope: typeof tokens.scope === "string" && tokens.scope.length > 0,
+    hasTokenType: typeof tokens.token_type === "string" && tokens.token_type.length > 0,
+    tokenResponseFields: Object.keys(tokens).sort(),
+  };
+}
+
+function getErrorDetails(error: unknown): OAuthDebugDetails {
+  if (error instanceof Error) {
+    return {
+      errorMessage: error.message,
+      errorName: error.name,
+    };
+  }
+
+  return {
+    errorMessage: String(error),
+    errorName: "UnknownError",
+  };
 }
 
 export function createOAuthBroker(config: OAuthAuthConfig): {
@@ -328,10 +359,34 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       return await core.getAuthorizationCodeChallenge(client, authorizationCode);
     },
     async exchangeAuthorizationCode(client, authorizationCode, _codeVerifier, redirectUri, resource) {
-      return await core.exchangeAuthorizationCode(client, authorizationCode, redirectUri, resource);
+      const tokens = await core.exchangeAuthorizationCode(client, authorizationCode, redirectUri, resource);
+      logOAuthDebug("token.exchange.succeeded", {
+        clientId: client.client_id,
+        grantType: "authorization_code",
+        ...getTokenResponseDebugDetails(tokens),
+      });
+      return tokens;
     },
     async exchangeRefreshToken(client, refreshToken, scopes, resource) {
-      return await core.exchangeRefreshToken(client, refreshToken, scopes, resource);
+      try {
+        const tokens = await core.exchangeRefreshToken(client, refreshToken, scopes, resource);
+        logOAuthDebug("token.refresh.succeeded", {
+          clientId: client.client_id,
+          grantType: "refresh_token",
+          ...getTokenResponseDebugDetails(tokens),
+        });
+        return tokens;
+      } catch (error) {
+        logOAuthDebug("token.refresh.failed", {
+          clientId: client.client_id,
+          grantType: "refresh_token",
+          hasRefreshToken: typeof refreshToken === "string" && refreshToken.length > 0,
+          hasResource: Boolean(resource?.href),
+          scopeCount: scopes?.length ?? 0,
+          ...getErrorDetails(error),
+        });
+        throw error;
+      }
     },
     verifyAccessToken,
   };
