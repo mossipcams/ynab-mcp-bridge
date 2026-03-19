@@ -388,7 +388,6 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       return;
     }
 
-    res.locals.corsOrigin = resolution.responseOrigin;
     applyCorsHeaders(res, resolution.responseOrigin);
 
     if (resolution.responseOrigin) {
