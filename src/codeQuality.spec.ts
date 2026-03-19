@@ -234,24 +234,24 @@ describe("code quality guardrails", () => {
     expect(gitignore).toContain("artifacts");
   });
 
-  it("defines dedicated required-check workflows for Release Please PRs", () => {
+  it("keeps Release Please PR smoke checks inside the main CI workflow", () => {
     expect(
       existsSync(new URL("../.github/workflows/release-please-pr-checks.yml", import.meta.url)),
-    ).toBe(true);
+    ).toBe(false);
 
     const workflow = readFileSync(
-      new URL("../.github/workflows/release-please-pr-checks.yml", import.meta.url),
+      new URL("../.github/workflows/test.yml", import.meta.url),
       "utf8",
     );
 
-    expect(workflow).toContain("pull_request_target:");
-    expect(workflow).toContain("release-please--");
-    expect(workflow).toContain("validate-22");
-    expect(workflow).toContain("name: validate (22.x)");
-    expect(workflow).toContain("validate-24");
-    expect(workflow).toContain("name: validate (24.x)");
-    expect(workflow).toContain("validate-pr-title");
-    expect(workflow).toContain("name: validate-pr-title");
+    expect(workflow).toContain("release-please-smoke:");
+    expect(workflow).toContain("name: release-please-smoke");
+    expect(workflow).toContain("startsWith(github.event.pull_request.head.ref, 'release-please--')");
+    expect(workflow).toContain("node-version: 22.x");
+    expect(workflow).toContain("npm run test:ci");
+    expect(workflow).toContain("npm run typecheck");
+    expect(workflow).toContain("npm run build");
+    expect(workflow).not.toContain("release-please-pr-checks.yml");
   });
 
   it("explicitly skips the main CI job for Release Please PR branches", () => {
@@ -263,6 +263,35 @@ describe("code quality guardrails", () => {
     expect(workflow).toContain("if:");
     expect(workflow).toContain("github.event_name != 'pull_request'");
     expect(workflow).toContain("!startsWith(github.event.pull_request.head.ref, 'release-please--')");
+  });
+
+  it("keeps the full validation matrix for non-release PRs while isolating smoke checks", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(workflow).toContain("matrix:");
+    expect(workflow).toContain("node-version: [22.x, 24.x]");
+    expect(workflow).toContain("Run dependency rules");
+    expect(workflow).toContain("Run ESLint");
+    expect(workflow).toContain("Run Knip");
+    expect(workflow).toContain("if: github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'release-please--')");
+  });
+
+  it("keeps Release Please smoke diagnostics lightweight but reviewable", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+    const validateJob = workflow.split("release-please-smoke:")[0] ?? "";
+    const smokeJob = workflow.split("release-please-smoke:")[1] ?? "";
+
+    expect(workflow).toContain("name: release-please-smoke");
+    expect(smokeJob).toContain("Upload release-please test reports");
+    expect(smokeJob).toContain("name: release-please-test-results");
+    expect(smokeJob).not.toContain("\n\n    strategy:");
+    expect(validateJob).not.toContain("release-please-test-results");
   });
 
   it("skips the normal PR title validator for Release Please PR branches", () => {
