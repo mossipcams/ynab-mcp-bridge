@@ -121,6 +121,16 @@ function getSessionId(req) {
     }
     return values[0];
 }
+function getNormalizedUserAgent(req) {
+    const userAgent = getFirstHeaderValue(req.headers["user-agent"]);
+    if (!userAgent) {
+        return undefined;
+    }
+    if (userAgent.toLowerCase().startsWith("openai-mcp/")) {
+        return "chatgpt";
+    }
+    return userAgent;
+}
 function getRequestDebugDetails(req) {
     const authSubject = req.auth?.extra?.subject;
     return {
@@ -131,6 +141,7 @@ function getRequestDebugDetails(req) {
         path: getRequestPath(req),
         protocolVersion: getFirstHeaderValue(req.headers["mcp-protocol-version"]),
         sessionId: getSessionId(req),
+        userAgent: getNormalizedUserAgent(req),
     };
 }
 function getJsonRpcDebugDetails(parsedBody) {
