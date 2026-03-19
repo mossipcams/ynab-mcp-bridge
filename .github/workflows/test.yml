@@ -75,3 +75,38 @@ jobs:
           name: coverage-node-${{ matrix.node-version }}
           path: artifacts/coverage
           if-no-files-found: error
+
+  release-please-smoke:
+    if: github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'release-please--')
+    name: release-please-smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:ci
+
+      - name: Run TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Build package
+        run: npm run build
+
+      - name: Upload release-please test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-please-test-results
+          path: artifacts/test-results
+          if-no-files-found: warn
