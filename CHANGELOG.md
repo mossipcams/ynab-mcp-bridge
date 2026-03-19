@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.0...ynab-mcp-bridge-v0.10.1) (2026-03-19)
+
+
+### Bug Fixes
+
+* harden agentic CI code quality ([cb05276](https://github.com/mossipcams/ynab-mcp-bridge/commit/cb0527691f549f448fbc2368e6ba88124cc696d3))
+* skip CI on release please prs ([3054635](https://github.com/mossipcams/ynab-mcp-bridge/commit/30546358f584fb5f398121adb5efe09cbd08c7a9))
+* skip release please title validation ([b4ba7d0](https://github.com/mossipcams/ynab-mcp-bridge/commit/b4ba7d0846ddc71f2d4676501b86dee37398a0b1))
+* skip release please title validation ([905e595](https://github.com/mossipcams/ynab-mcp-bridge/commit/905e59557e6295cf62e6ec9460b88f93e705bdd7))
+
+
+### Reverts
+
+* remove ynab canary automation ([de6d507](https://github.com/mossipcams/ynab-mcp-bridge/commit/de6d507fd916c99296b0ce183276b8d68f350723))
+
 ## [0.10.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.9.0...ynab-mcp-bridge-v0.10.0) (2026-03-19)
 
 
