@@ -6,9 +6,13 @@ import * as GetAccountTool from "./tools/GetAccountTool.js";
 import * as GetBudgetCleanupSummaryTool from "./tools/GetBudgetCleanupSummaryTool.js";
 import * as GetBudgetRatioSummaryTool from "./tools/GetBudgetRatioSummaryTool.js";
 import * as GetBudgetHealthSummaryTool from "./tools/GetBudgetHealthSummaryTool.js";
+import * as GetCashRunwayTool from "./tools/GetCashRunwayTool.js";
 import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
 import * as GetCategoryTool from "./tools/GetCategoryTool.js";
 import * as GetCategoryTrendSummaryTool from "./tools/GetCategoryTrendSummaryTool.js";
+import * as GetDebtSummaryTool from "./tools/GetDebtSummaryTool.js";
+import * as GetEmergencyFundCoverageTool from "./tools/GetEmergencyFundCoverageTool.js";
+import * as GetFinancialHealthCheckTool from "./tools/GetFinancialHealthCheckTool.js";
 import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";
 import * as GetGoalProgressSummaryTool from "./tools/GetGoalProgressSummaryTool.js";
 import * as GetIncomeSummaryTool from "./tools/GetIncomeSummaryTool.js";
@@ -22,7 +26,9 @@ import * as GetPayeeLocationTool from "./tools/GetPayeeLocationTool.js";
 import * as GetPayeeLocationsByPayeeTool from "./tools/GetPayeeLocationsByPayeeTool.js";
 import * as GetPayeeTool from "./tools/GetPayeeTool.js";
 import * as GetScheduledTransactionTool from "./tools/GetScheduledTransactionTool.js";
+import * as SearchTransactionsTool from "./tools/SearchTransactionsTool.js";
 import * as GetSpendingSummaryTool from "./tools/GetSpendingSummaryTool.js";
+import * as GetSpendingAnomaliesTool from "./tools/GetSpendingAnomaliesTool.js";
 import * as GetPlanDetailsTool from "./tools/GetPlanDetailsTool.js";
 import * as GetPlanMonthTool from "./tools/GetPlanMonthTool.js";
 import * as GetPlanSettingsTool from "./tools/GetPlanSettingsTool.js";
@@ -33,6 +39,7 @@ import * as GetTransactionsByMonthTool from "./tools/GetTransactionsByMonthTool.
 import * as GetTransactionsByPayeeTool from "./tools/GetTransactionsByPayeeTool.js";
 import * as GetUpcomingObligationsTool from "./tools/GetUpcomingObligationsTool.js";
 import * as GetUserTool from "./tools/GetUserTool.js";
+import * as GetRecurringExpenseSummaryTool from "./tools/GetRecurringExpenseSummaryTool.js";
 import * as ListAccountsTool from "./tools/ListAccountsTool.js";
 import * as ListPayeeLocationsTool from "./tools/ListPayeeLocationsTool.js";
 import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
@@ -58,6 +65,7 @@ const toolRegistrations = [
     { title: "Get Category", name: GetCategoryTool.name, description: GetCategoryTool.description, inputSchema: GetCategoryTool.inputSchema, execute: (input, api) => GetCategoryTool.execute(input, api) },
     { title: "Get Month Category", name: GetMonthCategoryTool.name, description: GetMonthCategoryTool.description, inputSchema: GetMonthCategoryTool.inputSchema, execute: (input, api) => GetMonthCategoryTool.execute(input, api) },
     { title: "List Transactions", name: ListTransactionsTool.name, description: ListTransactionsTool.description, inputSchema: ListTransactionsTool.inputSchema, execute: (input, api) => ListTransactionsTool.execute(input, api) },
+    { title: "Search Transactions", name: SearchTransactionsTool.name, description: SearchTransactionsTool.description, inputSchema: SearchTransactionsTool.inputSchema, execute: (input, api) => SearchTransactionsTool.execute(input, api) },
     { title: "Get Transactions By Month", name: GetTransactionsByMonthTool.name, description: GetTransactionsByMonthTool.description, inputSchema: GetTransactionsByMonthTool.inputSchema, execute: (input, api) => GetTransactionsByMonthTool.execute(input, api) },
     { title: "Get Transaction", name: GetTransactionTool.name, description: GetTransactionTool.description, inputSchema: GetTransactionTool.inputSchema, execute: (input, api) => GetTransactionTool.execute(input, api) },
     { title: "Get Transactions By Account", name: GetTransactionsByAccountTool.name, description: GetTransactionsByAccountTool.description, inputSchema: GetTransactionsByAccountTool.inputSchema, execute: (input, api) => GetTransactionsByAccountTool.execute(input, api) },
@@ -77,13 +85,19 @@ const toolRegistrations = [
     { title: "Get Money Movement Groups", name: GetMoneyMovementGroupsTool.name, description: GetMoneyMovementGroupsTool.description, inputSchema: GetMoneyMovementGroupsTool.inputSchema, execute: (input, api) => GetMoneyMovementGroupsTool.execute(input, api) },
     { title: "Get Money Movement Groups By Month", name: GetMoneyMovementGroupsByMonthTool.name, description: GetMoneyMovementGroupsByMonthTool.description, inputSchema: GetMoneyMovementGroupsByMonthTool.inputSchema, execute: (input, api) => GetMoneyMovementGroupsByMonthTool.execute(input, api) },
     { title: "Get Financial Snapshot", name: GetFinancialSnapshotTool.name, description: GetFinancialSnapshotTool.description, inputSchema: GetFinancialSnapshotTool.inputSchema, execute: (input, api) => GetFinancialSnapshotTool.execute(input, api) },
+    { title: "Get Financial Health Check", name: GetFinancialHealthCheckTool.name, description: GetFinancialHealthCheckTool.description, inputSchema: GetFinancialHealthCheckTool.inputSchema, execute: (input, api) => GetFinancialHealthCheckTool.execute(input, api) },
     { title: "Get Spending Summary", name: GetSpendingSummaryTool.name, description: GetSpendingSummaryTool.description, inputSchema: GetSpendingSummaryTool.inputSchema, execute: (input, api) => GetSpendingSummaryTool.execute(input, api) },
+    { title: "Get Spending Anomalies", name: GetSpendingAnomaliesTool.name, description: GetSpendingAnomaliesTool.description, inputSchema: GetSpendingAnomaliesTool.inputSchema, execute: (input, api) => GetSpendingAnomaliesTool.execute(input, api) },
     { title: "Get Cash Flow Summary", name: GetCashFlowSummaryTool.name, description: GetCashFlowSummaryTool.description, inputSchema: GetCashFlowSummaryTool.inputSchema, execute: (input, api) => GetCashFlowSummaryTool.execute(input, api) },
+    { title: "Get Cash Runway", name: GetCashRunwayTool.name, description: GetCashRunwayTool.description, inputSchema: GetCashRunwayTool.inputSchema, execute: (input, api) => GetCashRunwayTool.execute(input, api) },
     { title: "Get Budget Health Summary", name: GetBudgetHealthSummaryTool.name, description: GetBudgetHealthSummaryTool.description, inputSchema: GetBudgetHealthSummaryTool.inputSchema, execute: (input, api) => GetBudgetHealthSummaryTool.execute(input, api) },
     { title: "Get Upcoming Obligations", name: GetUpcomingObligationsTool.name, description: GetUpcomingObligationsTool.description, inputSchema: GetUpcomingObligationsTool.inputSchema, execute: (input, api) => GetUpcomingObligationsTool.execute(input, api) },
     { title: "Get Goal Progress Summary", name: GetGoalProgressSummaryTool.name, description: GetGoalProgressSummaryTool.description, inputSchema: GetGoalProgressSummaryTool.inputSchema, execute: (input, api) => GetGoalProgressSummaryTool.execute(input, api) },
     { title: "Get Budget Cleanup Summary", name: GetBudgetCleanupSummaryTool.name, description: GetBudgetCleanupSummaryTool.description, inputSchema: GetBudgetCleanupSummaryTool.inputSchema, execute: (input, api) => GetBudgetCleanupSummaryTool.execute(input, api) },
     { title: "Get Income Summary", name: GetIncomeSummaryTool.name, description: GetIncomeSummaryTool.description, inputSchema: GetIncomeSummaryTool.inputSchema, execute: (input, api) => GetIncomeSummaryTool.execute(input, api) },
+    { title: "Get Emergency Fund Coverage", name: GetEmergencyFundCoverageTool.name, description: GetEmergencyFundCoverageTool.description, inputSchema: GetEmergencyFundCoverageTool.inputSchema, execute: (input, api) => GetEmergencyFundCoverageTool.execute(input, api) },
+    { title: "Get Debt Summary", name: GetDebtSummaryTool.name, description: GetDebtSummaryTool.description, inputSchema: GetDebtSummaryTool.inputSchema, execute: (input, api) => GetDebtSummaryTool.execute(input, api) },
+    { title: "Get Recurring Expense Summary", name: GetRecurringExpenseSummaryTool.name, description: GetRecurringExpenseSummaryTool.description, inputSchema: GetRecurringExpenseSummaryTool.inputSchema, execute: (input, api) => GetRecurringExpenseSummaryTool.execute(input, api) },
     { title: "Get Category Trend Summary", name: GetCategoryTrendSummaryTool.name, description: GetCategoryTrendSummaryTool.description, inputSchema: GetCategoryTrendSummaryTool.inputSchema, execute: (input, api) => GetCategoryTrendSummaryTool.execute(input, api) },
     { title: "Get 70/20/10 Summary", name: GetBudgetRatioSummaryTool.name, description: GetBudgetRatioSummaryTool.description, inputSchema: GetBudgetRatioSummaryTool.inputSchema, execute: (input, api) => GetBudgetRatioSummaryTool.execute(input, api) },
 ];
