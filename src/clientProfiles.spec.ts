@@ -10,6 +10,19 @@ import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProf
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 
 describe("client profiles", () => {
+  function createRequestContext(overrides: Partial<{
+    headers: Record<string, string | string[] | undefined>;
+    method: string;
+    path: string;
+  }> = {}) {
+    return {
+      headers: {},
+      method: "GET",
+      path: "/mcp",
+      ...overrides,
+    };
+  }
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -58,33 +71,144 @@ describe("client profiles", () => {
   });
 
   it("detects ChatGPT setup requests from the root protected-resource probe path", () => {
-    expect(detectClientProfile({
-      headers: {},
-      method: "GET",
+    expect(detectClientProfile(createRequestContext({
       path: "/.well-known/oauth-protected-resource",
-    })).toEqual({
+    }))).toEqual({
       profileId: "chatgpt",
       reason: "path:chatgpt-protected-resource-probe",
     });
   });
 
+  it("detects ChatGPT OAuth-flow requests from an OpenAI MCP user agent across the route family", () => {
+    const headers = {
+      "user-agent": "openai-mcp/1.0.0",
+    };
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      path: "/.well-known/openid-configuration",
+    }))).toEqual({
+      profileId: "chatgpt",
+      reason: "user-agent:openai-mcp",
+    });
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      path: "/authorize",
+    }))).toEqual({
+      profileId: "chatgpt",
+      reason: "user-agent:openai-mcp",
+    });
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      path: "/oauth/callback",
+    }))).toEqual({
+      profileId: "chatgpt",
+      reason: "user-agent:openai-mcp",
+    });
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      method: "POST",
+      path: "/token",
+    }))).toEqual({
+      profileId: "chatgpt",
+      reason: "user-agent:openai-mcp",
+    });
+  });
+
+  it("detects ChatGPT OAuth-flow requests from chatgpt-branded user agents across the route family", () => {
+    const headers = {
+      "user-agent": "chatgpt-web/1.0",
+    };
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      path: "/.well-known/openid-configuration",
+    }))).toEqual({
+      profileId: "chatgpt",
+      reason: "user-agent:chatgpt",
+    });
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      path: "/authorize",
+    }))).toEqual({
+      profileId: "chatgpt",
+      reason: "user-agent:chatgpt",
+    });
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      path: "/oauth/callback",
+    }))).toEqual({
+      profileId: "chatgpt",
+      reason: "user-agent:chatgpt",
+    });
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      method: "POST",
+      path: "/token",
+    }))).toEqual({
+      profileId: "chatgpt",
+      reason: "user-agent:chatgpt",
+    });
+  });
+
   it("detects Codex setup requests from OAuth discovery probe paths", () => {
-    expect(detectClientProfile({
-      headers: {},
-      method: "GET",
+    expect(detectClientProfile(createRequestContext({
       path: "/.well-known/oauth-authorization-server/sse",
-    })).toEqual({
+    }))).toEqual({
       profileId: "codex",
       reason: "path:codex-oauth-probe",
     });
 
-    expect(detectClientProfile({
-      headers: {},
-      method: "GET",
+    expect(detectClientProfile(createRequestContext({
       path: "/sse/.well-known/oauth-authorization-server",
-    })).toEqual({
+    }))).toEqual({
       profileId: "codex",
       reason: "path:codex-oauth-probe",
+    });
+  });
+
+  it("detects Codex OAuth-flow requests from a Codex user agent across the route family", () => {
+    const headers = {
+      "user-agent": "OpenAI Codex/0.1.0",
+    };
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      path: "/.well-known/openid-configuration",
+    }))).toEqual({
+      profileId: "codex",
+      reason: "user-agent:codex",
+    });
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      path: "/authorize",
+    }))).toEqual({
+      profileId: "codex",
+      reason: "user-agent:codex",
+    });
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      path: "/oauth/callback",
+    }))).toEqual({
+      profileId: "codex",
+      reason: "user-agent:codex",
+    });
+
+    expect(detectClientProfile(createRequestContext({
+      headers,
+      method: "POST",
+      path: "/token",
+    }))).toEqual({
+      profileId: "codex",
+      reason: "user-agent:codex",
     });
   });
 

@@ -3,6 +3,12 @@ import type { DetectedClientProfile, RequestContext } from "./types.js";
 
 export function detectClientProfile(context: RequestContext): DetectedClientProfile {
   for (const profile of getPreAuthDetectionProfiles()) {
+    const detectedProfile = profile.detectPreAuth?.(context);
+
+    if (detectedProfile) {
+      return detectedProfile;
+    }
+
     if (profile.matchesPreAuth(context)) {
       return {
         profileId: profile.id,
