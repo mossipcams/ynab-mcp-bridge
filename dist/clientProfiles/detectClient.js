@@ -1,70 +1,26 @@
-const CHATGPT_DISCOVERY_PATHS = new Set([
-    "/.well-known/oauth-protected-resource",
-]);
-const CODEX_DISCOVERY_PATHS = new Set([
-    "/.well-known/oauth-authorization-server/sse",
-    "/sse/.well-known/oauth-authorization-server",
-]);
-function getFirstHeaderValue(value) {
-    if (typeof value === "string") {
-        return value.split(",")[0]?.trim();
-    }
-    return value?.[0]?.split(",")[0]?.trim();
-}
+import { getInitializeDetectionProfiles, getPreAuthDetectionProfiles } from "./index.js";
 export function detectClientProfile(context) {
-    const origin = getFirstHeaderValue(context.headers.origin)?.toLowerCase();
-    if (origin === "https://claude.ai") {
-        return {
-            profileId: "claude",
-            reason: "origin:claude.ai",
-        };
-    }
-    if (CHATGPT_DISCOVERY_PATHS.has(context.path)) {
-        return {
-            profileId: "chatgpt",
-            reason: "path:chatgpt-protected-resource-probe",
-        };
-    }
-    if (CODEX_DISCOVERY_PATHS.has(context.path)) {
-        return {
-            profileId: "codex",
-            reason: "path:codex-oauth-probe",
-        };
+    for (const profile of getPreAuthDetectionProfiles()) {
+        if (profile.matchesPreAuth(context)) {
+            return {
+                profileId: profile.id,
+                reason: profile.detection?.preAuthReason ?? `profile:${profile.id}`,
+            };
+        }
     }
     return {
         profileId: "generic",
         reason: "fallback:generic",
     };
 }
-function getClientInfoName(clientInfo) {
-    if (!clientInfo || typeof clientInfo !== "object") {
-        return undefined;
-    }
-    const name = clientInfo.name;
-    return typeof name === "string" ? name.toLowerCase() : undefined;
-}
 export function detectInitializeClientProfile(input) {
-    const clientName = getClientInfoName(input.clientInfo);
-    if (!clientName) {
-        return undefined;
-    }
-    if (clientName.includes("chatgpt") || clientName.includes("openai-mcp")) {
-        return {
-            profileId: "chatgpt",
-            reason: "initialize:client-info",
-        };
-    }
-    if (clientName.includes("codex")) {
-        return {
-            profileId: "codex",
-            reason: "initialize:client-info",
-        };
-    }
-    if (clientName.includes("claude")) {
-        return {
-            profileId: "claude",
-            reason: "initialize:client-info",
-        };
+    for (const profile of getInitializeDetectionProfiles()) {
+        if (profile.matchesInitialize(input.clientInfo, input.capabilities)) {
+            return {
+                profileId: profile.id,
+                reason: profile.detection?.initializeReason ?? "initialize:client-info",
+            };
+        }
     }
     return undefined;
 }

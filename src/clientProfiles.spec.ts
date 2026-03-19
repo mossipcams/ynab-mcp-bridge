@@ -142,6 +142,14 @@ describe("client profiles", () => {
         requireStatelessPostOnly: true,
       },
     });
+
+    expect(profile.matchesPreAuth({
+      headers: {
+        origin: "https://claude.ai",
+      },
+      method: "POST",
+      path: "/mcp",
+    })).toBe(true);
   });
 
   it("exposes a Codex profile that tolerates extra OAuth discovery probes safely", () => {
@@ -165,6 +173,31 @@ describe("client profiles", () => {
         preferJsonResponse: true,
         requireStatelessPostOnly: true,
       },
+    });
+
+    expect(profile.matchesPreAuth({
+      headers: {},
+      method: "GET",
+      path: "/.well-known/oauth-authorization-server/sse",
+    })).toBe(true);
+
+    expect(profile.matchesPreAuth({
+      headers: {},
+      method: "GET",
+      path: "/sse/.well-known/oauth-authorization-server",
+    })).toBe(true);
+  });
+
+  it("keeps the documented pre-auth precedence when multiple profiles could match", () => {
+    expect(detectClientProfile({
+      headers: {
+        origin: "https://claude.ai",
+      },
+      method: "GET",
+      path: "/.well-known/oauth-authorization-server/sse",
+    })).toEqual({
+      profileId: "claude",
+      reason: "origin:claude.ai",
     });
   });
 
@@ -196,6 +229,10 @@ describe("client profiles", () => {
   });
 
   it("detects a profile from initialize clientInfo and capabilities when available", () => {
+    const chatgptMatchesInitializeSpy = vi.spyOn(getClientProfile("chatgpt"), "matchesInitialize");
+    const codexMatchesInitializeSpy = vi.spyOn(getClientProfile("codex"), "matchesInitialize");
+    const claudeMatchesInitializeSpy = vi.spyOn(getClientProfile("claude"), "matchesInitialize");
+
     expect(detectInitializeClientProfile({
       capabilities: {},
       clientInfo: {
@@ -217,6 +254,10 @@ describe("client profiles", () => {
       profileId: "chatgpt",
       reason: "initialize:client-info",
     });
+    expect(chatgptMatchesInitializeSpy).toHaveBeenCalledWith({
+      name: "ChatGPT",
+      version: "1.0.0",
+    }, {});
 
     expect(detectInitializeClientProfile({
       capabilities: {
@@ -230,6 +271,12 @@ describe("client profiles", () => {
       profileId: "codex",
       reason: "initialize:client-info",
     });
+    expect(codexMatchesInitializeSpy).toHaveBeenCalledWith({
+      name: "OpenAI Codex",
+      version: "1.0.0",
+    }, {
+      roots: {},
+    });
 
     expect(detectInitializeClientProfile({
       capabilities: {},
@@ -241,6 +288,10 @@ describe("client profiles", () => {
       profileId: "claude",
       reason: "initialize:client-info",
     });
+    expect(claudeMatchesInitializeSpy).toHaveBeenCalledWith({
+      name: "Claude Desktop",
+      version: "1.0.0",
+    }, {});
   });
 
   it("promotes a generic provisional profile when initialize detection is more specific", () => {

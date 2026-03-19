@@ -24,6 +24,7 @@ For each task after approval:
 ## Branch Rules
 
 For implementation work, always start a new branch from `main` unless the user explicitly says otherwise.
+When starting a new branch, first update or rebase from the latest `main` so the branch begins from current `main` unless the user explicitly says otherwise.
 If the current branch is not `main`, do not switch branches automatically when that could disturb existing work; pause and confirm first.
 Use `git worktree` when it makes sense to keep branch-based work isolated without disturbing the current working tree.
 
