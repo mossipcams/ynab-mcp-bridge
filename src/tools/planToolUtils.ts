@@ -1,7 +1,7 @@
 import { getYnabApiRuntimeContext } from "../ynabApi.js";
 import { getErrorMessage } from "./errorUtils.js";
 
-export function getPlanId(inputPlanId?: string, configuredPlanId?: string): string {
+function _getPlanId(inputPlanId?: string, configuredPlanId?: string): string {
   const planId = inputPlanId?.trim() || configuredPlanId?.trim() || "";
   if (!planId) {
     throw new Error("No plan ID provided. Please provide a plan ID or set YNAB_PLAN_ID.");
@@ -92,7 +92,7 @@ function isMissingPlanError(error: unknown) {
   return message.includes("not found") || message.includes("no entity was found");
 }
 
-export async function resolvePlanId(
+async function resolvePlanId(
   inputPlanId: string | undefined,
   api: PlanResolverApi,
   options: ResolvePlanIdOptions = {},
@@ -142,21 +142,29 @@ export async function withResolvedPlan<T>(
   }
 }
 
-export function toTextResult(payload: unknown) {
+type OutputFormat = "compact" | "pretty";
+
+function serializePayload(payload: unknown, format: OutputFormat) {
+  return format === "pretty"
+    ? JSON.stringify(payload, null, 2)
+    : JSON.stringify(payload);
+}
+
+export function toTextResult(payload: unknown, format: OutputFormat = "compact") {
   return {
     content: [{
       type: "text" as const,
-      text: JSON.stringify(payload, null, 2),
+      text: serializePayload(payload, format),
     }],
   };
 }
 
-export function toErrorResult(error: unknown) {
+export function toErrorResult(error: unknown, format: OutputFormat = "compact") {
   return {
     isError: true,
     ...toTextResult({
       success: false,
       error: getErrorMessage(error),
-    }),
+    }, format),
   };
 }
