@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   validate-pr-title:
+    if: ${{ !startsWith(github.event.pull_request.head.ref, 'release-please--') }}
     runs-on: ubuntu-latest
     steps:
       - name: Validate releasable conventional commit title

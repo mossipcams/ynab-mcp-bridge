@@ -255,4 +255,14 @@ describe("code quality guardrails", () => {
     expect(workflow).toContain("github.event_name != 'pull_request'");
     expect(workflow).toContain("!startsWith(github.event.pull_request.head.ref, 'release-please--')");
   });
+
+  it("skips the normal PR title validator for Release Please PR branches", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/validate-pr-title.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(workflow).toContain("if:");
+    expect(workflow).toContain("!startsWith(github.event.pull_request.head.ref, 'release-please--')");
+  });
 });
