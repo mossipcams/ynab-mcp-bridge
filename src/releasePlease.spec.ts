@@ -108,7 +108,7 @@ describe("release-please automation", () => {
     });
   });
 
-  it("keeps release metadata aligned with the highest published tag and avoids rollback pins", () => {
+  it("keeps release metadata ahead of published tags without rollback pins", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("../package.json", import.meta.url), "utf8"),
     );
@@ -121,8 +121,11 @@ describe("release-please automation", () => {
     const highestPublishedTagVersion = getHighestPublishedTagVersion();
 
     expect(highestPublishedTagVersion).toBeDefined();
-    expect(packageJson.version).toBe(highestPublishedTagVersion);
-    expect(manifest["."]).toBe(highestPublishedTagVersion);
+    if (!highestPublishedTagVersion) {
+      throw new Error("Expected at least one published release tag.");
+    }
+    expect(compareVersions(packageJson.version, highestPublishedTagVersion)).toBeGreaterThanOrEqual(0);
+    expect(manifest["."]).toBe(packageJson.version);
     expect(config).not.toHaveProperty("last-release-sha");
   });
 

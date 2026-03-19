@@ -5,4 +5,5 @@ node_modules
 logs
 data
 coverage
+artifacts
 .claude

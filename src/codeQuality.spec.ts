@@ -90,6 +90,7 @@ describe("code quality guardrails", () => {
     const testsIndex = workflow.indexOf("Run tests");
     const dependencyRulesIndex = workflow.indexOf("Run dependency rules");
     const eslintIndex = workflow.indexOf("Run ESLint");
+    const typecheckIndex = workflow.indexOf("Run TypeScript typecheck");
     const knipIndex = workflow.indexOf("Run Knip");
     const buildIndex = workflow.indexOf("Build package");
 
@@ -97,7 +98,130 @@ describe("code quality guardrails", () => {
     expect(testsIndex).toBeGreaterThan(installIndex);
     expect(dependencyRulesIndex).toBeGreaterThan(testsIndex);
     expect(eslintIndex).toBeGreaterThan(dependencyRulesIndex);
-    expect(knipIndex).toBeGreaterThan(eslintIndex);
+    expect(typecheckIndex).toBeGreaterThan(eslintIndex);
+    expect(knipIndex).toBeGreaterThan(typecheckIndex);
     expect(buildIndex).toBeGreaterThan(knipIndex);
+  });
+
+  it("defines a dedicated typecheck that includes test files in package scripts and CI", () => {
+    expect(existsSync(new URL("../tsconfig.test.json", import.meta.url))).toBe(true);
+
+    const testTsconfig = readFileSync(
+      new URL("../tsconfig.test.json", import.meta.url),
+      "utf8",
+    );
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(testTsconfig).toContain("\"**/*.spec.ts\"");
+    expect(testTsconfig).not.toContain("\"**/*.test.ts\"");
+    expect(packageJson.scripts.typecheck).toContain("tsconfig.test.json");
+    expect(workflow).toContain("Run TypeScript typecheck");
+    expect(workflow).toContain("npm run typecheck");
+  });
+
+  it("lints spec files with test-specific overrides instead of ignoring them", () => {
+    const eslintConfig = readFileSync(
+      new URL("../eslint.config.mjs", import.meta.url),
+      "utf8",
+    );
+    const topLevelIgnoreBlock = eslintConfig
+      .split("export default [")[1]
+      ?.split("js.configs.recommended")[0] ?? "";
+
+    expect(topLevelIgnoreBlock).not.toContain('"src/**/*.spec.ts"');
+    expect(eslintConfig).toContain('files: ["src/**/*.spec.ts"]');
+    expect(eslintConfig).toContain('project: "./tsconfig.test.json"');
+    expect(eslintConfig).toContain("describe");
+    expect(eslintConfig).toContain("it");
+    expect(eslintConfig).toContain("expect");
+  });
+
+  it("emits machine-readable test reports and uploads them from CI", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(packageJson.scripts["test:ci"]).toContain("--reporter=junit");
+    expect(packageJson.scripts["test:ci"]).toContain("--outputFile.junit=");
+    expect(workflow).toContain("npm run test:ci");
+    expect(workflow).toContain("actions/upload-artifact@v4");
+    expect(workflow).toContain("artifacts/test-results");
+  });
+
+  it("enforces coverage thresholds in Vitest and CI", () => {
+    const vitestConfig = readFileSync(
+      new URL("../vitest.config.ts", import.meta.url),
+      "utf8",
+    );
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(vitestConfig).toContain("thresholds");
+    expect(vitestConfig).toContain("lines");
+    expect(vitestConfig).toContain("functions");
+    expect(vitestConfig).toContain("branches");
+    expect(vitestConfig).toContain("statements");
+    expect(packageJson.scripts["test:coverage"]).toContain("--coverage");
+    expect(workflow).toContain("npm run test:coverage");
+  });
+
+  it("cancels stale CI runs and avoids duplicate branch pushes for pull requests", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(workflow).toContain("concurrency:");
+    expect(workflow).toContain("cancel-in-progress: true");
+    expect(workflow).toContain("group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}");
+    expect(workflow).toContain("push:");
+    expect(workflow).toContain("branches:");
+    expect(workflow).toContain("- main");
+  });
+
+  it("uses explicit least-privilege workflow permissions for CI", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(workflow).toContain("permissions:");
+    expect(workflow).toContain("contents: read");
+  });
+
+  it("assigns workflow files to a code owner", () => {
+    expect(existsSync(new URL("../.github/CODEOWNERS", import.meta.url))).toBe(true);
+
+    const codeowners = readFileSync(
+      new URL("../.github/CODEOWNERS", import.meta.url),
+      "utf8",
+    );
+
+    expect(codeowners).toContain(".github/workflows/");
+    expect(codeowners).toContain("@mossipcams");
+  });
+
+  it("ignores generated CI artifacts in git", () => {
+    const gitignore = readFileSync(
+      new URL("../.gitignore", import.meta.url),
+      "utf8",
+    );
+
+    expect(gitignore).toContain("artifacts");
   });
 });

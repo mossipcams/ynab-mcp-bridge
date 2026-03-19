@@ -1545,6 +1545,9 @@ describe("startHttpServer", () => {
       auth: {
         audience: "https://mcp.example.com/mcp",
         authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oauth2/auth",
+        callbackPath: "/oauth/callback",
+        clientId: "cloudflare-client-id",
+        clientSecret: "cloudflare-client-secret",
         deployment: "oauth-single-tenant",
         issuer: "https://example.cloudflareaccess.com",
         jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/certs",
