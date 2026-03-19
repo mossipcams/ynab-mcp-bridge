@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.2...ynab-mcp-bridge-v0.10.3) (2026-03-19)
+
+
+### Bug Fixes
+
+* route client detection through profile matchers ([#130](https://github.com/mossipcams/ynab-mcp-bridge/issues/130)) ([a7ff140](https://github.com/mossipcams/ynab-mcp-bridge/commit/a7ff1401297da43973bed068094f86188ffcbb96))
+
 ## [0.10.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.1...ynab-mcp-bridge-v0.10.2) (2026-03-19)
 
 
