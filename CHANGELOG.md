@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.6](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.5...ynab-mcp-bridge-v0.10.6) (2026-03-19)
+
+
+### Bug Fixes
+
+* stabilize oauth client profile detection across routes ([#141](https://github.com/mossipcams/ynab-mcp-bridge/issues/141)) ([3d84005](https://github.com/mossipcams/ynab-mcp-bridge/commit/3d84005cc92a3cf63146b8159a8fba7c4f03de6d))
+* stop release please validation placeholders ([#143](https://github.com/mossipcams/ynab-mcp-bridge/issues/143)) ([2418b9b](https://github.com/mossipcams/ynab-mcp-bridge/commit/2418b9b325bfbf5d506f76a8a8f5c16205744c2d))
+
 ## [0.10.5](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.4...ynab-mcp-bridge-v0.10.5) (2026-03-19)
 
 
