@@ -5,6 +5,8 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter, } from "@modelcont
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
+import { detectClientProfile, detectInitializeClientProfile, } from "./clientProfiles/detectClient.js";
+import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import { createOAuthBroker } from "./oauthBroker.js";
 import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { createServer } from "./server.js";
@@ -147,6 +149,34 @@ function getJsonRpcDebugDetails(parsedBody) {
     }
     return details;
 }
+function getInitializeParams(parsedBody) {
+    if (!parsedBody || typeof parsedBody !== "object") {
+        return undefined;
+    }
+    const request = parsedBody;
+    if (request.method !== "initialize" || !request.params || typeof request.params !== "object") {
+        return undefined;
+    }
+    return request.params;
+}
+function setResolvedClientProfile(res, profile) {
+    res.locals.clientProfile = profile;
+}
+function getResolvedClientProfile(res) {
+    const profile = res.locals.clientProfile;
+    if (!profile || typeof profile !== "object") {
+        return undefined;
+    }
+    const profileId = profile.profileId;
+    const reason = profile.reason;
+    if (typeof profileId !== "string" || typeof reason !== "string") {
+        return undefined;
+    }
+    return {
+        profileId,
+        reason,
+    };
+}
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (Array.isArray(sessionId)) {
@@ -251,6 +281,23 @@ export async function startHttpServer(options) {
         logHttpDebug("request.received", getRequestDebugDetails(req));
         next();
     });
+    app.use((req, res, next) => {
+        const detectedProfile = detectClientProfile({
+            headers: req.headers,
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+        });
+        setResolvedClientProfile(res, detectedProfile);
+        if (detectedProfile.profileId !== "generic") {
+            logClientProfileEvent("profile.detected", {
+                method: req.method ?? "GET",
+                path: getRequestPath(req),
+                profileId: detectedProfile.profileId,
+                reason: detectedProfile.reason,
+            });
+        }
+        next();
+    });
     app.use((_req, res, next) => {
         const originalSetHeader = res.setHeader.bind(res);
         res.setHeader = ((name, value) => {
@@ -270,6 +317,9 @@ export async function startHttpServer(options) {
     }
     app.use((req, res, next) => {
         const resolution = resolveOriginPolicy({
+            allowNullOrigin: auth.mode === "oauth" &&
+                req.method === "POST" &&
+                getRequestPath(req) === "/authorize/consent",
             allowedOrigins,
             headers: req.headers,
         });
@@ -290,6 +340,20 @@ export async function startHttpServer(options) {
     });
     if (auth.mode === "oauth") {
         const publicServerUrl = getPublicResourceServerUrl(auth);
+        const protectedResourceMetadata = {
+            authorization_servers: [oauthBroker.getIssuerUrl().href],
+            resource: publicServerUrl.href,
+            resource_name: "YNAB MCP Bridge",
+            scopes_supported: auth.scopes.length > 0 ? auth.scopes : undefined,
+        };
+        app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
+            const resolvedProfile = getResolvedClientProfile(res);
+            if (resolvedProfile?.profileId !== "chatgpt") {
+                next();
+                return;
+            }
+            res.status(200).json(protectedResourceMetadata);
+        });
         app.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
         app.post("/authorize/consent", urlencodedParser, oauthBroker.handleConsent);
         app.use(mcpAuthRouter({
@@ -382,10 +446,29 @@ export async function startHttpServer(options) {
             res.once("close", () => {
                 void cleanup();
             });
+            const initializeParams = getInitializeParams(parsedBody);
+            if (initializeParams) {
+                const detectedProfile = detectInitializeClientProfile({
+                    capabilities: initializeParams.capabilities,
+                    clientInfo: initializeParams.clientInfo,
+                });
+                if (detectedProfile) {
+                    setResolvedClientProfile(res, detectedProfile);
+                    logClientProfileEvent("profile.detected", {
+                        method: req.method ?? "GET",
+                        path: getRequestPath(req),
+                        profileId: detectedProfile.profileId,
+                        reason: detectedProfile.reason,
+                    });
+                }
+            }
+            const resolvedProfile = getResolvedClientProfile(res);
             logHttpDebug("transport.handoff", {
                 ...getRequestDebugDetails(req),
                 ...getJsonRpcDebugDetails(parsedBody),
                 cleanup: Boolean(resolution.cleanup),
+                profileId: resolvedProfile?.profileId,
+                profileReason: resolvedProfile?.reason,
             });
             applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
             await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);

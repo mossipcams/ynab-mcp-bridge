@@ -20,6 +20,11 @@ import {
   type RuntimeAuthConfig,
   type YnabConfig,
 } from "./config.js";
+import {
+  detectClientProfile,
+  detectInitializeClientProfile,
+} from "./clientProfiles/detectClient.js";
+import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import { createOAuthBroker } from "./oauthBroker.js";
 import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { createServer } from "./server.js";
@@ -65,6 +70,12 @@ type HttpDebugDetails = Record<string, unknown>;
 type JsonRpcRequestLike = {
   id?: unknown;
   method?: unknown;
+  params?: unknown;
+};
+
+type InitializeParamsLike = {
+  capabilities?: unknown;
+  clientInfo?: unknown;
 };
 
 function applyCloudflareAccessAuthorizationHeader(req: Pick<Request, "headers">) {
@@ -242,6 +253,47 @@ function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
   return details;
 }
 
+function getInitializeParams(parsedBody: unknown) {
+  if (!parsedBody || typeof parsedBody !== "object") {
+    return undefined;
+  }
+
+  const request = parsedBody as JsonRpcRequestLike;
+
+  if (request.method !== "initialize" || !request.params || typeof request.params !== "object") {
+    return undefined;
+  }
+
+  return request.params as InitializeParamsLike;
+}
+
+function setResolvedClientProfile(res: Response, profile: {
+  profileId: string;
+  reason: string;
+}) {
+  (res.locals as Record<string, unknown>).clientProfile = profile;
+}
+
+function getResolvedClientProfile(res: Response) {
+  const profile = (res.locals as Record<string, unknown>).clientProfile;
+
+  if (!profile || typeof profile !== "object") {
+    return undefined;
+  }
+
+  const profileId = (profile as { profileId?: unknown }).profileId;
+  const reason = (profile as { reason?: unknown }).reason;
+
+  if (typeof profileId !== "string" || typeof reason !== "string") {
+    return undefined;
+  }
+
+  return {
+    profileId,
+    reason,
+  };
+}
+
 function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">) {
   const sessionId = req.headers["mcp-session-id"];
 
@@ -379,6 +431,27 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     next();
   });
 
+  app.use((req, res, next) => {
+    const detectedProfile = detectClientProfile({
+      headers: req.headers as Record<string, string | string[] | undefined>,
+      method: req.method ?? "GET",
+      path: getRequestPath(req),
+    });
+
+    setResolvedClientProfile(res, detectedProfile);
+
+    if (detectedProfile.profileId !== "generic") {
+      logClientProfileEvent("profile.detected", {
+        method: req.method ?? "GET",
+        path: getRequestPath(req),
+        profileId: detectedProfile.profileId,
+        reason: detectedProfile.reason,
+      });
+    }
+
+    next();
+  });
+
   app.use((_req, res, next) => {
     const originalSetHeader = res.setHeader.bind(res);
 
@@ -404,6 +477,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   app.use((req, res, next) => {
     const resolution = resolveOriginPolicy({
+      allowNullOrigin: auth.mode === "oauth" &&
+        req.method === "POST" &&
+        getRequestPath(req) === "/authorize/consent",
       allowedOrigins,
       headers: req.headers,
     });
@@ -429,6 +505,23 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   if (auth.mode === "oauth") {
     const publicServerUrl = getPublicResourceServerUrl(auth);
+    const protectedResourceMetadata = {
+      authorization_servers: [oauthBroker!.getIssuerUrl().href],
+      resource: publicServerUrl.href,
+      resource_name: "YNAB MCP Bridge",
+      scopes_supported: auth.scopes.length > 0 ? auth.scopes : undefined,
+    };
+
+    app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
+      const resolvedProfile = getResolvedClientProfile(res);
+
+      if (resolvedProfile?.profileId !== "chatgpt") {
+        next();
+        return;
+      }
+
+      res.status(200).json(protectedResourceMetadata);
+    });
 
     app.use(oauthBroker!.callbackPath, oauthBroker!.handleCallback);
     app.post("/authorize/consent", urlencodedParser, oauthBroker!.handleConsent);
@@ -543,10 +636,32 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       res.once("close", () => {
         void cleanup();
       });
+      const initializeParams = getInitializeParams(parsedBody);
+
+      if (initializeParams) {
+        const detectedProfile = detectInitializeClientProfile({
+          capabilities: initializeParams.capabilities,
+          clientInfo: initializeParams.clientInfo,
+        });
+
+        if (detectedProfile) {
+          setResolvedClientProfile(res, detectedProfile);
+          logClientProfileEvent("profile.detected", {
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+            profileId: detectedProfile.profileId,
+            reason: detectedProfile.reason,
+          });
+        }
+      }
+
+      const resolvedProfile = getResolvedClientProfile(res);
       logHttpDebug("transport.handoff", {
         ...getRequestDebugDetails(req),
         ...getJsonRpcDebugDetails(parsedBody),
         cleanup: Boolean(resolution.cleanup),
+        profileId: resolvedProfile?.profileId,
+        profileReason: resolvedProfile?.reason,
       });
       applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
       await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);

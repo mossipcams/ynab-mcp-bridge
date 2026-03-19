@@ -39,6 +39,12 @@ export function resolveOriginPolicy(input) {
             responseOrigin: undefined,
         };
     }
+    if (originHeader === "null") {
+        return {
+            allowed: input.allowNullOrigin === true,
+            responseOrigin: undefined,
+        };
+    }
     try {
         const normalizedOrigin = normalizeOrigin(originHeader);
         if (input.allowedOrigins.has(normalizedOrigin)) {

@@ -282,13 +282,24 @@ export function createOAuthBroker(config) {
     const handleCallback = async (req, res, next) => {
         try {
             const upstreamState = typeof req.query.state === "string" ? req.query.state : undefined;
+            const upstreamError = typeof req.query.error === "string" ? req.query.error : undefined;
+            const upstreamErrorDescription = typeof req.query.error_description === "string"
+                ? req.query.error_description
+                : undefined;
+            if (!upstreamState && upstreamError) {
+                res.status(400).json({
+                    error: upstreamError,
+                    error_description: upstreamErrorDescription,
+                });
+                return;
+            }
             if (!upstreamState) {
                 throw new InvalidRequestError("Missing upstream OAuth state.");
             }
             const result = await core.handleCallback({
                 code: typeof req.query.code === "string" && req.query.code.length > 0 ? req.query.code : undefined,
-                error: typeof req.query.error === "string" ? req.query.error : undefined,
-                errorDescription: typeof req.query.error_description === "string" ? req.query.error_description : undefined,
+                error: upstreamError,
+                errorDescription: upstreamErrorDescription,
                 upstreamState,
             });
             res.redirect(302, result.location);

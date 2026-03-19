@@ -36,6 +36,20 @@ describe("startHttpServer", () => {
     ));
   }
 
+  function findProfileLogCall(
+    spy: ReturnType<typeof vi.spyOn>,
+    event: string,
+    matcher: (details: Record<string, unknown>) => boolean = () => true,
+  ) {
+    return spy.mock.calls.find(([scope, loggedEvent, details]) => (
+      scope === "[profile]" &&
+      loggedEvent === event &&
+      typeof details === "object" &&
+      details !== null &&
+      matcher(details as Record<string, unknown>)
+    ));
+  }
+
   async function sendRawHttpRequest(url: string, options: {
     body?: string;
     headers?: Record<string, string>;
@@ -262,6 +276,108 @@ describe("startHttpServer", () => {
     ))).toBeTruthy();
   });
 
+  it("classifies ChatGPT initialize traffic with a dedicated profile", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "ChatGPT",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.profileId === "chatgpt" &&
+      details.reason === "initialize:client-info"
+    ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.path === "/mcp" &&
+      details.jsonRpcMethod === "initialize" &&
+      details.profileId === "chatgpt" &&
+      details.profileReason === "initialize:client-info"
+    ))).toBeTruthy();
+  });
+
+  it("classifies Claude initialize traffic with a dedicated profile", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "Claude Desktop",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.profileId === "claude" &&
+      details.reason === "initialize:client-info"
+    ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.path === "/mcp" &&
+      details.jsonRpcMethod === "initialize" &&
+      details.profileId === "claude" &&
+      details.profileReason === "initialize:client-info"
+    ))).toBeTruthy();
+  });
+
   it("supports browser preflight requests", async () => {
     const httpServer = await startHttpServer({
       ynab,
@@ -372,6 +488,42 @@ describe("startHttpServer", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
+  });
+
+  it("serves OAuth protected resource metadata on the ChatGPT root probe path in oauth mode", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(new URL("/.well-known/oauth-protected-resource", httpServer.url), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      authorization_servers: ["https://mcp.example.com/"],
+      resource: "https://mcp.example.com/mcp",
+      scopes_supported: ["openid", "profile"],
+    });
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/.well-known/oauth-protected-resource" &&
+      details.method === "GET" &&
+      details.profileId === "chatgpt" &&
+      details.reason === "path:chatgpt-protected-resource-probe"
+    ))).toBeTruthy();
   });
 
   it("still applies origin validation to path-aware probing URLs", async () => {
@@ -1560,6 +1712,46 @@ describe("startHttpServer", () => {
     expect(redirectUrl.searchParams.get("state")).toBeTruthy();
   });
 
+  it("allows Origin: null only for OAuth consent submission", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    const consentBody = await authorizeResponse.text();
+
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, consentBody, {
+      origin: "null",
+    });
+
+    expect(consentResponse.status).toBe(302);
+    expect(consentResponse.headers.get("location")).toContain("/authorize");
+
+    const metadataResponse = await fetch(new URL("/.well-known/oauth-authorization-server", httpServer.url), {
+      headers: {
+        Origin: "null",
+      },
+    });
+
+    expect(metadataResponse.status).toBe(403);
+    await expect(metadataResponse.json()).resolves.toEqual({
+      error: "Forbidden origin",
+    });
+  });
+
   it("escapes client metadata and sends hardened headers on the consent page", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
@@ -1660,6 +1852,78 @@ describe("startHttpServer", () => {
     expect(upstream.getLastTokenRequest()?.body.get("client_id")).toBe("cloudflare-client-id");
     expect(upstream.getLastTokenRequest()?.body.get("client_secret")).toBe("cloudflare-client-secret");
     expect(upstream.getLastTokenRequest()?.body.get("redirect_uri")).toBe("https://mcp.example.com/oauth/callback");
+  });
+
+  it("returns a structured OAuth error when the upstream callback omits state on an error response", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
+
+    expect(consentResponse.status).toBe(302);
+
+    const callbackResponse = await fetch(new URL(
+      "/oauth/callback?error=access_denied&error_description=User%20cancelled",
+      httpServer.url,
+    ), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(callbackResponse.status).toBe(400);
+    await expect(callbackResponse.json()).resolves.toEqual({
+      error: "access_denied",
+      error_description: "User cancelled",
+    });
+  });
+
+  it("still rejects successful upstream callbacks that omit state", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const callbackResponse = await fetch(new URL(
+      "/oauth/callback?code=upstream-code-123",
+      httpServer.url,
+    ), {
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(callbackResponse.status).toBe(400);
+    await expect(callbackResponse.json()).resolves.toMatchObject({
+      error: "invalid_request",
+      error_description: "Missing upstream OAuth state.",
+    });
   });
 
   it("exchanges a local authorization code for a bearer token and accepts it on MCP requests", async () => {
