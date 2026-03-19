@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   validate:
+    if: github.event_name != 'pull_request' || !startsWith(github.event.pull_request.head.ref, 'release-please--')
     runs-on: ubuntu-latest
 
     strategy:

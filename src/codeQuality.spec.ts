@@ -224,4 +224,35 @@ describe("code quality guardrails", () => {
 
     expect(gitignore).toContain("artifacts");
   });
+
+  it("defines dedicated required-check workflows for Release Please PRs", () => {
+    expect(
+      existsSync(new URL("../.github/workflows/release-please-pr-checks.yml", import.meta.url)),
+    ).toBe(true);
+
+    const workflow = readFileSync(
+      new URL("../.github/workflows/release-please-pr-checks.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(workflow).toContain("pull_request_target:");
+    expect(workflow).toContain("release-please--");
+    expect(workflow).toContain("validate-22");
+    expect(workflow).toContain("name: validate (22.x)");
+    expect(workflow).toContain("validate-24");
+    expect(workflow).toContain("name: validate (24.x)");
+    expect(workflow).toContain("validate-pr-title");
+    expect(workflow).toContain("name: validate-pr-title");
+  });
+
+  it("explicitly skips the main CI job for Release Please PR branches", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(workflow).toContain("if:");
+    expect(workflow).toContain("github.event_name != 'pull_request'");
+    expect(workflow).toContain("!startsWith(github.event.pull_request.head.ref, 'release-please--')");
+  });
 });
