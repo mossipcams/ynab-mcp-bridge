@@ -1,6 +1,10 @@
 import { getInitializeDetectionProfiles, getPreAuthDetectionProfiles } from "./index.js";
 export function detectClientProfile(context) {
     for (const profile of getPreAuthDetectionProfiles()) {
+        const detectedProfile = profile.detectPreAuth?.(context);
+        if (detectedProfile) {
+            return detectedProfile;
+        }
         if (profile.matchesPreAuth(context)) {
             return {
                 profileId: profile.id,

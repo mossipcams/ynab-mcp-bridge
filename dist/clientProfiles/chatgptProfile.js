@@ -1,4 +1,5 @@
 import { genericProfile } from "./genericProfile.js";
+import { getRequestUserAgent } from "./requestContext.js";
 const CHATGPT_DISCOVERY_PATHS = new Set([
     "/.well-known/oauth-protected-resource",
 ]);
@@ -9,7 +10,28 @@ export const chatgptProfile = {
         initializeReason: "initialize:client-info",
         preAuthReason: "path:chatgpt-protected-resource-probe",
     },
-    matchesPreAuth: (context) => CHATGPT_DISCOVERY_PATHS.has(context.path),
+    detectPreAuth: (context) => {
+        if (CHATGPT_DISCOVERY_PATHS.has(context.path)) {
+            return {
+                profileId: "chatgpt",
+                reason: "path:chatgpt-protected-resource-probe",
+            };
+        }
+        if (getRequestUserAgent(context)?.startsWith("openai-mcp/")) {
+            return {
+                profileId: "chatgpt",
+                reason: "user-agent:openai-mcp",
+            };
+        }
+        if (getRequestUserAgent(context)?.includes("chatgpt")) {
+            return {
+                profileId: "chatgpt",
+                reason: "user-agent:chatgpt",
+            };
+        }
+        return undefined;
+    },
+    matchesPreAuth: (context) => Boolean(chatgptProfile.detectPreAuth?.(context)),
     matchesInitialize: (clientInfo) => {
         const name = typeof clientInfo?.name === "string"
             ? clientInfo.name.toLowerCase()

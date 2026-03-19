@@ -11,3 +11,7 @@ function getFirstHeaderValue(value: string | string[] | undefined) {
 export function getRequestOrigin(context: RequestContext) {
   return getFirstHeaderValue(context.headers.origin)?.toLowerCase();
 }
+
+export function getRequestUserAgent(context: RequestContext) {
+  return getFirstHeaderValue(context.headers["user-agent"])?.toLowerCase();
+}
