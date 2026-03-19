@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.5](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.4...ynab-mcp-bridge-v0.10.5) (2026-03-19)
+
+
+### Bug Fixes
+
+* deduplicate header utilities and consolidate CORS handling ([#137](https://github.com/mossipcams/ynab-mcp-bridge/issues/137)) ([561dad5](https://github.com/mossipcams/ynab-mcp-bridge/commit/561dad5705fdb118612baeb2fe0ba5612b414518))
+* fetch tags in release-please smoke CI ([#139](https://github.com/mossipcams/ynab-mcp-bridge/issues/139)) ([bca0515](https://github.com/mossipcams/ynab-mcp-bridge/commit/bca0515c9fb785fb73286c7b3ff42f6cba8b025e))
+* restore required checks for release-please PRs ([#140](https://github.com/mossipcams/ynab-mcp-bridge/issues/140)) ([4e11334](https://github.com/mossipcams/ynab-mcp-bridge/commit/4e11334118427295cf07dae2fbd23576f3d18177))
+* simplify release-please PR CI ([#138](https://github.com/mossipcams/ynab-mcp-bridge/issues/138)) ([8a6e7e5](https://github.com/mossipcams/ynab-mcp-bridge/commit/8a6e7e5d4f71f98cffca8f6a6c838642e18f1e7e))
+* tighten dependency guardrails ([#135](https://github.com/mossipcams/ynab-mcp-bridge/issues/135)) ([cc2d36f](https://github.com/mossipcams/ynab-mcp-bridge/commit/cc2d36fdf5d7aca0affbc86de329e67ace34dbb7))
+
 ## [0.10.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.3...ynab-mcp-bridge-v0.10.4) (2026-03-19)
 
 
