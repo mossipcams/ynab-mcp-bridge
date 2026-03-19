@@ -1,4 +1,5 @@
 import { InvalidClientMetadataError, InvalidGrantError, InvalidRequestError, InvalidScopeError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { getEffectiveOAuthScopes } from "./config.js";
 function clampExpiresIn(expiresIn) {
     return Math.max(60, Math.min(expiresIn ?? 3600, 3600));
 }
@@ -101,7 +102,7 @@ export function createOAuthCore({ config, dependencies, store }) {
     }
     async function startAuthorization(client, params) {
         assertRegisteredRedirectUri(client, params.redirectUri);
-        const scopes = params.scopes && params.scopes.length > 0 ? params.scopes : config.defaultScopes;
+        const scopes = getEffectiveOAuthScopes(params.scopes && params.scopes.length > 0 ? params.scopes : config.defaultScopes);
         const resource = params.resource?.href ?? config.defaultResource;
         if (store.isClientApproved({
             clientId: client.client_id,
@@ -226,7 +227,7 @@ export function createOAuthCore({ config, dependencies, store }) {
                 expiresAt: dependencies.now() + 5 * 60 * 1000,
             },
             pendingAuthorization: undefined,
-            subject: grant.clientId,
+            principalId: grant.clientId,
             upstreamTokens,
         });
         const redirectUrl = new URL(grant.redirectUri);
@@ -265,7 +266,7 @@ export function createOAuthCore({ config, dependencies, store }) {
         if (resource?.href && resource.href !== grant.resource) {
             throw new InvalidGrantError("resource does not match the authorization request.");
         }
-        if (!grant.subject || !grant.upstreamTokens) {
+        if (!grant.principalId || !grant.upstreamTokens) {
             store.deleteGrant(grant.grantId);
             throw new InvalidGrantError("Authorization code is missing grant context.");
         }
@@ -274,9 +275,9 @@ export function createOAuthCore({ config, dependencies, store }) {
         const accessToken = await dependencies.mintAccessToken({
             clientId: grant.clientId,
             expiresInSeconds,
+            principalId: grant.principalId,
             resource: grant.resource,
             scopes: grant.scopes,
-            subject: grant.subject,
         });
         const refreshToken = dependencies.createId();
         store.saveGrant({
@@ -317,7 +318,7 @@ export function createOAuthCore({ config, dependencies, store }) {
             ...refreshedUpstreamTokens,
             refresh_token: refreshedUpstreamTokens.refresh_token ?? grant.upstreamTokens?.refresh_token,
         };
-        if (!grant.subject) {
+        if (!grant.principalId) {
             store.deleteGrant(grant.grantId);
             throw new InvalidGrantError("Refresh token is missing grant context.");
         }
@@ -325,9 +326,9 @@ export function createOAuthCore({ config, dependencies, store }) {
         const accessToken = await dependencies.mintAccessToken({
             clientId: grant.clientId,
             expiresInSeconds,
+            principalId: grant.principalId,
             resource: grant.resource,
             scopes: grantedScopes,
-            subject: grant.subject,
         });
         const nextRefreshToken = dependencies.createId();
         store.saveGrant({

@@ -41,7 +41,7 @@ export function resolveOriginPolicy(input) {
     }
     if (originHeader === "null") {
         return {
-            allowed: input.allowNullOrigin === true,
+            allowed: Boolean(input.allowOpaqueNullOrigin),
             responseOrigin: undefined,
         };
     }

@@ -150,6 +150,33 @@ describe("additional read-only tools", () => {
     });
   });
 
+  it("can still return the full account payload when explicitly requested", async () => {
+    const api = {
+      accounts: {
+        getAccountById: vi.fn().mockResolvedValue({
+          data: {
+            account: {
+              id: "acct-1",
+              name: "Checking",
+              note: "Primary account",
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetAccountTool.execute({ planId: "plan-1", accountId: "acct-1", view: "full" }, api as any);
+
+    expect(api.accounts.getAccountById).toHaveBeenCalledWith("plan-1", "acct-1");
+    expect(parseText(result)).toEqual({
+      account: {
+        id: "acct-1",
+        name: "Checking",
+        note: "Primary account",
+      },
+    });
+  });
+
   it("lists accounts for a plan", async () => {
     const api = {
       accounts: {

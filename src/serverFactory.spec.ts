@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { createServer, registerServerTools } from "./server.js";
 
 describe("createServer", () => {
@@ -18,7 +19,7 @@ describe("createServer", () => {
     });
     const registeredTools = Object.keys((server as any)._registeredTools);
 
-    expect(registeredTools).toHaveLength(39);
+    expect(registeredTools).toHaveLength(46);
     expect(registeredTools).toEqual(
       expect.arrayContaining([
         "ynab_get_mcp_version",
@@ -32,6 +33,7 @@ describe("createServer", () => {
         "ynab_get_category",
         "ynab_get_month_category",
         "ynab_list_transactions",
+        "ynab_search_transactions",
         "ynab_get_transactions_by_month",
         "ynab_get_transaction",
         "ynab_get_transactions_by_account",
@@ -51,13 +53,19 @@ describe("createServer", () => {
         "ynab_get_money_movement_groups",
         "ynab_get_money_movement_groups_by_month",
         "ynab_get_financial_snapshot",
+        "ynab_get_financial_health_check",
         "ynab_get_spending_summary",
+        "ynab_get_spending_anomalies",
         "ynab_get_cash_flow_summary",
+        "ynab_get_cash_runway",
         "ynab_get_budget_health_summary",
         "ynab_get_upcoming_obligations",
         "ynab_get_goal_progress_summary",
         "ynab_get_budget_cleanup_summary",
         "ynab_get_income_summary",
+        "ynab_get_emergency_fund_coverage",
+        "ynab_get_debt_summary",
+        "ynab_get_recurring_expense_summary",
         "ynab_get_category_trend_summary",
         "ynab_get_70_20_10_summary",
       ]),
@@ -74,7 +82,7 @@ describe("createServer", () => {
       {} as any,
     );
 
-    expect(registeredToolNames).toHaveLength(39);
+    expect(registeredToolNames).toHaveLength(46);
     expect(registeredToolNames).toEqual([
       "ynab_get_mcp_version",
       "ynab_get_user",
@@ -87,6 +95,7 @@ describe("createServer", () => {
       "ynab_get_category",
       "ynab_get_month_category",
       "ynab_list_transactions",
+      "ynab_search_transactions",
       "ynab_get_transactions_by_month",
       "ynab_get_transaction",
       "ynab_get_transactions_by_account",
@@ -106,17 +115,23 @@ describe("createServer", () => {
       "ynab_get_money_movement_groups",
       "ynab_get_money_movement_groups_by_month",
       "ynab_get_financial_snapshot",
+      "ynab_get_financial_health_check",
       "ynab_get_spending_summary",
+      "ynab_get_spending_anomalies",
       "ynab_get_cash_flow_summary",
+      "ynab_get_cash_runway",
       "ynab_get_budget_health_summary",
       "ynab_get_upcoming_obligations",
       "ynab_get_goal_progress_summary",
       "ynab_get_budget_cleanup_summary",
       "ynab_get_income_summary",
+      "ynab_get_emergency_fund_coverage",
+      "ynab_get_debt_summary",
+      "ynab_get_recurring_expense_summary",
       "ynab_get_category_trend_summary",
       "ynab_get_70_20_10_summary",
     ]);
-    expect(registerTool).toHaveBeenCalledTimes(39);
+    expect(registerTool).toHaveBeenCalledTimes(46);
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_mcp_version",
       expect.objectContaining({
@@ -133,6 +148,15 @@ describe("createServer", () => {
       }),
       expect.any(Function),
     );
+  });
+
+  it("defines an explicit tool registry instead of passing whole tool modules around", () => {
+    const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("name: GetMcpVersionTool.name");
+    expect(source).toContain("GetAccountTool.execute(");
+    expect(source).not.toContain("module: GetAccountTool");
+    expect(source).not.toContain("module.execute");
   });
 
   it("requires explicit config instead of reading the API token from environment", () => {

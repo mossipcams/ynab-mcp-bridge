@@ -7,7 +7,7 @@ import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
 import * as ListPlansTool from "./tools/ListPlansTool.js";
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
 
-function parseResponseText(result: Awaited<ReturnType<typeof ListPlansTool.execute>>) {
+function parseResponseText(result: { content: Array<{ text: string }> }) {
   return JSON.parse(result.content[0].text);
 }
 
@@ -64,8 +64,37 @@ describe("plan read tools", () => {
       plan: {
         id: "plan-1",
         name: "Home",
-        accounts: [],
-        category_groups: [],
+        account_count: 0,
+        category_group_count: 0,
+      },
+    });
+  });
+
+  it("can still return the full plan payload when explicitly requested", async () => {
+    const api = {
+      plans: {
+        getPlanById: vi.fn().mockResolvedValue({
+          data: {
+            plan: {
+              id: "plan-1",
+              name: "Home",
+              accounts: [{ id: "acct-1" }],
+              category_groups: [{ id: "group-1" }],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetPlanDetailsTool.execute({ planId: "plan-1", view: "full" }, api as any);
+
+    expect(api.plans.getPlanById).toHaveBeenCalledWith("plan-1", undefined);
+    expect(parseResponseText(result)).toEqual({
+      plan: {
+        id: "plan-1",
+        name: "Home",
+        accounts: [{ id: "acct-1" }],
+        category_groups: [{ id: "group-1" }],
       },
     });
   });
@@ -202,7 +231,7 @@ describe("plan read tools", () => {
     expect(api.plans.getPlanSettingsById).toHaveBeenCalledOnce();
     expect(api.plans.getPlanSettingsById).toHaveBeenCalledWith("plan-explicit");
     expect(api.plans.getPlans).not.toHaveBeenCalled();
-    expect(result.isError).toBe(true);
+    expect("isError" in result && result.isError).toBe(true);
     expect(parseResponseText(result)).toEqual({
       success: false,
       error: "Plan not found",
@@ -239,6 +268,42 @@ describe("plan read tools", () => {
         budgeted: 40000,
         activity: 30000,
         to_be_budgeted: 60000,
+      },
+    });
+  });
+
+  it("can still return the full plan month payload when explicitly requested", async () => {
+    const api = {
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              income: 100000,
+              budgeted: 40000,
+              activity: 30000,
+              to_be_budgeted: 60000,
+              categories: [{ id: "cat-1", name: "Rent" }],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetPlanMonthTool.execute(
+      { planId: "plan-1", month: "2026-03-01", view: "full" },
+      api as any,
+    );
+
+    expect(api.months.getPlanMonth).toHaveBeenCalledWith("plan-1", "2026-03-01");
+    expect(parseResponseText(result)).toEqual({
+      month: {
+        month: "2026-03-01",
+        income: 100000,
+        budgeted: 40000,
+        activity: 30000,
+        to_be_budgeted: 60000,
+        categories: [{ id: "cat-1", name: "Rent" }],
       },
     });
   });

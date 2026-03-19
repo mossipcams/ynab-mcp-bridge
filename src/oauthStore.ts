@@ -10,6 +10,7 @@ import {
   normalizeGrant,
   normalizeScopes,
   type OAuthGrant,
+  type OAuthGrantInput,
 } from "./oauthGrant.js";
 
 type ApprovalRecord = {
@@ -32,16 +33,16 @@ type PendingConsentRecord = {
 type PendingAuthorizationRecord = Omit<PendingConsentRecord, "clientName">;
 
 type AuthorizationCodeRecord = PendingAuthorizationRecord & {
-  subject: string;
+  principalId: string;
   upstreamTokens: OAuthTokens;
 };
 
 type RefreshTokenRecord = {
   clientId: string;
   expiresAt: number;
+  principalId: string;
   resource: string;
   scopes: string[];
-  subject: string;
   upstreamTokens: OAuthTokens;
 };
 
@@ -61,6 +62,20 @@ type PersistedOAuthState = {
   grants: Record<string, OAuthGrant>;
   version: 2;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isApprovalRecord(value: unknown): value is ApprovalRecord {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return typeof value.clientId === "string" &&
+    typeof value.resource === "string" &&
+    Array.isArray(value.scopes);
+}
 
 function normalizeApprovalRecord(record: ApprovalRecord) {
   return {
@@ -84,13 +99,7 @@ function parseApprovals(value: unknown) {
   }
 
   return value
-    .filter((approval): approval is ApprovalRecord => (
-      typeof approval === "object" &&
-      approval !== null &&
-      typeof approval.clientId === "string" &&
-      typeof approval.resource === "string" &&
-      Array.isArray(approval.scopes)
-    ))
+    .filter(isApprovalRecord)
     .map(normalizeApprovalRecord);
 }
 
@@ -107,7 +116,9 @@ function parseGrantRecord(value: unknown): OAuthGrant | undefined {
     return undefined;
   }
 
-  const grant = value as Partial<OAuthGrant>;
+  const grant = value as Partial<OAuthGrant> & {
+    subject?: string;
+  };
 
   if (
     typeof grant.grantId !== "string" ||
@@ -133,6 +144,7 @@ function parseGrantRecord(value: unknown): OAuthGrant | undefined {
     resource: grant.resource,
     scopes: grant.scopes,
     state: grant.state,
+    principalId: grant.principalId,
     subject: grant.subject,
     upstreamTokens: grant.upstreamTokens,
   });
@@ -164,7 +176,7 @@ function parseGrants(value: unknown) {
 function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthState {
   const grants: Record<string, OAuthGrant> = {};
 
-  const pushGrant = (grant: OAuthGrant) => {
+  const pushGrant = (grant: OAuthGrantInput) => {
     grants[grant.grantId] = normalizeGrant(grant);
   };
 
@@ -229,7 +241,9 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
 
   if (parsed.authorizationCodes && typeof parsed.authorizationCodes === "object") {
     for (const [code, record] of Object.entries(parsed.authorizationCodes)) {
-      const authorizationCode = record as Partial<AuthorizationCodeRecord>;
+      const authorizationCode = record as Partial<AuthorizationCodeRecord> & {
+        subject?: string;
+      };
 
       if (
         typeof authorizationCode.clientId === "string" &&
@@ -238,7 +252,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
         typeof authorizationCode.redirectUri === "string" &&
         typeof authorizationCode.resource === "string" &&
         Array.isArray(authorizationCode.scopes) &&
-        typeof authorizationCode.subject === "string" &&
+        typeof (authorizationCode.principalId ?? authorizationCode.subject) === "string" &&
         authorizationCode.upstreamTokens &&
         typeof authorizationCode.upstreamTokens === "object"
       ) {
@@ -254,7 +268,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
           resource: authorizationCode.resource,
           scopes: authorizationCode.scopes,
           state: authorizationCode.state,
-          subject: authorizationCode.subject,
+          principalId: authorizationCode.principalId ?? authorizationCode.subject,
           upstreamTokens: authorizationCode.upstreamTokens as OAuthTokens,
         });
       }
@@ -263,14 +277,16 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
 
   if (parsed.refreshTokens && typeof parsed.refreshTokens === "object") {
     for (const [token, record] of Object.entries(parsed.refreshTokens)) {
-      const refreshToken = record as Partial<RefreshTokenRecord>;
+      const refreshToken = record as Partial<RefreshTokenRecord> & {
+        subject?: string;
+      };
 
       if (
         typeof refreshToken.clientId === "string" &&
         typeof refreshToken.expiresAt === "number" &&
         typeof refreshToken.resource === "string" &&
         Array.isArray(refreshToken.scopes) &&
-        typeof refreshToken.subject === "string" &&
+        typeof (refreshToken.principalId ?? refreshToken.subject) === "string" &&
         refreshToken.upstreamTokens &&
         typeof refreshToken.upstreamTokens === "object"
       ) {
@@ -285,7 +301,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
           },
           resource: refreshToken.resource,
           scopes: refreshToken.scopes,
-          subject: refreshToken.subject,
+          principalId: refreshToken.principalId ?? refreshToken.subject,
           upstreamTokens: refreshToken.upstreamTokens as OAuthTokens,
         });
       }
@@ -383,7 +399,7 @@ function toPendingAuthorizationRecord(grant: OAuthGrant): PendingAuthorizationRe
 }
 
 function toAuthorizationCodeRecord(grant: OAuthGrant): AuthorizationCodeRecord | undefined {
-  if (!grant.authorizationCode || !grant.subject || !grant.upstreamTokens) {
+  if (!grant.authorizationCode || !grant.principalId || !grant.upstreamTokens) {
     return undefined;
   }
 
@@ -395,13 +411,13 @@ function toAuthorizationCodeRecord(grant: OAuthGrant): AuthorizationCodeRecord |
     resource: grant.resource,
     scopes: grant.scopes,
     state: grant.state,
-    subject: grant.subject,
+    principalId: grant.principalId,
     upstreamTokens: grant.upstreamTokens,
   };
 }
 
 function toRefreshTokenRecord(grant: OAuthGrant): RefreshTokenRecord | undefined {
-  if (!grant.refreshToken || !grant.subject || !grant.upstreamTokens) {
+  if (!grant.refreshToken || !grant.principalId || !grant.upstreamTokens) {
     return undefined;
   }
 
@@ -410,7 +426,7 @@ function toRefreshTokenRecord(grant: OAuthGrant): RefreshTokenRecord | undefined
     expiresAt: grant.refreshToken.expiresAt,
     resource: grant.resource,
     scopes: grant.scopes,
-    subject: grant.subject,
+    principalId: grant.principalId,
     upstreamTokens: grant.upstreamTokens,
   };
 }
@@ -584,7 +600,7 @@ export function createOAuthStore(storePath: string | undefined) {
             resource: record.resource,
             scopes: record.scopes,
             state: record.state,
-            subject: record.subject,
+            principalId: record.principalId,
             upstreamTokens: record.upstreamTokens,
           }),
         },
@@ -601,7 +617,7 @@ export function createOAuthStore(storePath: string | undefined) {
       };
       persist();
     },
-    saveGrant(grant: OAuthGrant) {
+    saveGrant(grant: OAuthGrantInput) {
       state = {
         ...state,
         grants: {
@@ -672,7 +688,7 @@ export function createOAuthStore(storePath: string | undefined) {
             },
             resource: record.resource,
             scopes: record.scopes,
-            subject: record.subject,
+            principalId: record.principalId,
             upstreamTokens: record.upstreamTokens,
           }),
         },

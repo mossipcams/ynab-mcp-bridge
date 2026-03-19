@@ -2,6 +2,7 @@
 import { startHttpServer } from "./httpServer.js";
 import { resolveAppConfig } from "./config.js";
 import { startStdioServer } from "./stdioServer.js";
+import { logHttpServerStarted, logStartupFailure } from "./startupLogging.js";
 
 // Start the server
 async function main() {
@@ -12,11 +13,17 @@ async function main() {
       ...config.runtime,
       ynab: config.ynab,
     });
-    console.error(`YNAB MCP server running on ${server.url}`);
+    logHttpServerStarted(server.url);
     return;
   }
 
   await startStdioServer(config.ynab);
 }
 
-main().catch(console.error);
+export function handleStartupFailure(error: unknown) {
+  logStartupFailure(error);
+}
+
+main().catch((error: unknown) => {
+  handleStartupFailure(error);
+});

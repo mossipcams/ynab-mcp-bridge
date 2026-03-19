@@ -1,4 +1,6 @@
-export type ClientProfileId = "chatgpt" | "claude" | "generic";
+export type ClientProfileId = "chatgpt" | "claude" | "codex" | "generic";
+
+export type SetupHookResult = "handle" | "pass";
 
 export type DetectedClientProfile = {
   profileId: ClientProfileId;
@@ -13,6 +15,8 @@ export type RequestContext = {
 
 export type ClientProfile = {
   id: ClientProfileId;
+  matchesPreAuth: (context: RequestContext) => boolean;
+  matchesInitialize: (clientInfo: unknown, capabilities: unknown) => boolean;
   oauth: {
     allowDynamicClientRegistration: boolean;
     discoveryPathVariants: string[];
@@ -24,5 +28,11 @@ export type ClientProfile = {
     acceptSessionHeaderButIgnoreIt: boolean;
     preferJsonResponse: boolean;
     requireStatelessPostOnly: boolean;
+  };
+  hooks: {
+    onAuthorizeRequest: (context: RequestContext) => SetupHookResult;
+    onDiscoveryRequest: (context: RequestContext) => SetupHookResult;
+    onInitialize: (clientInfo: unknown, capabilities: unknown) => void;
+    onTokenRequest: (context: RequestContext) => SetupHookResult;
   };
 };
