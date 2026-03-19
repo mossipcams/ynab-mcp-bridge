@@ -293,6 +293,7 @@ describe("startHttpServer", () => {
         "Content-Type": "application/json",
         Origin: "https://claude.ai",
         "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "User-Agent": "openai-mcp/1.0.0",
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -311,14 +312,18 @@ describe("startHttpServer", () => {
 
     expect(response.status).toBe(200);
     expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
+      details.authMode === "none" &&
       details.method === "POST" &&
       details.path === "/mcp" &&
-      details.origin === "https://claude.ai"
+      details.origin === "https://claude.ai" &&
+      details.userAgent === "chatgpt"
     ))).toBeTruthy();
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.authMode === "none" &&
       details.path === "/mcp" &&
       details.method === "POST" &&
       details.jsonRpcMethod === "initialize" &&
+      details.userAgent === "chatgpt" &&
       details.sessionId === undefined &&
       details.cleanup === true
     ))).toBeTruthy();
@@ -1272,6 +1277,7 @@ describe("startHttpServer", () => {
         "Content-Type": "application/json",
         Origin: "https://claude.ai",
         "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "User-Agent": "openai-mcp/1.0.0",
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -1285,11 +1291,17 @@ describe("startHttpServer", () => {
     });
 
     expect(followUpResponse.status).toBe(200);
+    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
+      details.method === "POST" &&
+      details.path === "/mcp" &&
+      details.userAgent === "chatgpt"
+    ))).toBeTruthy();
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
       details.method === "POST" &&
       details.path === "/mcp" &&
       details.cleanup === true &&
       details.jsonRpcMethod === "tools/call" &&
+      details.userAgent === "chatgpt" &&
       details.sessionId === undefined
     ))).toBeTruthy();
   });
