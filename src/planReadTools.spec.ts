@@ -7,7 +7,7 @@ import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
 import * as ListPlansTool from "./tools/ListPlansTool.js";
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
 
-function parseResponseText(result: Awaited<ReturnType<typeof ListPlansTool.execute>>) {
+function parseResponseText(result: { content: Array<{ text: string }> }) {
   return JSON.parse(result.content[0].text);
 }
 
@@ -231,7 +231,7 @@ describe("plan read tools", () => {
     expect(api.plans.getPlanSettingsById).toHaveBeenCalledOnce();
     expect(api.plans.getPlanSettingsById).toHaveBeenCalledWith("plan-explicit");
     expect(api.plans.getPlans).not.toHaveBeenCalled();
-    expect(result.isError).toBe(true);
+    expect("isError" in result && result.isError).toBe(true);
     expect(parseResponseText(result)).toEqual({
       success: false,
       error: "Plan not found",
