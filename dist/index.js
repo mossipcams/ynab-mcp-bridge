@@ -18,6 +18,7 @@ async function main() {
 }
 export function handleStartupFailure(error) {
     logStartupFailure(error);
+    process.exitCode = 1;
 }
 main().catch((error) => {
     handleStartupFailure(error);

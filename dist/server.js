@@ -53,6 +53,12 @@ const SERVER_INFO = {
     name: packageInfo.name,
     version: packageInfo.version,
 };
+const READ_ONLY_TOOL_ANNOTATIONS = {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+};
 const toolRegistrations = [
     { title: "Get MCP Version", name: GetMcpVersionTool.name, description: GetMcpVersionTool.description, inputSchema: GetMcpVersionTool.inputSchema, execute: (input, api) => GetMcpVersionTool.execute(input, api) },
     { title: "Get User", name: GetUserTool.name, description: GetUserTool.description, inputSchema: GetUserTool.inputSchema, execute: (input, api) => GetUserTool.execute(input, api) },
@@ -106,6 +112,7 @@ function registerTool(registrar, tool, api) {
         title: tool.title,
         description: tool.description,
         inputSchema: tool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
     }, (input) => tool.execute(input, api));
 }
 export function registerServerTools(registrar, api) {

@@ -138,6 +138,12 @@ describe("createServer", () => {
         title: "Get MCP Version",
         description: expect.any(String),
         inputSchema: expect.any(Object),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
       }),
       expect.any(Function),
     );
@@ -145,6 +151,12 @@ describe("createServer", () => {
       "ynab_get_70_20_10_summary",
       expect.objectContaining({
         title: "Get 70/20/10 Summary",
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
       }),
       expect.any(Function),
     );
