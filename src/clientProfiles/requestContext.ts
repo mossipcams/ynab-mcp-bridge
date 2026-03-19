@@ -1,6 +1,6 @@
 import type { RequestContext } from "./types.js";
 
-export function getFirstHeaderValue(value: string | string[] | undefined) {
+function getFirstHeaderValue(value: string | string[] | undefined) {
   if (typeof value === "string") {
     return value.split(",")[0]?.trim();
   }
