@@ -139,13 +139,11 @@ describe("release-please automation", () => {
 
   it("fetches repository tags in CI before enforcing release metadata invariants", () => {
     const workflow = readFileSync(new URL("../.github/workflows/test.yml", import.meta.url), "utf8");
-    const validate22Job = workflow.split("validate-22:")[1]?.split("validate-24:")[0] ?? "";
-    const validate24Job = workflow.split("validate-24:")[1] ?? "";
 
     expect(workflow).toContain("uses: actions/checkout@v4");
     expect(workflow).toContain("fetch-depth: 0");
-    expect(validate22Job).toContain("fetch-depth: 0");
-    expect(validate24Job).toContain("fetch-depth: 0");
+    expect(workflow).toContain("strategy:");
+    expect(workflow).toContain("node-version: [22.x, 24.x]");
   });
 
   it("keeps the 0.8.0 changelog entry aligned with the cleaned release notes", () => {

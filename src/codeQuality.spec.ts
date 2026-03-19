@@ -94,15 +94,14 @@ describe("code quality guardrails", () => {
       new URL("../.github/workflows/test.yml", import.meta.url),
       "utf8",
     );
-    const validate22Job = workflow.split("validate-22:")[1]?.split("validate-24:")[0] ?? "";
 
-    const installIndex = validate22Job.indexOf("Install dependencies");
-    const testsIndex = validate22Job.indexOf("Run full tests");
-    const dependencyRulesIndex = validate22Job.indexOf("Run dependency rules");
-    const eslintIndex = validate22Job.indexOf("Run ESLint");
-    const typecheckIndex = validate22Job.indexOf("Run TypeScript typecheck");
-    const knipIndex = validate22Job.indexOf("Run Knip");
-    const buildIndex = validate22Job.indexOf("Build package");
+    const installIndex = workflow.indexOf("Install dependencies");
+    const testsIndex = workflow.indexOf("Run tests");
+    const dependencyRulesIndex = workflow.indexOf("Run dependency rules");
+    const eslintIndex = workflow.indexOf("Run ESLint");
+    const typecheckIndex = workflow.indexOf("Run TypeScript typecheck");
+    const knipIndex = workflow.indexOf("Run Knip");
+    const buildIndex = workflow.indexOf("Build package");
 
     expect(installIndex).toBeGreaterThanOrEqual(0);
     expect(testsIndex).toBeGreaterThan(installIndex);
@@ -235,7 +234,7 @@ describe("code quality guardrails", () => {
     expect(gitignore).toContain("artifacts");
   });
 
-  it("keeps Release Please PR required checks inside the main CI workflow", () => {
+  it("does not define dedicated validate jobs for Release Please PRs", () => {
     expect(
       existsSync(new URL("../.github/workflows/release-please-pr-checks.yml", import.meta.url)),
     ).toBe(false);
@@ -245,67 +244,48 @@ describe("code quality guardrails", () => {
       "utf8",
     );
 
-    expect(workflow).toContain("validate-22:");
-    expect(workflow).toContain("name: validate (22.x)");
-    expect(workflow).toContain("validate-24:");
-    expect(workflow).toContain("name: validate (24.x)");
-    expect(workflow).toContain("startsWith(github.event.pull_request.head.ref, 'release-please--')");
-    expect(workflow).toContain("node-version: 22.x");
-    expect(workflow).toContain("node-version: 24.x");
-    expect(workflow).toContain("npm run test:ci");
-    expect(workflow).toContain("npm run typecheck");
-    expect(workflow).toContain("npm run build");
-    expect(workflow).not.toContain("release-please-smoke:");
-    expect(workflow).not.toContain("release-please-pr-checks.yml");
+    expect(workflow).toContain("strategy:");
+    expect(workflow).toContain("matrix:");
+    expect(workflow).toContain("node-version: [22.x, 24.x]");
+    expect(workflow).not.toContain("validate-22:");
+    expect(workflow).not.toContain("validate-24:");
+    expect(workflow).not.toContain("name: validate (22.x)");
+    expect(workflow).not.toContain("name: validate (24.x)");
+    expect(workflow).not.toContain("Release Please 24.x validation marker");
+    expect(workflow).not.toContain("release-please-test-results");
+    expect(workflow).not.toContain("Run smoke tests for Release Please PRs");
   });
 
-  it("keeps the full 22.x validation job from running release-only shortcuts on normal PRs", () => {
+  it("skips the main CI job for Release Please PR branches instead of adding placeholder validations", () => {
     const workflow = readFileSync(
       new URL("../.github/workflows/test.yml", import.meta.url),
       "utf8",
     );
 
-    expect(workflow).toContain("if:");
-    expect(workflow).toContain("github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'release-please--')");
-    expect(workflow).toContain("github.event_name != 'pull_request' || !startsWith(github.event.pull_request.head.ref, 'release-please--')");
+    expect(workflow).toContain("if: github.event_name != 'pull_request' || !startsWith(github.event.pull_request.head.ref, 'release-please--')");
+    expect(workflow).not.toContain("github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'release-please--')");
   });
 
-  it("keeps the full validation pair for non-release PRs while making release checks lightweight", () => {
+  it("keeps the normal validation matrix for non-release PRs", () => {
     const workflow = readFileSync(
       new URL("../.github/workflows/test.yml", import.meta.url),
       "utf8",
     );
 
-    expect(workflow).not.toContain("matrix:");
     expect(workflow).toContain("Run dependency rules");
     expect(workflow).toContain("Run ESLint");
     expect(workflow).toContain("Run Knip");
-    expect(workflow).toContain("Release Please 24.x validation marker");
+    expect(workflow).toContain("Run TypeScript typecheck");
+    expect(workflow).toContain("Build package");
   });
 
-  it("keeps Release Please 22.x diagnostics lightweight but reviewable", () => {
-    const workflow = readFileSync(
-      new URL("../.github/workflows/test.yml", import.meta.url),
-      "utf8",
-    );
-    const validate22Job = workflow.split("validate-22:")[1]?.split("validate-24:")[0] ?? "";
-    const validate24Job = workflow.split("validate-24:")[1] ?? "";
-
-    expect(workflow).toContain("name: validate (22.x)");
-    expect(validate22Job).toContain("Upload release-please test reports");
-    expect(validate22Job).toContain("name: release-please-test-results");
-    expect(validate24Job).toContain("Release Please 24.x validation marker");
-    expect(validate24Job).toContain("if: github.event_name != 'pull_request' || !startsWith(github.event.pull_request.head.ref, 'release-please--')");
-  });
-
-  it("reports a release-please exemption instead of skipping PR title validation", () => {
+  it("skips PR title validation entirely for Release Please PR branches", () => {
     const workflow = readFileSync(
       new URL("../.github/workflows/validate-pr-title.yml", import.meta.url),
       "utf8",
     );
 
-    expect(workflow).toContain("validate-pr-title:");
-    expect(workflow).toContain("Release Please PR title exemption");
-    expect(workflow).toContain("Validate releasable conventional commit title");
+    expect(workflow).toContain("if: ${{ !startsWith(github.event.pull_request.head.ref, 'release-please--') }}");
+    expect(workflow).not.toContain("Release Please PR title exemption");
   });
 });
