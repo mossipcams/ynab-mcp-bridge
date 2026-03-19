@@ -63,6 +63,14 @@ describe("release-please automation", () => {
     expect(workflow).toContain("manifest-file: .release-please-manifest.json");
   });
 
+  it("dispatches release PR validations from release-please outputs without local git state", () => {
+    const workflow = readFileSync(new URL("../.github/workflows/release-please.yml", import.meta.url), "utf8");
+
+    expect(workflow).toContain("id: release");
+    expect(workflow).toContain("steps.release.outputs.prs_created");
+    expect(workflow).not.toContain("gh pr list");
+  });
+
   it("defines a PR title validation workflow for releasable conventional commits", () => {
     const workflow = readFileSync(
       new URL("../.github/workflows/validate-pr-title.yml", import.meta.url),
