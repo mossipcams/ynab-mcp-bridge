@@ -60,6 +60,13 @@ const SERVER_INFO = {
   version: packageInfo.version,
 } as const;
 
+const READ_ONLY_TOOL_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+} as const;
+
 type ToolModule = {
   title: string;
   name: string;
@@ -126,6 +133,7 @@ function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: ynab.API)
       title: tool.title,
       description: tool.description,
       inputSchema: tool.inputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
     (input) => tool.execute(input, api),
   );
