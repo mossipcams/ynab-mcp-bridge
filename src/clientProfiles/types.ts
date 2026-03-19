@@ -1,4 +1,4 @@
-export type ClientProfileId = "claude" | "codex" | "generic";
+export type ClientProfileId = "chatgpt" | "claude" | "codex" | "generic";
 
 export type SetupHookResult = "handle" | "pass";
 

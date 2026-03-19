@@ -96,4 +96,5 @@ describe("originPolicy", () => {
       responseOrigin: undefined,
     });
   });
+
 });

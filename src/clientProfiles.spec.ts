@@ -57,6 +57,17 @@ describe("client profiles", () => {
     });
   });
 
+  it("detects ChatGPT setup requests from the root protected-resource probe path", () => {
+    expect(detectClientProfile({
+      headers: {},
+      method: "GET",
+      path: "/.well-known/oauth-protected-resource",
+    })).toEqual({
+      profileId: "chatgpt",
+      reason: "path:chatgpt-protected-resource-probe",
+    });
+  });
+
   it("detects Codex setup requests from OAuth discovery probe paths", () => {
     expect(detectClientProfile({
       headers: {},
@@ -87,6 +98,29 @@ describe("client profiles", () => {
     })).toEqual({
       profileId: "generic",
       reason: "fallback:generic",
+    });
+  });
+
+  it("exposes a ChatGPT profile that keeps transport strict while allowing the root protected-resource probe", () => {
+    const profile = getClientProfile("chatgpt");
+
+    expect(profile).toMatchObject({
+      id: "chatgpt",
+      oauth: {
+        allowDynamicClientRegistration: true,
+        discoveryPathVariants: [
+          "/.well-known/oauth-authorization-server",
+          "/.well-known/oauth-protected-resource",
+        ],
+        tolerateExtraDiscoveryProbes: true,
+        tolerateMissingResourceParam: false,
+        tokenRequestLeniency: "strict",
+      },
+      transport: {
+        acceptSessionHeaderButIgnoreIt: false,
+        preferJsonResponse: true,
+        requireStatelessPostOnly: true,
+      },
     });
   });
 
@@ -163,6 +197,28 @@ describe("client profiles", () => {
 
   it("detects a profile from initialize clientInfo and capabilities when available", () => {
     expect(detectInitializeClientProfile({
+      capabilities: {},
+      clientInfo: {
+        name: "ChatGPT",
+        version: "1.0.0",
+      },
+    })).toEqual({
+      profileId: "chatgpt",
+      reason: "initialize:client-info",
+    });
+
+    expect(detectInitializeClientProfile({
+      capabilities: {},
+      clientInfo: {
+        name: "openai-mcp",
+        version: "1.0.0",
+      },
+    })).toEqual({
+      profileId: "chatgpt",
+      reason: "initialize:client-info",
+    });
+
+    expect(detectInitializeClientProfile({
       capabilities: {
         roots: {},
       },
@@ -184,6 +240,25 @@ describe("client profiles", () => {
     })).toEqual({
       profileId: "claude",
       reason: "initialize:client-info",
+    });
+  });
+
+  it("promotes a generic provisional profile when initialize detection is more specific", () => {
+    expect(reconcileClientProfile(
+      {
+        profileId: "generic",
+        reason: "fallback:generic",
+      },
+      {
+        profileId: "chatgpt",
+        reason: "initialize:client-info",
+      },
+    )).toEqual({
+      mismatch: false,
+      profile: {
+        profileId: "chatgpt",
+        reason: "initialize:client-info",
+      },
     });
   });
 

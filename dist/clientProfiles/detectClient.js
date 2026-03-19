@@ -1,3 +1,6 @@
+const CHATGPT_DISCOVERY_PATHS = new Set([
+    "/.well-known/oauth-protected-resource",
+]);
 const CODEX_DISCOVERY_PATHS = new Set([
     "/.well-known/oauth-authorization-server/sse",
     "/sse/.well-known/oauth-authorization-server",
@@ -14,6 +17,12 @@ export function detectClientProfile(context) {
         return {
             profileId: "claude",
             reason: "origin:claude.ai",
+        };
+    }
+    if (CHATGPT_DISCOVERY_PATHS.has(context.path)) {
+        return {
+            profileId: "chatgpt",
+            reason: "path:chatgpt-protected-resource-probe",
         };
     }
     if (CODEX_DISCOVERY_PATHS.has(context.path)) {
@@ -39,6 +48,12 @@ export function detectInitializeClientProfile(input) {
     if (!clientName) {
         return undefined;
     }
+    if (clientName.includes("chatgpt") || clientName.includes("openai-mcp")) {
+        return {
+            profileId: "chatgpt",
+            reason: "initialize:client-info",
+        };
+    }
     if (clientName.includes("codex")) {
         return {
             profileId: "codex",
@@ -54,10 +69,22 @@ export function detectInitializeClientProfile(input) {
     return undefined;
 }
 export function reconcileClientProfile(provisionalProfile, confirmedProfile) {
-    if (!confirmedProfile || confirmedProfile.profileId === provisionalProfile.profileId) {
+    if (!confirmedProfile) {
         return {
             mismatch: false,
             profile: provisionalProfile,
+        };
+    }
+    if (provisionalProfile.profileId === "generic") {
+        return {
+            mismatch: false,
+            profile: confirmedProfile,
+        };
+    }
+    if (confirmedProfile.profileId === provisionalProfile.profileId) {
+        return {
+            mismatch: false,
+            profile: confirmedProfile,
         };
     }
     return {

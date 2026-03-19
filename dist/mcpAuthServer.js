@@ -48,6 +48,12 @@ export function createMcpAuthModule(auth) {
             resourceMetadataUrl,
             verifier: oauthBroker.provider,
         }),
+        protectedResourceMetadata: {
+            authorization_servers: [oauthBroker.getIssuerUrl().href],
+            resource: publicServerUrl.href,
+            resource_name: "YNAB MCP Bridge",
+            scopes_supported: scopesSupported.length > 0 ? scopesSupported : undefined,
+        },
         router,
     };
 }

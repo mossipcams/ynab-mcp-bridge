@@ -31,6 +31,9 @@ function toClientProfileRequestContext(req) {
     };
 }
 function getCanonicalOAuthDiscoveryPath(pathname, profileId) {
+    if (profileId === "chatgpt") {
+        return undefined;
+    }
     const profile = getClientProfile(profileId);
     const canonicalPath = "/.well-known/oauth-authorization-server";
     if (!profile.oauth.tolerateExtraDiscoveryProbes || pathname === canonicalPath) {
@@ -350,6 +353,14 @@ export async function startHttpServer(options) {
         next();
     });
     if (auth.mode === "oauth") {
+        app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
+            const resolvedProfile = getResolvedClientProfile(res.locals);
+            if (resolvedProfile?.profileId !== "chatgpt") {
+                next();
+                return;
+            }
+            res.status(200).json(mcpAuthModule.protectedResourceMetadata);
+        });
         app.use((req, res, next) => {
             const resolvedProfile = getResolvedClientProfile(res.locals);
             const canonicalPath = getCanonicalOAuthDiscoveryPath(getRequestPath(req), resolvedProfile?.profileId ?? "generic");
@@ -451,7 +462,15 @@ export async function startHttpServer(options) {
                 });
                 const reconciliation = reconcileClientProfile(provisionalProfile, confirmedProfile);
                 setResolvedClientProfile(res.locals, reconciliation.profile);
-                if (reconciliation.mismatch && confirmedProfile) {
+                if (!reconciliation.mismatch && confirmedProfile) {
+                    logClientProfileEvent("profile.detected", {
+                        method: req.method ?? "GET",
+                        path: getRequestPath(req),
+                        profileId: confirmedProfile.profileId,
+                        reason: confirmedProfile.reason,
+                    });
+                }
+                else if (reconciliation.mismatch && confirmedProfile) {
                     logClientProfileEvent("profile.reconciled", {
                         confirmedProfileId: confirmedProfile.profileId,
                         method: req.method ?? "GET",
@@ -462,10 +481,13 @@ export async function startHttpServer(options) {
                     });
                 }
             }
+            const resolvedProfile = getResolvedClientProfile(res.locals);
             logHttpDebug("transport.handoff", {
                 ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                 ...getJsonRpcDebugDetails(parsedBody),
                 cleanup: Boolean(resolution.cleanup),
+                profileId: resolvedProfile?.profileId,
+                profileReason: resolvedProfile?.reason,
             });
             applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
             await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);

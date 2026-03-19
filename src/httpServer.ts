@@ -26,7 +26,7 @@ import {
 import { getClientProfile } from "./clientProfiles/index.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
-import type { RequestContext as ClientProfileRequestContext } from "./clientProfiles/types.js";
+import type { ClientProfileId, RequestContext as ClientProfileRequestContext } from "./clientProfiles/types.js";
 import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { createServer } from "./server.js";
 
@@ -99,7 +99,11 @@ function toClientProfileRequestContext(req: Pick<Request, "headers" | "method" |
   };
 }
 
-function getCanonicalOAuthDiscoveryPath(pathname: string, profileId: "claude" | "codex" | "generic") {
+function getCanonicalOAuthDiscoveryPath(pathname: string, profileId: ClientProfileId) {
+  if (profileId === "chatgpt") {
+    return undefined;
+  }
+
   const profile = getClientProfile(profileId);
   const canonicalPath = "/.well-known/oauth-authorization-server";
 
@@ -517,6 +521,17 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   });
 
   if (auth.mode === "oauth") {
+    app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
+      const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+
+      if (resolvedProfile?.profileId !== "chatgpt") {
+        next();
+        return;
+      }
+
+      res.status(200).json(mcpAuthModule!.protectedResourceMetadata);
+    });
+
     app.use((req, res, next) => {
       const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
       const canonicalPath = getCanonicalOAuthDiscoveryPath(
@@ -649,7 +664,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
         setResolvedClientProfile(res.locals as Record<string, unknown>, reconciliation.profile);
 
-        if (reconciliation.mismatch && confirmedProfile) {
+        if (!reconciliation.mismatch && confirmedProfile) {
+          logClientProfileEvent("profile.detected", {
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+            profileId: confirmedProfile.profileId,
+            reason: confirmedProfile.reason,
+          });
+        } else if (reconciliation.mismatch && confirmedProfile) {
           logClientProfileEvent("profile.reconciled", {
             confirmedProfileId: confirmedProfile.profileId,
             method: req.method ?? "GET",
@@ -661,10 +683,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
         }
       }
 
+      const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+
       logHttpDebug("transport.handoff", {
         ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         ...getJsonRpcDebugDetails(parsedBody),
         cleanup: Boolean(resolution.cleanup),
+        profileId: resolvedProfile?.profileId,
+        profileReason: resolvedProfile?.reason,
       });
       applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
       await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
