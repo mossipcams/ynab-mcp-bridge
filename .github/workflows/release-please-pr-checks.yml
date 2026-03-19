@@ -1,0 +1,44 @@
+name: Release Please PR Checks
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-22:
+    if: |
+      (github.event_name == 'pull_request_target' && startsWith(github.event.pull_request.head.ref, 'release-please--')) ||
+      (github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--'))
+    name: validate (22.x)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip full CI for Release Please PRs
+        run: echo "Release Please PRs do not run the full CI matrix."
+
+  validate-24:
+    if: |
+      (github.event_name == 'pull_request_target' && startsWith(github.event.pull_request.head.ref, 'release-please--')) ||
+      (github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--'))
+    name: validate (24.x)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip full CI for Release Please PRs
+        run: echo "Release Please PRs do not run the full CI matrix."
+
+  validate-pr-title:
+    if: |
+      (github.event_name == 'pull_request_target' && startsWith(github.event.pull_request.head.ref, 'release-please--')) ||
+      (github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--'))
+    name: validate-pr-title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip PR title validation for Release Please PRs
+        run: echo "Release Please PRs do not run PR title validation."

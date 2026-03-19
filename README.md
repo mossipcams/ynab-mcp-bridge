@@ -1,124 +1,76 @@
 # ynab-mcp-bridge
 
-`ynab-mcp-bridge` is a Model Context Protocol server for YNAB built on the YNAB SDK v4 surface.
+`ynab-mcp-bridge` is a read-only Model Context Protocol (MCP) server for YNAB.
 
-It supports:
+It gives MCP clients a shared YNAB backend over either:
 
-* stateless authless streamable HTTP by default for self-hosted deployments
-* optional OAuth-protected streamable HTTP for remote deployments and MCP clients
-* `stdio` transport when explicitly requested for local clients and debugging
-* direct JSON responses for HTTP requests without durable MCP sessions
+- stateless HTTP for self-hosted or remote deployments
+- optional OAuth-protected HTTP for remote browser-based MCP clients
+- `stdio` for local desktop clients and debugging
 
-## Requirements
+## What You Get
 
-Set these environment variables before starting the server:
+- Read-only YNAB tools for plans, accounts, categories, payees, transactions, scheduled transactions, and summary views
+- HTTP mode by default
+- Stateless `POST /mcp` handling that works well with clients that do not keep durable MCP sessions
+- Optional OAuth broker mode for remote clients such as Claude Web
+- Automatic plan resolution when `YNAB_PLAN_ID` is not set
 
-* `YNAB_API_TOKEN` required
-* `YNAB_PLAN_ID` optional default plan for tools that accept `planId`
-* `MCP_TRANSPORT` optional, `stdio` or `http`, default `http`
-* `MCP_HOST` optional, HTTP only, default `127.0.0.1`
-* `MCP_PORT` optional, HTTP only, default `3000`
-* `MCP_PATH` optional, HTTP only, default `/mcp`
-* `MCP_ALLOWED_ORIGINS` optional comma-separated allowlist for browser-based HTTP clients like remote MCP hosts
-* `MCP_DEPLOYMENT_MODE` optional, `authless`, `oauth-single-tenant`, or `oauth-hardened`, default `authless`
-* `MCP_AUTH_MODE` optional legacy compatibility shim, `none` or `oauth`; prefer `MCP_DEPLOYMENT_MODE` for new deployments
-* `MCP_PUBLIC_URL` required in OAuth deployment modes, the externally reachable MCP URL such as `https://mcp.example.com/mcp`
-* `MCP_OAUTH_CLOUDFLARE_DOMAIN` optional shortcut for Cloudflare Access such as `example.cloudflareaccess.com`; when set with `MCP_OAUTH_CLIENT_ID`, the bridge derives issuer, authorization, token, and JWKS URLs automatically
-* `MCP_OAUTH_ISSUER` required in OAuth deployment modes unless `MCP_OAUTH_CLOUDFLARE_DOMAIN` is set
-* `MCP_OAUTH_AUTHORIZATION_URL` required in OAuth deployment modes unless `MCP_OAUTH_CLOUDFLARE_DOMAIN` is set
-* `MCP_OAUTH_TOKEN_URL` required in OAuth deployment modes unless `MCP_OAUTH_CLOUDFLARE_DOMAIN` is set
-* `MCP_OAUTH_JWKS_URL` required in OAuth deployment modes unless `MCP_OAUTH_CLOUDFLARE_DOMAIN` is set
-* `MCP_OAUTH_AUDIENCE` optional in OAuth deployment modes; defaults to `MCP_PUBLIC_URL`
-* `MCP_OAUTH_CLIENT_ID` required in OAuth deployment modes, the upstream confidential OAuth client ID used by the MCP bridge
-* `MCP_OAUTH_CLIENT_SECRET` required in OAuth deployment modes, the upstream confidential OAuth client secret used by the MCP bridge
-* `MCP_OAUTH_STORE_PATH` optional in OAuth deployment modes; defaults to `~/.ynab-mcp-bridge/oauth-store.json`
-* `MCP_OAUTH_TOKEN_SIGNING_SECRET` optional in OAuth deployment modes; defaults to a stable secret derived from `MCP_OAUTH_CLIENT_SECRET`, `MCP_PUBLIC_URL`, and `MCP_OAUTH_CLIENT_ID`
-* `MCP_OAUTH_CALLBACK_PATH` optional in OAuth deployment modes, default `/oauth/callback`
-* `MCP_OAUTH_SCOPES` optional comma-separated scopes to advertise and require in OAuth deployment modes
+## Choose A Mode
 
-`authless` is the default stateless shared-backend mode. `oauth-single-tenant` enables the current brokered OAuth flow for remote MCP clients. `oauth-hardened` enables the same broker flow but requires an explicit `MCP_ALLOWED_ORIGINS` allowlist at startup so remote deployments fail closed.
+| Mode | Use it when | Auth | Key settings |
+| --- | --- | --- | --- |
+| `http` + `authless` | Local use or a trusted self-hosted setup | None | `YNAB_API_TOKEN` |
+| `http` + `oauth-single-tenant` | Remote client access behind an upstream IdP | MCP-side OAuth | `MCP_PUBLIC_URL` and OAuth settings |
+| `http` + `oauth-hardened` | Same as above, but fail closed unless origins are explicitly allowed | MCP-side OAuth | OAuth settings plus `MCP_ALLOWED_ORIGINS` |
+| `stdio` | Local desktop clients and debugging | None | `YNAB_API_TOKEN` |
 
-HTTP mode validates the `Origin` header when one is present. Loopback origins are allowed automatically for loopback hosts, but remote/browser deployments should set `MCP_ALLOWED_ORIGINS` explicitly, for example `https://claude.ai`.
-The default HTTP transport is stateless: clients should use `POST /mcp` requests directly and should not rely on returned `Mcp-Session-Id` headers, session-scoped `GET` streams, or `DELETE` session teardown.
-In OAuth deployment modes the server acts as the MCP authorization server for clients such as Claude Web. It exposes local `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`, and `/.well-known/oauth-protected-resource/mcp` endpoints, requires an MCP-side consent step before redirecting upstream, brokers the upstream authorization-code and refresh-token exchanges, and enforces broker-issued bearer tokens on `POST /mcp`. If Cloudflare Access injects `Cf-Access-Jwt-Assertion`, the server will still bridge that header into the MCP request path as an explicit compatibility mode.
-
-If `YNAB_PLAN_ID` is not set, the bridge automatically resolves YNAB's `default_plan` when one exists or the only available plan when there is exactly one. If a configured plan becomes stale, the bridge retries once with a fresh plan resolution.
-OAuth here protects access to a shared backend YNAB token configured through `YNAB_API_TOKEN`; it does not yet perform per-user YNAB OAuth delegation.
-
-## Available MCP Tools
-
-The server exposes a read-only plan-based toolset:
-
-* `ynab_get_user`
-* `ynab_list_plans`
-* `ynab_get_plan`
-* `ynab_get_plan_settings`
-* `ynab_get_plan_month`
-* `ynab_list_plan_months`
-* `ynab_get_mcp_version`
-* `ynab_list_transactions`
-* `ynab_get_transaction`
-* `ynab_get_transactions_by_account`
-* `ynab_get_transactions_by_category`
-* `ynab_get_transactions_by_payee`
-* `ynab_list_categories`
-* `ynab_get_category`
-* `ynab_get_month_category`
-* `ynab_get_transactions_by_month`
-* `ynab_list_scheduled_transactions`
-* `ynab_get_scheduled_transaction`
-* `ynab_list_accounts`
-* `ynab_get_account`
-* `ynab_list_payees`
-* `ynab_get_payee`
-* `ynab_list_payee_locations`
-* `ynab_get_payee_location`
-* `ynab_get_payee_locations_by_payee`
-* `ynab_get_money_movements`
-* `ynab_get_money_movements_by_month`
-* `ynab_get_money_movement_groups`
-* `ynab_get_money_movement_groups_by_month`
-* `ynab_get_financial_snapshot`
-* `ynab_get_spending_summary`
-* `ynab_get_cash_flow_summary`
-* `ynab_get_budget_health_summary`
-* `ynab_get_upcoming_obligations`
-* `ynab_get_goal_progress_summary`
-* `ynab_get_budget_cleanup_summary`
-* `ynab_get_income_summary`
-* `ynab_get_category_trend_summary`
-* `ynab_get_70_20_10_summary`
-
-## Rate Limiting
-
-YNAB documents a limit of 200 requests per rolling hour per access token. The bridge now applies a shared per-token sliding-window limiter in the YNAB client layer and retries `429 Too Many Requests` responses conservatively.
+`authless` is the default deployment mode. `http` is the default transport.
 
 ## Quick Start
+
+### 1. Install and build
 
 ```bash
 npm install
 npm run build
+```
+
+### 2. Run the default local HTTP server
+
+```bash
+export YNAB_API_TOKEN=your-token
 npm start
 ```
 
-To start HTTP mode explicitly:
+Defaults:
+
+- host: `127.0.0.1`
+- port: `3000`
+- path: `/mcp`
+
+### 3. Run over `stdio`
 
 ```bash
-MCP_TRANSPORT=http npm run start:http
+export YNAB_API_TOKEN=your-token
+npm run start:stdio
 ```
 
-To expose HTTP mode to a remote MCP client, bind an external host intentionally and allow the client origin explicitly:
+### 4. Expose authless HTTP intentionally
+
+Use this only when the network path is already trusted.
 
 ```bash
 MCP_TRANSPORT=http \
 MCP_HOST=0.0.0.0 \
 MCP_ALLOWED_ORIGINS=https://claude.ai \
+YNAB_API_TOKEN=your-token \
 npm run start:http
 ```
 
-This stateless HTTP default is intended to be more tolerant of Claude Desktop's remote MCP lifecycle, where tool calls may arrive without a durable MCP session continuation.
+### 5. Enable OAuth for a remote client
 
-To enable OAuth for a remote deployment:
+This is the recommended remote setup.
 
 ```bash
 MCP_TRANSPORT=http \
@@ -130,45 +82,111 @@ MCP_OAUTH_CLOUDFLARE_DOMAIN=example.cloudflareaccess.com \
 MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
 MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
 MCP_OAUTH_SCOPES=openid,profile \
+YNAB_API_TOKEN=your-token \
 npm run start:http
 ```
 
-If you want to override the Cloudflare-derived endpoints or use another upstream provider, set the explicit OAuth URLs instead:
+## Environment Variables
 
-```bash
-MCP_TRANSPORT=http \
-MCP_HOST=0.0.0.0 \
-MCP_ALLOWED_ORIGINS=https://claude.ai \
-MCP_DEPLOYMENT_MODE=oauth-single-tenant \
-MCP_PUBLIC_URL=https://mcp.example.com/mcp \
-MCP_OAUTH_ISSUER=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123 \
-MCP_OAUTH_AUTHORIZATION_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization \
-MCP_OAUTH_TOKEN_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token \
-MCP_OAUTH_JWKS_URL=https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks \
-MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
-MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
-MCP_OAUTH_AUDIENCE=https://mcp.example.com/mcp \
-MCP_OAUTH_STORE_PATH=/var/lib/ynab-mcp-bridge/oauth-store.json \
-MCP_OAUTH_TOKEN_SIGNING_SECRET=replace-with-a-long-random-secret \
-MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
-MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
-MCP_OAUTH_SCOPES=openid,profile \
-npm run start:http
-```
+### YNAB Backend
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `YNAB_API_TOKEN` | Yes | Shared backend YNAB token |
+| `YNAB_PLAN_ID` | No | Default plan for tools that accept `planId` |
+
+If `YNAB_PLAN_ID` is unset, the bridge tries YNAB's `default_plan` first, then the only available plan when exactly one exists. If a configured plan becomes stale, the bridge retries once with a fresh resolution.
+
+### Transport and HTTP
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `MCP_TRANSPORT` | `http` | `http` or `stdio` |
+| `MCP_HOST` | `127.0.0.1` | HTTP only |
+| `MCP_PORT` | `3000` | HTTP only |
+| `MCP_PATH` | `/mcp` | HTTP only |
+| `MCP_ALLOWED_ORIGINS` | empty | Comma-separated browser origin allowlist |
+| `MCP_ALLOWED_HOSTS` | empty | Optional comma-separated `Host` header allowlist |
+| `MCP_DEPLOYMENT_MODE` | `authless` | `authless`, `oauth-single-tenant`, or `oauth-hardened` |
+| `MCP_AUTH_MODE` | none | Legacy compatibility shim: `none` or `oauth` |
+
+Notes:
+
+- When an `Origin` header is present, HTTP mode validates it.
+- Loopback origins are allowed automatically for loopback hosts.
+- `oauth-hardened` refuses to start without `MCP_ALLOWED_ORIGINS`.
+
+### OAuth
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `MCP_PUBLIC_URL` | Yes in OAuth modes | Public MCP URL, for example `https://mcp.example.com/mcp` |
+| `MCP_OAUTH_CLOUDFLARE_DOMAIN` | Optional | Shortcut for Cloudflare Access endpoint derivation |
+| `MCP_OAUTH_ISSUER` | Yes unless Cloudflare shortcut is used | Upstream issuer |
+| `MCP_OAUTH_AUTHORIZATION_URL` | Yes unless Cloudflare shortcut is used | Upstream authorization endpoint |
+| `MCP_OAUTH_TOKEN_URL` | Yes unless Cloudflare shortcut is used | Upstream token endpoint |
+| `MCP_OAUTH_JWKS_URL` | Yes unless Cloudflare shortcut is used | Upstream JWKS endpoint |
+| `MCP_OAUTH_AUDIENCE` | No | Defaults to `MCP_PUBLIC_URL` |
+| `MCP_OAUTH_CLIENT_ID` | Yes in OAuth modes | Upstream confidential client ID |
+| `MCP_OAUTH_CLIENT_SECRET` | Yes in OAuth modes | Upstream confidential client secret |
+| `MCP_OAUTH_STORE_PATH` | No | Defaults to `~/.ynab-mcp-bridge/oauth-store.json` |
+| `MCP_OAUTH_TOKEN_SIGNING_SECRET` | No | Defaults to a stable derived secret |
+| `MCP_OAUTH_CALLBACK_PATH` | No | Defaults to `/oauth/callback` |
+| `MCP_OAUTH_SCOPES` | No | Comma-separated scopes to advertise and require |
+
+## How HTTP Mode Behaves
+
+- The default HTTP transport is stateless. Clients should send `POST /mcp` and should not depend on durable MCP sessions.
+- The bridge still exposes `Mcp-Session-Id` headers for compatibility, but session continuity is not the primary path.
+- In OAuth modes, the bridge acts as the MCP authorization server and exposes:
+  - `/.well-known/oauth-authorization-server`
+  - `/register`
+  - `/authorize`
+  - `/token`
+  - `/.well-known/oauth-protected-resource/mcp`
+- OAuth here protects access to a shared backend YNAB token. It does not do per-user YNAB OAuth delegation.
 
 ## Cloudflare Access
 
-For Cloudflare Access, the easiest path is to set `MCP_OAUTH_CLOUDFLARE_DOMAIN`, `MCP_OAUTH_CLIENT_ID`, `MCP_OAUTH_CLIENT_SECRET`, and `MCP_PUBLIC_URL`; the bridge will derive the per-application OIDC SaaS endpoints under `/cdn-cgi/access/sso/oidc/<client-id>` automatically.
-Use the public MCP URL for both `MCP_PUBLIC_URL` and `MCP_OAUTH_AUDIENCE` unless your Access app is configured with a different audience/resource identifier.
-Set `MCP_OAUTH_CLIENT_ID` and `MCP_OAUTH_CLIENT_SECRET` to the confidential client credentials for the upstream Access application, and make sure the Access application allows the bridge callback URL built from `MCP_PUBLIC_URL` and `MCP_OAUTH_CALLBACK_PATH` such as `https://mcp.example.com/oauth/callback`.
-If you need to control persistence or token signing explicitly, override `MCP_OAUTH_STORE_PATH` and `MCP_OAUTH_TOKEN_SIGNING_SECRET`. Otherwise, the defaults are enough for a local or simple remote deployment.
-The bridge advertises itself as the MCP authorization server from `/.well-known/oauth-authorization-server`, dynamically registers MCP clients at `/register`, presents an MCP-side consent step at `/authorize`, exchanges the upstream code at the callback URL, refreshes the upstream grant when Claude refreshes, and issues MCP bearer tokens from `/token`.
-Do not use the older tenant-wide `/cdn-cgi/access/sso/oauth2/*` or `/cdn-cgi/access/certs` endpoints here. With current MCP clients, that legacy configuration can break the authorization-code redirect and surface errors like `code: Field required`.
-When deployed behind Cloudflare, keep `MCP_PUBLIC_URL` on the external HTTPS hostname even if the local bind address is `127.0.0.1` or `0.0.0.0`; discovery metadata must describe the public URL, not the internal listener.
+For Cloudflare Access, the simplest setup is:
 
-## CLI Usage
+- `MCP_PUBLIC_URL`
+- `MCP_OAUTH_CLOUDFLARE_DOMAIN`
+- `MCP_OAUTH_CLIENT_ID`
+- `MCP_OAUTH_CLIENT_SECRET`
 
-Start over stdio:
+The bridge will derive the per-application OIDC SaaS endpoints under `/cdn-cgi/access/sso/oidc/<client-id>`.
+
+Important details:
+
+- Register the callback built from `MCP_PUBLIC_URL` and `MCP_OAUTH_CALLBACK_PATH`, for example `https://mcp.example.com/oauth/callback`
+- Keep `MCP_PUBLIC_URL` on the external HTTPS hostname, not the internal bind address
+- Use the public MCP URL as the audience unless your Access app expects a different resource identifier
+- Do not use the older tenant-wide `/cdn-cgi/access/sso/oauth2/*` endpoints for this flow
+
+If Cloudflare injects `Cf-Access-Jwt-Assertion`, the bridge can translate that assertion into a bridge-local token as an explicit compatibility path.
+
+## Tool Coverage
+
+The server exposes a read-only YNAB toolset across:
+
+- user and plan metadata
+- plan settings and plan months
+- accounts, categories, and payees
+- transactions and scheduled transactions
+- payee locations
+- money movement and transfer summaries
+- higher-level financial summaries such as spending, cash flow, income, goal progress, obligations, and budget health
+
+## CLI Examples
+
+Start with the default HTTP settings:
+
+```bash
+node dist/index.js
+```
+
+Start over `stdio`:
 
 ```bash
 node dist/index.js --transport stdio
@@ -180,19 +198,30 @@ Start over HTTP explicitly:
 node dist/index.js --transport http --host 127.0.0.1 --port 3000 --path /mcp
 ```
 
-Start with the default HTTP configuration:
+Allow specific browser origins:
 
 ```bash
-node dist/index.js
+node dist/index.js \
+  --transport http \
+  --host 0.0.0.0 \
+  --port 3000 \
+  --path /mcp \
+  --allowed-origins https://claude.ai,https://chat.openai.com
 ```
 
-Allow specific browser origins over HTTP:
+Lock down accepted host headers too:
 
 ```bash
-node dist/index.js --transport http --host 0.0.0.0 --port 3000 --path /mcp --allowed-origins https://claude.ai,https://chat.openai.com
+node dist/index.js \
+  --transport http \
+  --host 0.0.0.0 \
+  --port 3000 \
+  --path /mcp \
+  --allowed-origins https://claude.ai \
+  --allowed-hosts mcp.example.com
 ```
 
-Enable the single-tenant OAuth broker over HTTP:
+Enable OAuth with explicit upstream endpoints:
 
 ```bash
 node dist/index.js \
@@ -203,22 +232,40 @@ node dist/index.js \
   --allowed-origins https://claude.ai \
   --deployment-mode oauth-single-tenant \
   --public-url https://mcp.example.com/mcp \
-  --oauth-cloudflare-domain example.cloudflareaccess.com \
-  --oauth-client-id cloudflare-access-client-id \
-  --oauth-client-secret cloudflare-access-client-secret \
   --oauth-issuer https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123 \
   --oauth-authorization-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization \
   --oauth-token-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token \
   --oauth-jwks-url https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks \
+  --oauth-client-id cloudflare-access-client-id \
+  --oauth-client-secret cloudflare-access-client-secret \
   --oauth-audience https://mcp.example.com/mcp \
   --oauth-store-path /var/lib/ynab-mcp-bridge/oauth-store.json \
   --oauth-token-signing-secret replace-with-a-long-random-secret \
-  --oauth-client-id cloudflare-access-client-id \
-  --oauth-client-secret cloudflare-access-client-secret \
   --oauth-scopes openid,profile
 ```
 
-For a stricter remote deployment, switch `oauth-single-tenant` to `oauth-hardened` and keep `--allowed-origins` or `MCP_ALLOWED_ORIGINS` explicitly populated.
+For a stricter remote deployment, switch `oauth-single-tenant` to `oauth-hardened`.
+
+## Docker
+
+Build the image:
+
+```bash
+docker build -t ynab-mcp-bridge .
+```
+
+Run the default HTTP server:
+
+```bash
+docker run --rm \
+  -p 3000:3000 \
+  -e YNAB_API_TOKEN=your-token \
+  ynab-mcp-bridge
+```
+
+## Rate Limiting
+
+YNAB documents a limit of 200 requests per rolling hour per access token. The bridge applies a shared per-token sliding-window limiter and retries `429 Too Many Requests` responses conservatively.
 
 ## Development
 

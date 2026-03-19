@@ -7,11 +7,6 @@ import {
   hostHeaderValidation,
   localhostHostValidation,
 } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
-import {
-  getOAuthProtectedResourceMetadataUrl,
-  mcpAuthRouter,
-} from "@modelcontextprotocol/sdk/server/auth/router.js";
-import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import {
@@ -20,12 +15,23 @@ import {
   type RuntimeAuthConfig,
   type YnabConfig,
 } from "./config.js";
-import { createOAuthBroker } from "./oauthBroker.js";
+import { logAppEvent } from "./logger.js";
+import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
+import { createMcpAuthModule } from "./mcpAuthServer.js";
+import {
+  detectClientProfile,
+  detectInitializeClientProfile,
+  reconcileClientProfile,
+} from "./clientProfiles/detectClient.js";
+import { getClientProfile } from "./clientProfiles/index.js";
+import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
+import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
+import type { ClientProfileId, RequestContext as ClientProfileRequestContext } from "./clientProfiles/types.js";
 import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import { createServer } from "./server.js";
 
-export type HttpServerOptions = {
+type HttpServerOptions = {
   allowedHosts?: string[];
   allowedOrigins?: string[];
   auth?: RuntimeAuthConfig;
@@ -35,7 +41,7 @@ export type HttpServerOptions = {
   ynab: YnabConfig;
 };
 
-export type StartedHttpServer = {
+type StartedHttpServer = {
   close: () => Promise<void>;
   host: string;
   path: string;
@@ -44,8 +50,6 @@ export type StartedHttpServer = {
 };
 
 const HTTP_ALLOWED_METHODS = ["POST"] as const;
-const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
-
 type ManagedRequest = {
   close: () => Promise<void>;
   transport: StreamableHTTPServerTransport;
@@ -66,24 +70,15 @@ type HttpDebugDetails = Record<string, unknown>;
 type JsonRpcRequestLike = {
   id?: unknown;
   method?: unknown;
+  params?: unknown;
 };
 
-function applyCloudflareAccessAuthorizationHeader(req: Pick<Request, "headers">) {
-  const existingAuthorization = getFirstHeaderValue(req.headers.authorization);
+type InitializeParamsLike = {
+  capabilities?: unknown;
+  clientInfo?: unknown;
+};
 
-  if (existingAuthorization) {
-    return;
-  }
-
-  const cfAccessJwt = getFirstHeaderValue(req.headers["cf-access-jwt-assertion"]);
-
-  if (!cfAccessJwt) {
-    return;
-  }
-
-  req.headers.authorization = `Bearer ${cfAccessJwt}`;
-  req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER] = "cf-access-jwt-assertion";
-}
+const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 
 function getRequestPath(req: Pick<Request, "path" | "url">) {
   if (typeof req.path === "string" && req.path.length > 0) {
@@ -96,6 +91,32 @@ function getRequestPath(req: Pick<Request, "path" | "url">) {
 
   return new URL(req.url, "http://127.0.0.1").pathname;
 }
+
+function toClientProfileRequestContext(req: Pick<Request, "headers" | "method" | "path" | "url">): ClientProfileRequestContext {
+  return {
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    method: req.method ?? "GET",
+    path: getRequestPath(req),
+  };
+}
+
+function getCanonicalOAuthDiscoveryPath(pathname: string, profileId: ClientProfileId) {
+  if (profileId === "chatgpt") {
+    return undefined;
+  }
+
+  const profile = getClientProfile(profileId);
+  const canonicalPath = "/.well-known/oauth-authorization-server";
+
+  if (!profile.oauth.tolerateExtraDiscoveryProbes || pathname === canonicalPath) {
+    return undefined;
+  }
+
+  return profile.oauth.discoveryPathVariants.includes(pathname)
+    ? canonicalPath
+    : undefined;
+}
+
 
 function getBearerToken(authorizationHeader: string | undefined) {
   if (!authorizationHeader?.startsWith("Bearer ")) {
@@ -172,11 +193,7 @@ function writeInternalServerError(res: Response) {
 }
 
 function logHttpDebug(event: string, details: HttpDebugDetails) {
-  console.error("[http]", event, details);
-}
-
-function getPublicResourceServerUrl(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
-  return new URL(auth.publicUrl);
+  logAppEvent("http", event, details);
 }
 
 function getSessionId(req: Pick<Request, "headers">) {
@@ -198,16 +215,45 @@ function getSessionId(req: Pick<Request, "headers">) {
   return values[0];
 }
 
-function getRequestDebugDetails(req: Request): HttpDebugDetails {
+function getNormalizedUserAgent(req: Pick<Request, "headers">) {
+  const userAgent = getFirstHeaderValue(req.headers["user-agent"]);
+
+  if (!userAgent) {
+    return undefined;
+  }
+
+  if (userAgent.toLowerCase().startsWith("openai-mcp/")) {
+    return "chatgpt";
+  }
+
+  return userAgent;
+}
+
+function hasHeaderValue(value: string | string[] | undefined) {
+  return Boolean(getFirstHeaderValue(value));
+}
+
+function getRequestDebugDetails(
+  req: Request,
+  options: {
+    authMode?: RuntimeAuthConfig["mode"];
+    authRequired?: boolean;
+  } = {},
+): HttpDebugDetails {
   const authSubject = req.auth?.extra?.subject;
   return {
+    authMode: options.authMode,
     authClientId: req.auth?.clientId,
+    authRequired: options.authRequired,
     authSubject: typeof authSubject === "string" ? authSubject : undefined,
+    hasAuthorizationHeader: hasHeaderValue(req.headers.authorization),
+    hasCfAccessJwtAssertion: hasHeaderValue(req.headers["cf-access-jwt-assertion"]),
     method: req.method ?? "UNKNOWN",
     origin: getFirstHeaderValue(req.headers.origin),
     path: getRequestPath(req),
     protocolVersion: getFirstHeaderValue(req.headers["mcp-protocol-version"]),
     sessionId: getSessionId(req),
+    userAgent: getNormalizedUserAgent(req),
   };
 }
 
@@ -228,6 +274,20 @@ function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
   }
 
   return details;
+}
+
+function getInitializeParams(parsedBody: unknown) {
+  if (!parsedBody || typeof parsedBody !== "object") {
+    return undefined;
+  }
+
+  const request = parsedBody as JsonRpcRequestLike;
+
+  if (request.method !== "initialize" || !request.params || typeof request.params !== "object") {
+    return undefined;
+  }
+
+  return request.params as InitializeParamsLike;
 }
 
 function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">) {
@@ -333,6 +393,12 @@ async function closeNodeServer(server: NodeHttpServer) {
   });
 }
 
+function allowsOpaqueNullOrigin(req: Pick<Request, "method" | "path" | "url">, authMode: RuntimeAuthConfig["mode"]) {
+  return authMode === "oauth" &&
+    req.method === "POST" &&
+    getRequestPath(req) === "/authorize/consent";
+}
+
 export async function startHttpServer(options: HttpServerOptions): Promise<StartedHttpServer> {
   const allowedHosts = options.allowedHosts ?? [];
   const auth = options.auth ?? { deployment: "authless", mode: "none" };
@@ -341,7 +407,6 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
   const ynab = assertYnabConfig(options.ynab);
-  const oauthBroker = auth.mode === "oauth" ? createOAuthBroker(auth) : undefined;
 
   if (auth.mode === "oauth") {
     allowedOrigins.add(new URL(auth.publicUrl).origin);
@@ -356,14 +421,42 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     });
   }
 
+  const mcpAuthModule = auth.mode === "oauth" ? createMcpAuthModule(auth) : undefined;
+  const cloudflareCompatibilityMiddleware = auth.mode === "oauth"
+    ? createCloudflareAccessCompatibilityMiddleware(auth)
+    : undefined;
+
   const app = express();
   const jsonParser = express.json();
-  const urlencodedParser = express.urlencoded({ extended: false });
+
+  function getRequestAuthDebugOptions(req: Pick<Request, "path" | "url">) {
+    const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
+
+    return {
+      authMode: auth.mode,
+      authRequired: isProtectedMcpRequest || undefined,
+    };
+  }
 
   app.disable("x-powered-by");
+  app.set("trust proxy", 1);
 
   app.use((req, _res, next) => {
-    logHttpDebug("request.received", getRequestDebugDetails(req));
+    logHttpDebug("request.received", getRequestDebugDetails(req, getRequestAuthDebugOptions(req)));
+    next();
+  });
+
+  app.use((req, res, next) => {
+    const detectedProfile = detectClientProfile(toClientProfileRequestContext(req));
+
+    setResolvedClientProfile(res.locals as Record<string, unknown>, detectedProfile);
+    logClientProfileEvent("profile.detected", {
+      method: req.method ?? "GET",
+      path: getRequestPath(req),
+      profileId: detectedProfile.profileId,
+      reason: detectedProfile.reason,
+    });
+
     next();
   });
 
@@ -375,13 +468,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   app.use((req, res, next) => {
     const resolution = resolveOriginPolicy({
+      allowOpaqueNullOrigin: allowsOpaqueNullOrigin(req, auth.mode),
       allowedOrigins,
       headers: req.headers,
     });
 
     if (!resolution.allowed) {
       logHttpDebug("request.rejected", {
-        ...getRequestDebugDetails(req),
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         reason: "forbidden-origin",
       });
       writeForbiddenOrigin(res);
@@ -398,18 +492,32 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   });
 
   if (auth.mode === "oauth") {
-    const publicServerUrl = getPublicResourceServerUrl(auth);
+    app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
+      const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
 
-    app.use(oauthBroker!.callbackPath, oauthBroker!.handleCallback);
-    app.post("/authorize/consent", urlencodedParser, oauthBroker!.handleConsent);
-    app.use(mcpAuthRouter({
-      baseUrl: oauthBroker!.getIssuerUrl(),
-      issuerUrl: oauthBroker!.getIssuerUrl(),
-      provider: oauthBroker!.provider,
-      resourceName: "YNAB MCP Bridge",
-      resourceServerUrl: publicServerUrl,
-      scopesSupported: auth.scopes.length > 0 ? auth.scopes : undefined,
-    }));
+      if (resolvedProfile?.profileId !== "chatgpt") {
+        next();
+        return;
+      }
+
+      res.status(200).json(mcpAuthModule!.protectedResourceMetadata);
+    });
+
+    app.use((req, res, next) => {
+      const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+      const canonicalPath = getCanonicalOAuthDiscoveryPath(
+        getRequestPath(req),
+        resolvedProfile?.profileId ?? "generic",
+      );
+
+      if (canonicalPath) {
+        req.url = canonicalPath;
+      }
+
+      next();
+    });
+
+    app.use(mcpAuthModule!.router);
   }
 
   app.use((req, res, next) => {
@@ -425,7 +533,15 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   app.use((req, res, next) => {
     if (getRequestPath(req) === path && req.method === "POST") {
       if (auth.mode === "oauth") {
-        applyCloudflareAccessAuthorizationHeader(req);
+        cloudflareCompatibilityMiddleware!(req, res, (error?: unknown) => {
+          if (error) {
+            next(error);
+            return;
+          }
+
+          jsonParser(req, res, next);
+        });
+        return;
       }
 
       jsonParser(req, res, next);
@@ -436,13 +552,6 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   });
 
   if (auth.mode === "oauth") {
-    const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(getPublicResourceServerUrl(auth));
-    const authMiddleware = requireBearerAuth({
-      requiredScopes: auth.scopes,
-      resourceMetadataUrl,
-      verifier: oauthBroker!.provider,
-    });
-
     app.use((req, res, next) => {
       if (getRequestPath(req) !== path || req.method !== "POST") {
         next();
@@ -459,12 +568,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
         }
 
         logHttpDebug("request.rejected", {
-          ...getRequestDebugDetails(req),
+          ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
           reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope",
         });
       });
 
-      authMiddleware(req, res, next);
+      mcpAuthModule!.authMiddleware(req, res, next);
     });
   }
 
@@ -476,14 +585,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
     if (req.method !== "POST") {
       logHttpDebug("request.rejected", {
-        ...getRequestDebugDetails(req),
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         reason: "method-not-allowed",
       });
       writeMethodNotAllowed(res, HTTP_ALLOWED_METHODS);
       return;
     }
 
-    const parsedBody = req.body;
+    const parsedBody: unknown = req.body;
     const resolution = await resolveRequest(
       req,
       () => createManagedRequest(ynab),
@@ -491,7 +600,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
     if (resolution.status !== "ready") {
       logHttpDebug("request.rejected", {
-        ...getRequestDebugDetails(req),
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         reason: resolution.status,
       });
       writeRequestResolution(res, resolution);
@@ -512,10 +621,46 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       res.once("close", () => {
         void cleanup();
       });
+
+      const provisionalProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+      const initializeParams = getInitializeParams(parsedBody);
+
+      if (provisionalProfile && initializeParams) {
+        const confirmedProfile = detectInitializeClientProfile({
+          capabilities: initializeParams.capabilities,
+          clientInfo: initializeParams.clientInfo,
+        });
+        const reconciliation = reconcileClientProfile(provisionalProfile, confirmedProfile);
+
+        setResolvedClientProfile(res.locals as Record<string, unknown>, reconciliation.profile);
+
+        if (!reconciliation.mismatch && confirmedProfile) {
+          logClientProfileEvent("profile.detected", {
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+            profileId: confirmedProfile.profileId,
+            reason: confirmedProfile.reason,
+          });
+        } else if (reconciliation.mismatch && confirmedProfile) {
+          logClientProfileEvent("profile.reconciled", {
+            confirmedProfileId: confirmedProfile.profileId,
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+            profileId: reconciliation.profile.profileId,
+            provisionalProfileId: provisionalProfile.profileId,
+            reason: reconciliation.profile.reason,
+          });
+        }
+      }
+
+      const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+
       logHttpDebug("transport.handoff", {
-        ...getRequestDebugDetails(req),
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         ...getJsonRpcDebugDetails(parsedBody),
         cleanup: Boolean(resolution.cleanup),
+        profileId: resolvedProfile?.profileId,
+        profileReason: resolvedProfile?.reason,
       });
       await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
     } catch (error) {
@@ -526,13 +671,15 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   app.use((req, res) => {
     logHttpDebug("request.rejected", {
-      ...getRequestDebugDetails(req),
+      ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
       reason: "path-not-found",
     });
     writeNotFound(res);
   });
 
   const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
+    const requestError: unknown = error;
+
     if (res.headersSent) {
       next(error);
       return;
@@ -550,9 +697,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       return;
     }
 
-    console.error("Error handling MCP request:", {
-      ...getRequestDebugDetails(req),
-      error,
+    logAppEvent("http", "request.error", {
+      ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+      error: requestError,
     });
 
     writeInternalServerError(res);

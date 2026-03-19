@@ -51,6 +51,37 @@ describe("originPolicy", () => {
     });
   });
 
+  it("rejects opaque null origins by default", () => {
+    const resolution = resolveOriginPolicy({
+      allowedOrigins: new Set(["https://claude.ai"]),
+      headers: {
+        host: "mcp.example.com",
+        origin: "null",
+      },
+    });
+
+    expect(resolution).toEqual({
+      allowed: false,
+      responseOrigin: undefined,
+    });
+  });
+
+  it("allows opaque null origins only with an explicit opt-in", () => {
+    const resolution = resolveOriginPolicy({
+      allowOpaqueNullOrigin: true,
+      allowedOrigins: new Set(["https://claude.ai"]),
+      headers: {
+        host: "mcp.example.com",
+        origin: "null",
+      },
+    });
+
+    expect(resolution).toEqual({
+      allowed: true,
+      responseOrigin: undefined,
+    });
+  });
+
   it("rejects untrusted origins", () => {
     const resolution = resolveOriginPolicy({
       allowedOrigins: new Set(["https://claude.ai"]),
@@ -65,6 +96,7 @@ describe("originPolicy", () => {
       responseOrigin: undefined,
     });
   });
+
 });
 
 describe("installCorsGuard", () => {
