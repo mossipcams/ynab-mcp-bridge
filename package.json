@@ -22,7 +22,7 @@
     "build": "rm -rf dist && tsc && chmod +x dist/index.js",
     "lint": "eslint . --max-warnings=0",
     "lint:deps": "dependency-cruiser --config .dependency-cruiser.js src",
-    "lint:unused": "knip --config knip.json",
+    "lint:unused": "knip --config knip.json --production --exclude dependencies",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "prepare": "npm run build",
     "watch": "tsc --watch",

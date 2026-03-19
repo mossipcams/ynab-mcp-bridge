@@ -21,6 +21,10 @@ describe("code quality guardrails", () => {
     expect(dependencyCruiserConfig).toContain("transport");
     expect(dependencyCruiserConfig).toContain("composition");
     expect(dependencyCruiserConfig).toContain("domain");
+    expect(dependencyCruiserConfig).toContain("no-circular");
+    expect(dependencyCruiserConfig).toContain("circular");
+    expect(dependencyCruiserConfig).toContain("no-orphans");
+    expect(dependencyCruiserConfig).toContain("orphan");
     expect(dependencyCruiserConfig).toContain("from.path");
     expect(dependencyCruiserConfig).toContain("to.path");
     expect(packageJson.devDependencies["dependency-cruiser"]).toBeTruthy();
@@ -73,8 +77,13 @@ describe("code quality guardrails", () => {
 
     expect(packageJson.devDependencies.knip).toBeTruthy();
     expect(packageJson.scripts["lint:unused"]).toBeTruthy();
-    expect(knipConfig).toContain("\"entry\"");
+    expect(packageJson.scripts["lint:unused"]).toContain("--production");
+    expect(packageJson.scripts["lint:unused"]).toContain("--exclude dependencies");
     expect(knipConfig).toContain("\"project\"");
+    expect(knipConfig).not.toContain("\"entry\"");
+    expect(knipConfig).not.toContain("\"ignore\"");
+    expect(knipConfig).not.toContain("\"src/index.ts\"");
+    expect(knipConfig).not.toContain("\"src/**/*.spec.ts\"");
     expect(knipConfig).not.toContain("\"src/tools/**/*.ts\"");
     expect(workflow).toContain("Run Knip");
     expect(workflow).toContain("npm run lint:unused");

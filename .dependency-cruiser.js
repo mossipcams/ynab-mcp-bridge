@@ -4,6 +4,33 @@ const config = {
   // Selectors are expressed with dependency-cruiser from.path and to.path matchers.
   forbidden: [
     {
+      name: "no-circular",
+      comment: "Production modules should not participate in circular dependencies.",
+      severity: "error",
+      from: {
+        path: "^src/",
+        pathNot: "\\.spec\\.ts$",
+      },
+      to: {
+        circular: true,
+      },
+    },
+    {
+      name: "no-orphans",
+      comment:
+        "Runtime and tool modules should stay connected to the production entry graph.",
+      severity: "error",
+      from: {
+        orphan: true,
+        path: [
+          "^src/(index|httpServer|stdioServer|server|cloudflareCompatibility|config|localTokenService|logger|mcpAuthServer|oauthBroker|oauthCore|oauthGrant|oauthStore|oauthVerifier|originPolicy|packageInfo|runtimeConfig|startupLogging|upstreamOAuthAdapter|ynabApi|ynabRateLimiter)\\.ts$",
+          "^src/clientProfiles/(?!types\\.ts$).+\\.ts$",
+          "^src/tools/.+\\.ts$",
+        ],
+      },
+      to: {},
+    },
+    {
       name: "no-imports-to-entry",
       comment: "Only the CLI entry layer should own src/index.ts.",
       severity: "error",
