@@ -13,10 +13,14 @@ permissions:
 
 jobs:
   validate-pr-title:
-    if: ${{ !startsWith(github.event.pull_request.head.ref, 'release-please--') }}
     runs-on: ubuntu-latest
     steps:
+      - name: Release Please PR title exemption
+        if: ${{ startsWith(github.event.pull_request.head.ref, 'release-please--') }}
+        run: echo "Release Please PRs are exempt from the releasable title regex."
+
       - name: Validate releasable conventional commit title
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'release-please--') }}
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
