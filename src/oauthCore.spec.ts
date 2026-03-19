@@ -66,9 +66,9 @@ describe("createOAuthCore", () => {
     const mintedAccessTokens: Array<{
       clientId: string;
       expiresInSeconds: number;
+      principalId: string;
       resource: string;
       scopes: string[];
-      subject: string;
     }> = [];
     const upstreamCodeExchanges: string[] = [];
     const upstreamRefreshExchanges: string[] = [];
@@ -254,9 +254,9 @@ describe("createOAuthCore", () => {
       {
         clientId: client.client_id,
         expiresInSeconds: 1800,
+        principalId: client.client_id,
         resource: "https://mcp.example.com/mcp",
-        scopes: ["openid", "profile"],
-        subject: client.client_id,
+        scopes: ["openid", "profile", "offline_access"],
       },
     ]);
     expect(store.state.grants.get("generated-2")).toMatchObject({

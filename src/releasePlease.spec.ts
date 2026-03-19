@@ -1,9 +1,60 @@
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 import { getPackageVersion } from "./packageInfo.js";
 
 describe("release-please automation", () => {
+  function parseVersion(version: string) {
+    return version.split(".").map((part) => Number.parseInt(part, 10));
+  }
+
+  function compareVersions(left: string, right: string) {
+    const leftParts = parseVersion(left);
+    const rightParts = parseVersion(right);
+
+    for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+      const leftPart = leftParts[index] ?? 0;
+      const rightPart = rightParts[index] ?? 0;
+
+      if (leftPart !== rightPart) {
+        return leftPart - rightPart;
+      }
+    }
+
+    return 0;
+  }
+
+  function getHighestPublishedTagVersion() {
+    const tags = execFileSync(
+      "git",
+      ["tag", "--list", "ynab-mcp-bridge-v*"],
+      { cwd: new URL("..", import.meta.url), encoding: "utf8" },
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((tag) => tag.replace("ynab-mcp-bridge-v", ""));
+
+    if (tags.length === 0) {
+      throw new Error("Expected at least one ynab-mcp-bridge release tag.");
+    }
+
+    return tags.sort(compareVersions).at(-1);
+  }
+
+  function getVersionSection(changelog: string, version: string) {
+    const marker = `## [${version}]`;
+    const start = changelog.indexOf(marker);
+
+    if (start === -1) {
+      throw new Error(`Expected changelog section for ${version}.`);
+    }
+
+    const nextSection = changelog.indexOf("\n## [", start + marker.length);
+    return changelog.slice(start, nextSection === -1 ? undefined : nextSection);
+  }
+
   it("defines a release-please workflow", () => {
     const workflow = readFileSync(new URL("../.github/workflows/release-please.yml", import.meta.url), "utf8");
 
@@ -55,5 +106,41 @@ describe("release-please automation", () => {
     expect(packageJson.bugs).toEqual({
       url: "https://github.com/mossipcams/ynab-mcp-bridge/issues",
     });
+  });
+
+  it("keeps release metadata aligned with the highest published tag and avoids rollback pins", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+    const config = JSON.parse(
+      readFileSync(new URL("../.release-please-config.json", import.meta.url), "utf8"),
+    );
+    const manifest = JSON.parse(
+      readFileSync(new URL("../.release-please-manifest.json", import.meta.url), "utf8"),
+    );
+    const highestPublishedTagVersion = getHighestPublishedTagVersion();
+
+    expect(highestPublishedTagVersion).toBeDefined();
+    expect(packageJson.version).toBe(highestPublishedTagVersion);
+    expect(manifest["."]).toBe(highestPublishedTagVersion);
+    expect(config).not.toHaveProperty("last-release-sha");
+  });
+
+  it("fetches repository tags in CI before enforcing release metadata invariants", () => {
+    const workflow = readFileSync(new URL("../.github/workflows/test.yml", import.meta.url), "utf8");
+
+    expect(workflow).toContain("uses: actions/checkout@v4");
+    expect(workflow).toContain("fetch-depth: 0");
+  });
+
+  it("keeps the 0.8.0 changelog entry aligned with the cleaned release notes", () => {
+    const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
+    const releaseSection = getVersionSection(changelog, "0.8.0");
+
+    expect(releaseSection).toContain("add client-aware oauth setup profiles");
+    expect(releaseSection).toContain("restore release-please baseline");
+    expect(releaseSection).not.toContain("restore v0.6.0 release");
+    expect(releaseSection).not.toContain("restore v0.6.5 release");
+    expect(releaseSection).not.toContain("### Reverts");
   });
 });

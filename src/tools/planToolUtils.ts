@@ -11,7 +11,7 @@ export function getPlanId(inputPlanId?: string, configuredPlanId?: string): stri
 
 type PlanResolverApi = {
   plans: {
-    getPlans: (...args: any[]) => Promise<{
+    getPlans: () => Promise<{
       data: {
         plans: Array<{ id: string }>;
         default_plan?: { id: string };

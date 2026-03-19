@@ -42,6 +42,7 @@ export function normalizeOrigin(origin: string) {
 }
 
 export function resolveOriginPolicy(input: {
+  allowOpaqueNullOrigin?: boolean;
   allowedOrigins: Set<string>;
   headers: Record<string, string | string[] | undefined>;
 }) {
@@ -50,6 +51,13 @@ export function resolveOriginPolicy(input: {
   if (!originHeader) {
     return {
       allowed: true,
+      responseOrigin: undefined,
+    };
+  }
+
+  if (originHeader === "null") {
+    return {
+      allowed: Boolean(input.allowOpaqueNullOrigin),
       responseOrigin: undefined,
     };
   }
