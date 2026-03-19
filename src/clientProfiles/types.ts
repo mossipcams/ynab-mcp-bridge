@@ -17,6 +17,10 @@ export type ClientProfile = {
   id: ClientProfileId;
   matchesPreAuth: (context: RequestContext) => boolean;
   matchesInitialize: (clientInfo: unknown, capabilities: unknown) => boolean;
+  detection?: {
+    initializeReason?: string;
+    preAuthReason?: string;
+  };
   oauth: {
     allowDynamicClientRegistration: boolean;
     discoveryPathVariants: string[];

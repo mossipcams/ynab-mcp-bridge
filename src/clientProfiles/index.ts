@@ -11,6 +11,20 @@ const profiles: Record<ClientProfileId, ClientProfile> = {
   generic: genericProfile,
 };
 
+const preAuthDetectionOrder: ClientProfileId[] = [
+  "claude",
+  "chatgpt",
+  "codex",
+];
+
 export function getClientProfile(profileId: ClientProfileId) {
   return profiles[profileId];
+}
+
+export function getPreAuthDetectionProfiles() {
+  return preAuthDetectionOrder.map((profileId) => profiles[profileId]);
+}
+
+export function getInitializeDetectionProfiles() {
+  return preAuthDetectionOrder.map((profileId) => profiles[profileId]);
 }

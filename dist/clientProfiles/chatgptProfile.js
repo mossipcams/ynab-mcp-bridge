@@ -1,7 +1,15 @@
 import { genericProfile } from "./genericProfile.js";
+const CHATGPT_DISCOVERY_PATHS = new Set([
+    "/.well-known/oauth-protected-resource",
+]);
 export const chatgptProfile = {
     ...genericProfile,
     id: "chatgpt",
+    detection: {
+        initializeReason: "initialize:client-info",
+        preAuthReason: "path:chatgpt-protected-resource-probe",
+    },
+    matchesPreAuth: (context) => CHATGPT_DISCOVERY_PATHS.has(context.path),
     matchesInitialize: (clientInfo) => {
         const name = typeof clientInfo?.name === "string"
             ? clientInfo.name.toLowerCase()
