@@ -312,12 +312,14 @@ describe("startHttpServer", () => {
 
     expect(response.status).toBe(200);
     expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
+      details.authMode === "none" &&
       details.method === "POST" &&
       details.path === "/mcp" &&
       details.origin === "https://claude.ai" &&
       details.userAgent === "chatgpt"
     ))).toBeTruthy();
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.authMode === "none" &&
       details.path === "/mcp" &&
       details.method === "POST" &&
       details.jsonRpcMethod === "initialize" &&
