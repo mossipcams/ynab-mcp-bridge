@@ -1,14 +1,9 @@
+import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 const CORS_HEADERS = {
     "access-control-allow-headers": "content-type, mcp-session-id, mcp-protocol-version, authorization",
     "access-control-allow-methods": "OPTIONS, POST",
     "access-control-expose-headers": "Mcp-Session-Id",
 };
-function getFirstHeaderValue(value) {
-    if (typeof value === "string") {
-        return value.split(",")[0]?.trim();
-    }
-    return value?.[0]?.split(",")[0]?.trim();
-}
 function parseHostName(host) {
     if (!host) {
         return undefined;
@@ -19,9 +14,6 @@ function parseHostName(host) {
     catch {
         return undefined;
     }
-}
-function isLoopbackHostname(hostname) {
-    return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
 }
 function getRequestHostName(headers) {
     const forwardedHost = getFirstHeaderValue(headers["x-forwarded-host"]);
@@ -72,6 +64,15 @@ export function resolveOriginPolicy(input) {
         allowed: false,
         responseOrigin: undefined,
     };
+}
+export function installCorsGuard(res, resolvedOrigin) {
+    const originalSetHeader = res.setHeader.bind(res);
+    res.setHeader = ((name, value) => {
+        if (name.toLowerCase() === "access-control-allow-origin") {
+            return originalSetHeader(name, resolvedOrigin);
+        }
+        return originalSetHeader(name, value);
+    });
 }
 export function applyCorsHeaders(res, responseOrigin) {
     for (const [name, value] of Object.entries(CORS_HEADERS)) {

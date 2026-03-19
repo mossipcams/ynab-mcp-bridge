@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
+import { installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 
 describe("originPolicy", () => {
   it("normalizes configured origins", () => {
@@ -97,4 +97,25 @@ describe("originPolicy", () => {
     });
   });
 
+});
+
+describe("installCorsGuard", () => {
+  it("overrides access-control-allow-origin with the resolved origin", () => {
+    const recorded: Array<[string, unknown]> = [];
+    const fakeRes = {
+      setHeader(name: string, value: unknown) {
+        recorded.push([name, value]);
+        return fakeRes;
+      },
+    } as unknown as import("express").Response;
+
+    installCorsGuard(fakeRes, "https://claude.ai");
+    fakeRes.setHeader("access-control-allow-origin", "*");
+    fakeRes.setHeader("content-type", "application/json");
+
+    expect(recorded).toEqual([
+      ["access-control-allow-origin", "https://claude.ai"],
+      ["content-type", "application/json"],
+    ]);
+  });
 });

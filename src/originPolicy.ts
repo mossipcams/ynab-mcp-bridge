@@ -1,18 +1,12 @@
 import type { Response } from "express";
 
+import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
+
 const CORS_HEADERS = {
   "access-control-allow-headers": "content-type, mcp-session-id, mcp-protocol-version, authorization",
   "access-control-allow-methods": "OPTIONS, POST",
   "access-control-expose-headers": "Mcp-Session-Id",
 } as const;
-
-function getFirstHeaderValue(value: string | string[] | undefined) {
-  if (typeof value === "string") {
-    return value.split(",")[0]?.trim();
-  }
-
-  return value?.[0]?.split(",")[0]?.trim();
-}
 
 function parseHostName(host: string | undefined) {
   if (!host) {
@@ -24,10 +18,6 @@ function parseHostName(host: string | undefined) {
   } catch {
     return undefined;
   }
-}
-
-function isLoopbackHostname(hostname: string | undefined) {
-  return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
 }
 
 function getRequestHostName(headers: Record<string, string | string[] | undefined>) {
@@ -92,6 +82,16 @@ export function resolveOriginPolicy(input: {
     allowed: false,
     responseOrigin: undefined,
   };
+}
+
+export function installCorsGuard(res: Response, resolvedOrigin: string) {
+  const originalSetHeader = res.setHeader.bind(res);
+  res.setHeader = ((name: string, value: number | string | readonly string[]) => {
+    if (name.toLowerCase() === "access-control-allow-origin") {
+      return originalSetHeader(name, resolvedOrigin);
+    }
+    return originalSetHeader(name, value);
+  }) as typeof res.setHeader;
 }
 
 export function applyCorsHeaders(res: Response, responseOrigin: string | undefined) {

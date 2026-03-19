@@ -10,7 +10,8 @@ import { detectClientProfile, detectInitializeClientProfile, reconcileClientProf
 import { getClientProfile } from "./clientProfiles/index.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
-import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
+import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
+import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import { createServer } from "./server.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
@@ -43,12 +44,6 @@ function getCanonicalOAuthDiscoveryPath(pathname, profileId) {
         ? canonicalPath
         : undefined;
 }
-function getFirstHeaderValue(value) {
-    if (typeof value === "string") {
-        return value.split(",")[0]?.trim();
-    }
-    return value?.[0]?.split(",")[0]?.trim();
-}
 function getBearerToken(authorizationHeader) {
     if (!authorizationHeader?.startsWith("Bearer ")) {
         return undefined;
@@ -71,12 +66,8 @@ function isDirectUpstreamBearerToken(req, auth) {
         return false;
     }
 }
-function isLoopbackHostname(hostname) {
-    return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
-}
 function writeJson(res, statusCode, body) {
     res.status(statusCode);
-    applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify(body));
 }
@@ -314,17 +305,6 @@ export async function startHttpServer(options) {
         });
         next();
     });
-    app.use((_req, res, next) => {
-        const originalSetHeader = res.setHeader.bind(res);
-        res.setHeader = ((name, value) => {
-            if (name.toLowerCase() === "access-control-allow-origin" &&
-                typeof res.locals.corsOrigin === "string") {
-                return originalSetHeader(name, res.locals.corsOrigin);
-            }
-            return originalSetHeader(name, value);
-        });
-        next();
-    });
     if (allowedHosts.length > 0) {
         app.use(hostHeaderValidation(allowedHosts));
     }
@@ -345,11 +325,10 @@ export async function startHttpServer(options) {
             writeForbiddenOrigin(res);
             return;
         }
-        res.locals.corsOrigin = resolution.responseOrigin;
-        next();
-    });
-    app.use((_req, res, next) => {
-        applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
+        applyCorsHeaders(res, resolution.responseOrigin);
+        if (resolution.responseOrigin) {
+            installCorsGuard(res, resolution.responseOrigin);
+        }
         next();
     });
     if (auth.mode === "oauth") {
@@ -374,7 +353,6 @@ export async function startHttpServer(options) {
     app.use((req, res, next) => {
         if (req.method === "OPTIONS") {
             logHttpDebug("request.preflight", getRequestDebugDetails(req));
-            applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
             res.status(204).end();
             return;
         }
@@ -489,7 +467,6 @@ export async function startHttpServer(options) {
                 profileId: resolvedProfile?.profileId,
                 profileReason: resolvedProfile?.reason,
             });
-            applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
             await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
         }
         catch (error) {

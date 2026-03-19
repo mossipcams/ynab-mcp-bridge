@@ -27,7 +27,8 @@ import { getClientProfile } from "./clientProfiles/index.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import type { ClientProfileId, RequestContext as ClientProfileRequestContext } from "./clientProfiles/types.js";
-import { applyCorsHeaders, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
+import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
+import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import { createServer } from "./server.js";
 
 type HttpServerOptions = {
@@ -116,13 +117,6 @@ function getCanonicalOAuthDiscoveryPath(pathname: string, profileId: ClientProfi
     : undefined;
 }
 
-function getFirstHeaderValue(value: string | string[] | undefined) {
-  if (typeof value === "string") {
-    return value.split(",")[0]?.trim();
-  }
-
-  return value?.[0]?.split(",")[0]?.trim();
-}
 
 function getBearerToken(authorizationHeader: string | undefined) {
   if (!authorizationHeader?.startsWith("Bearer ")) {
@@ -152,13 +146,8 @@ function isDirectUpstreamBearerToken(req: Pick<Request, "headers">, auth: Extrac
   }
 }
 
-function isLoopbackHostname(hostname: string | undefined) {
-  return hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]" || hostname === "localhost";
-}
-
 function writeJson(res: Response, statusCode: number, body: unknown) {
   res.status(statusCode);
-  applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(body));
 }
@@ -471,23 +460,6 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     next();
   });
 
-  app.use((_req, res, next) => {
-    const originalSetHeader = res.setHeader.bind(res);
-
-    res.setHeader = ((name: string, value: number | string | readonly string[]) => {
-      if (
-        name.toLowerCase() === "access-control-allow-origin" &&
-        typeof res.locals.corsOrigin === "string"
-      ) {
-        return originalSetHeader(name, res.locals.corsOrigin);
-      }
-
-      return originalSetHeader(name, value);
-    }) as typeof res.setHeader;
-
-    next();
-  });
-
   if (allowedHosts.length > 0) {
     app.use(hostHeaderValidation(allowedHosts));
   } else if (isLoopbackHostname(host)) {
@@ -510,13 +482,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       return;
     }
 
-    res.locals.corsOrigin = resolution.responseOrigin;
+    applyCorsHeaders(res, resolution.responseOrigin);
 
-    next();
-  });
+    if (resolution.responseOrigin) {
+      installCorsGuard(res, resolution.responseOrigin);
+    }
 
-  app.use((_req, res, next) => {
-    applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
     next();
   });
 
@@ -552,7 +523,6 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   app.use((req, res, next) => {
     if (req.method === "OPTIONS") {
       logHttpDebug("request.preflight", getRequestDebugDetails(req));
-      applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
       res.status(204).end();
       return;
     }
@@ -692,7 +662,6 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
         profileId: resolvedProfile?.profileId,
         profileReason: resolvedProfile?.reason,
       });
-      applyCorsHeaders(res, typeof res.locals.corsOrigin === "string" ? res.locals.corsOrigin : undefined);
       await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
     } catch (error) {
       await cleanup();
