@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.6...ynab-mcp-bridge-v0.11.0) (2026-03-20)
+
+
+### Features
+
+* complete quality stack and add oxlint pilot ([#147](https://github.com/mossipcams/ynab-mcp-bridge/issues/147)) ([ab4bff4](https://github.com/mossipcams/ynab-mcp-bridge/commit/ab4bff4011fbf2191e896a2940335a3c34e8063f))
+
+
+### Bug Fixes
+
+* align agent workflow docs with planning and TDD ([#144](https://github.com/mossipcams/ynab-mcp-bridge/issues/144)) ([7938c84](https://github.com/mossipcams/ynab-mcp-bridge/commit/7938c8488571c43ce819729f372121bad7fca507))
+
 ## [0.10.6](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.5...ynab-mcp-bridge-v0.10.6) (2026-03-19)
 
 
