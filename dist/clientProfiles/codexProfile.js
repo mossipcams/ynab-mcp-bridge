@@ -1,5 +1,6 @@
 import { genericProfile } from "./genericProfile.js";
 import { getRequestUserAgent } from "./requestContext.js";
+import { getStringValue, isRecord } from "../typeUtils.js";
 const CODEX_DISCOVERY_PATHS = new Set([
     "/.well-known/oauth-authorization-server/sse",
     "/sse/.well-known/oauth-authorization-server",
@@ -27,8 +28,8 @@ export const codexProfile = {
         return undefined;
     },
     matchesPreAuth: (context) => Boolean(codexProfile.detectPreAuth?.(context)),
-    matchesInitialize: (clientInfo) => (typeof clientInfo?.name === "string" &&
-        clientInfo.name.toLowerCase().includes("codex")),
+    matchesInitialize: (clientInfo) => Boolean(isRecord(clientInfo) &&
+        getStringValue(clientInfo, "name")?.toLowerCase().includes("codex")),
     oauth: {
         ...genericProfile.oauth,
         discoveryPathVariants: [

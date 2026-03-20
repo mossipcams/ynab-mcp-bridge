@@ -233,7 +233,7 @@ describe("createServer", () => {
     const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
 
     expect(source).toContain("name: GetMcpVersionTool.name");
-    expect(source).toContain("GetAccountTool.execute(");
+    expect(source).toContain("executeTool(GetAccountTool.execute, api)");
     expect(source).not.toContain("module: GetAccountTool");
     expect(source).not.toContain("module.execute");
   });

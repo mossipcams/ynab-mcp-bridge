@@ -1,16 +1,20 @@
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
+import type { PlanId } from "./ynabTypes.js";
+import { toPlanId } from "./ynabTypes.js";
 
 type RuntimeTransport = "http" | "stdio";
 type DeploymentMode = "authless" | "oauth-single-tenant" | "oauth-hardened";
+
+type YnabConfigInputPlanId = string | PlanId;
 
 export type RuntimeAuthConfig =
   | {
       deployment: "authless";
       mode: "none";
     }
-  | {
+    | {
       audience: string;
       authorizationUrl: string;
       callbackPath: string;
@@ -22,8 +26,8 @@ export type RuntimeAuthConfig =
       mode: "oauth";
       publicUrl: string;
       scopes: string[];
-      storePath?: string;
-      tokenSigningSecret?: string;
+      storePath?: string | undefined;
+      tokenSigningSecret?: string | undefined;
       tokenUrl: string;
     };
 
@@ -39,12 +43,17 @@ type RuntimeConfig = {
 
 export type YnabConfig = {
   apiToken: string;
-  planId?: string;
+  planId?: YnabConfigInputPlanId | undefined;
+};
+
+export type NormalizedYnabConfig = {
+  apiToken: string;
+  planId?: PlanId | undefined;
 };
 
 type AppConfig = {
   runtime: RuntimeConfig;
-  ynab: YnabConfig;
+  ynab: NormalizedYnabConfig;
 };
 
 type EnvConfig = Record<string, string | undefined>;
@@ -300,6 +309,20 @@ function deriveTokenSigningSecret(
     .digest("base64url");
 }
 
+function readLegacyAuthMode(args: string[], env: EnvConfig): "none" | "oauth" | undefined {
+  const authMode = readOptionalValue(readFlag(args, "--auth-mode")) ?? readOptionalValue(env["MCP_AUTH_MODE"]);
+
+  if (!authMode) {
+    return undefined;
+  }
+
+  if (authMode !== "none" && authMode !== "oauth") {
+    throw new Error(`Unsupported auth mode: ${authMode}`);
+  }
+
+  return authMode;
+}
+
 function assertRuntimeTransportCompatibility(
   auth: RuntimeAuthConfig,
   rawTransport: RuntimeTransport,
@@ -312,20 +335,6 @@ function assertRuntimeTransportCompatibility(
   if (auth.mode === "oauth" && auth.deployment === "oauth-hardened" && resolvedAllowedOrigins.length === 0) {
     throw new Error("oauth-hardened deployment requires MCP_ALLOWED_ORIGINS or --allowed-origins.");
   }
-}
-
-function readLegacyAuthMode(args: string[], env: EnvConfig): "none" | "oauth" | undefined {
-  const authMode = readOptionalValue(readFlag(args, "--auth-mode")) ?? readOptionalValue(env.MCP_AUTH_MODE);
-
-  if (!authMode) {
-    return undefined;
-  }
-
-  if (authMode !== "none" && authMode !== "oauth") {
-    throw new Error(`Unsupported auth mode: ${authMode}`);
-  }
-
-  return authMode;
 }
 
 function isDeploymentMode(value: string): value is DeploymentMode {
@@ -346,7 +355,7 @@ function assertDeploymentModeCompatibility(
 }
 
 function readDeploymentMode(args: string[], env: EnvConfig): DeploymentMode {
-  const deploymentMode = readOptionalValue(readFlag(args, "--deployment-mode")) ?? readOptionalValue(env.MCP_DEPLOYMENT_MODE);
+  const deploymentMode = readOptionalValue(readFlag(args, "--deployment-mode")) ?? readOptionalValue(env["MCP_DEPLOYMENT_MODE"]);
   const legacyAuthMode = readLegacyAuthMode(args, env);
 
   if (deploymentMode) {
@@ -363,7 +372,7 @@ function readDeploymentMode(args: string[], env: EnvConfig): DeploymentMode {
 
 function resolveRuntimeAuthConfig(args: string[], env: EnvConfig): RuntimeAuthConfig {
   const deployment = readDeploymentMode(args, env);
-  const explicitDeploymentMode = readOptionalValue(readFlag(args, "--deployment-mode")) ?? readOptionalValue(env.MCP_DEPLOYMENT_MODE);
+  const explicitDeploymentMode = readOptionalValue(readFlag(args, "--deployment-mode")) ?? readOptionalValue(env["MCP_DEPLOYMENT_MODE"]);
 
   if (deployment === "authless") {
     return {
@@ -373,31 +382,31 @@ function resolveRuntimeAuthConfig(args: string[], env: EnvConfig): RuntimeAuthCo
   }
 
   const callbackPath = readPathValue(
-    readFlag(args, "--oauth-callback-path") ?? env.MCP_OAUTH_CALLBACK_PATH ?? "/oauth/callback",
+    readFlag(args, "--oauth-callback-path") ?? env["MCP_OAUTH_CALLBACK_PATH"] ?? "/oauth/callback",
     "MCP_OAUTH_CALLBACK_PATH",
   );
-  const publicUrl = readUrlLikeValue(readFlag(args, "--public-url") ?? env.MCP_PUBLIC_URL, "MCP_PUBLIC_URL");
-  const clientId = readOptionalValue(readFlag(args, "--oauth-client-id") ?? env.MCP_OAUTH_CLIENT_ID);
-  const clientSecret = readOptionalValue(readFlag(args, "--oauth-client-secret") ?? env.MCP_OAUTH_CLIENT_SECRET);
+  const publicUrl = readUrlLikeValue(readFlag(args, "--public-url") ?? env["MCP_PUBLIC_URL"], "MCP_PUBLIC_URL");
+  const clientId = readOptionalValue(readFlag(args, "--oauth-client-id") ?? env["MCP_OAUTH_CLIENT_ID"]);
+  const clientSecret = readOptionalValue(readFlag(args, "--oauth-client-secret") ?? env["MCP_OAUTH_CLIENT_SECRET"]);
   const cloudflareDomain = readHostnameLikeValue(
-    readFlag(args, "--oauth-cloudflare-domain") ?? env.MCP_OAUTH_CLOUDFLARE_DOMAIN,
+    readFlag(args, "--oauth-cloudflare-domain") ?? env["MCP_OAUTH_CLOUDFLARE_DOMAIN"],
     "MCP_OAUTH_CLOUDFLARE_DOMAIN",
   );
   const cloudflareAccessUrls = buildCloudflareAccessUrls(cloudflareDomain, clientId);
-  const issuer = readUrlLikeValue(readFlag(args, "--oauth-issuer") ?? env.MCP_OAUTH_ISSUER, "MCP_OAUTH_ISSUER")
+  const issuer = readUrlLikeValue(readFlag(args, "--oauth-issuer") ?? env["MCP_OAUTH_ISSUER"], "MCP_OAUTH_ISSUER")
     ?? cloudflareAccessUrls?.issuer;
   const authorizationUrl = readUrlLikeValue(
-    readFlag(args, "--oauth-authorization-url") ?? env.MCP_OAUTH_AUTHORIZATION_URL,
+    readFlag(args, "--oauth-authorization-url") ?? env["MCP_OAUTH_AUTHORIZATION_URL"],
     "MCP_OAUTH_AUTHORIZATION_URL",
   ) ?? cloudflareAccessUrls?.authorizationUrl;
-  const tokenUrl = readUrlLikeValue(readFlag(args, "--oauth-token-url") ?? env.MCP_OAUTH_TOKEN_URL, "MCP_OAUTH_TOKEN_URL")
+  const tokenUrl = readUrlLikeValue(readFlag(args, "--oauth-token-url") ?? env["MCP_OAUTH_TOKEN_URL"], "MCP_OAUTH_TOKEN_URL")
     ?? cloudflareAccessUrls?.tokenUrl;
-  const jwksUrl = readUrlLikeValue(readFlag(args, "--oauth-jwks-url") ?? env.MCP_OAUTH_JWKS_URL, "MCP_OAUTH_JWKS_URL")
+  const jwksUrl = readUrlLikeValue(readFlag(args, "--oauth-jwks-url") ?? env["MCP_OAUTH_JWKS_URL"], "MCP_OAUTH_JWKS_URL")
     ?? cloudflareAccessUrls?.jwksUrl;
-  const audience = readOptionalValue(readFlag(args, "--oauth-audience") ?? env.MCP_OAUTH_AUDIENCE) ?? publicUrl;
-  const storePath = readFilePathValue(readFlag(args, "--oauth-store-path") ?? env.MCP_OAUTH_STORE_PATH)
+  const audience = readOptionalValue(readFlag(args, "--oauth-audience") ?? env["MCP_OAUTH_AUDIENCE"]) ?? publicUrl;
+  const storePath = readFilePathValue(readFlag(args, "--oauth-store-path") ?? env["MCP_OAUTH_STORE_PATH"])
     ?? getDefaultOAuthStorePath();
-  const tokenSigningSecret = readOptionalValue(readFlag(args, "--oauth-token-signing-secret") ?? env.MCP_OAUTH_TOKEN_SIGNING_SECRET)
+  const tokenSigningSecret = readOptionalValue(readFlag(args, "--oauth-token-signing-secret") ?? env["MCP_OAUTH_TOKEN_SIGNING_SECRET"])
     ?? deriveTokenSigningSecret(clientSecret, publicUrl, clientId);
 
   if (!issuer || !authorizationUrl || !tokenUrl || !jwksUrl || !audience || !publicUrl || !clientId || !clientSecret || !callbackPath || !storePath || !tokenSigningSecret) {
@@ -420,7 +429,7 @@ function resolveRuntimeAuthConfig(args: string[], env: EnvConfig): RuntimeAuthCo
     tokenUrl,
   });
 
-  const scopes = getEffectiveOAuthScopes(parseCsv(readFlag(args, "--oauth-scopes") ?? env.MCP_OAUTH_SCOPES ?? ""));
+  const scopes = getEffectiveOAuthScopes(parseCsv(readFlag(args, "--oauth-scopes") ?? env["MCP_OAUTH_SCOPES"] ?? ""));
 
   return {
     audience,
@@ -441,8 +450,8 @@ function resolveRuntimeAuthConfig(args: string[], env: EnvConfig): RuntimeAuthCo
 }
 
 function getBackendReadiness(env: EnvConfig): BackendReadiness {
-  const ynabApiToken = hasValue(env.YNAB_API_TOKEN);
-  const ynabPlanIdConfigured = hasValue(env.YNAB_PLAN_ID);
+  const ynabApiToken = hasValue(env["YNAB_API_TOKEN"]);
+  const ynabPlanIdConfigured = hasValue(env["YNAB_PLAN_ID"]);
 
   return {
     status: ynabApiToken ? "ok" : "misconfigured",
@@ -464,15 +473,18 @@ export function assertBackendEnvironment(env: EnvConfig): BackendReadiness {
   return readiness;
 }
 
-export function readYnabConfig(env: EnvConfig): YnabConfig {
+export function readYnabConfig(env: EnvConfig): NormalizedYnabConfig {
+  const planId = toPlanId(readOptionalValue(env["YNAB_PLAN_ID"]));
+
   return {
-    apiToken: readOptionalValue(env.YNAB_API_TOKEN) ?? "",
-    planId: readOptionalValue(env.YNAB_PLAN_ID),
+    apiToken: readOptionalValue(env["YNAB_API_TOKEN"]) ?? "",
+    ...(planId ? { planId } : {}),
   };
 }
 
-export function assertYnabConfig(config: YnabConfig | undefined): YnabConfig {
+export function assertYnabConfig(config: YnabConfig | undefined): NormalizedYnabConfig {
   const apiToken = readOptionalValue(config?.apiToken);
+  const planId = toPlanId(config?.planId);
 
   if (!apiToken) {
     throw new Error("YNAB config is required.");
@@ -480,18 +492,18 @@ export function assertYnabConfig(config: YnabConfig | undefined): YnabConfig {
 
   return {
     apiToken,
-    planId: readOptionalValue(config?.planId),
+    ...(planId ? { planId } : {}),
   };
 }
 
 export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeConfig {
-  const rawTransport = readFlag(args, "--transport") ?? env.MCP_TRANSPORT ?? "http";
+  const rawTransport = readFlag(args, "--transport") ?? env["MCP_TRANSPORT"] ?? "http";
 
   if (rawTransport !== "http" && rawTransport !== "stdio") {
     throw new Error(`Unsupported transport: ${rawTransport}`);
   }
 
-  const rawPort = readFlag(args, "--port") ?? env.MCP_PORT ?? "3000";
+  const rawPort = readFlag(args, "--port") ?? env["MCP_PORT"] ?? "3000";
   const port = Number.parseInt(rawPort, 10);
 
   if (!Number.isInteger(port)) {
@@ -499,12 +511,12 @@ export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeCon
   }
 
   const allowedOrigins = readCsvFlag(args, "--allowed-origins");
-  const envAllowedOrigins = env.MCP_ALLOWED_ORIGINS
-    ? parseCsv(env.MCP_ALLOWED_ORIGINS)
+  const envAllowedOrigins = env["MCP_ALLOWED_ORIGINS"]
+    ? parseCsv(env["MCP_ALLOWED_ORIGINS"])
     : undefined;
   const allowedHosts = readCsvFlag(args, "--allowed-hosts");
-  const envAllowedHosts = env.MCP_ALLOWED_HOSTS
-    ? parseCsv(env.MCP_ALLOWED_HOSTS)
+  const envAllowedHosts = env["MCP_ALLOWED_HOSTS"]
+    ? parseCsv(env["MCP_ALLOWED_HOSTS"])
     : undefined;
 
   const resolvedAllowedOrigins = allowedOrigins.length > 0 ? allowedOrigins : (envAllowedOrigins ?? []);
@@ -518,8 +530,8 @@ export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeCon
     allowedHosts: resolvedAllowedHosts,
     auth,
     transport: rawTransport,
-    host: readFlag(args, "--host") ?? env.MCP_HOST ?? "127.0.0.1",
-    path: readFlag(args, "--path") ?? env.MCP_PATH ?? "/mcp",
+    host: readFlag(args, "--host") ?? env["MCP_HOST"] ?? "127.0.0.1",
+    path: readFlag(args, "--path") ?? env["MCP_PATH"] ?? "/mcp",
     port,
   };
 }

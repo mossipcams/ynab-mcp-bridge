@@ -1,4 +1,5 @@
 import { ServerError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { getStringValue, isRecord } from "./typeUtils.js";
 class UpstreamTokenExchangeError extends ServerError {
     upstreamError;
     upstreamErrorDescription;
@@ -22,24 +23,28 @@ function summarizeUpstreamTokenError(bodyText, status) {
     }
     try {
         const parsed = JSON.parse(bodyText);
-        const error = typeof parsed.error === "string" ? parsed.error : undefined;
-        const errorDescription = typeof parsed.error_description === "string"
-            ? parsed.error_description
-            : undefined;
+        if (!isRecord(parsed)) {
+            return details;
+        }
+        const error = getStringValue(parsed, "error");
+        const errorDescription = getStringValue(parsed, "error_description");
         const errorFields = [
             ...(error ? ["error"] : []),
             ...(errorDescription ? ["error_description"] : []),
         ];
         return {
             ...details,
-            upstreamError: error,
-            upstreamErrorDescription: errorDescription,
-            upstreamErrorFields: errorFields.length > 0 ? errorFields : undefined,
+            ...(error ? { upstreamError: error } : {}),
+            ...(errorDescription ? { upstreamErrorDescription: errorDescription } : {}),
+            ...(errorFields.length > 0 ? { upstreamErrorFields: errorFields } : {}),
         };
     }
     catch {
         return details;
     }
+}
+function isOAuthTokens(value) {
+    return isRecord(value) && typeof value["access_token"] === "string";
 }
 async function exchangeTokens(url, body, failureMessage) {
     const response = await fetch(url, {
@@ -54,7 +59,11 @@ async function exchangeTokens(url, body, failureMessage) {
         const bodyText = await response.text();
         throw new UpstreamTokenExchangeError(`${failureMessage} with status ${response.status}.`, summarizeUpstreamTokenError(bodyText, response.status));
     }
-    return await response.json();
+    const tokens = await response.json();
+    if (!isOAuthTokens(tokens)) {
+        throw new ServerError("Upstream token exchange returned an invalid token payload.");
+    }
+    return tokens;
 }
 export function createUpstreamOAuthAdapter(options) {
     return {

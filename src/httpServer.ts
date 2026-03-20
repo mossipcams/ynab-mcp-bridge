@@ -30,14 +30,15 @@ import type { ClientProfileId, RequestContext as ClientProfileRequestContext } f
 import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import { createServer } from "./server.js";
+import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 
 type HttpServerOptions = {
-  allowedHosts?: string[];
-  allowedOrigins?: string[];
-  auth?: RuntimeAuthConfig;
-  host?: string;
-  path?: string;
-  port?: number;
+  allowedHosts?: string[] | undefined;
+  allowedOrigins?: string[] | undefined;
+  auth?: RuntimeAuthConfig | undefined;
+  host?: string | undefined;
+  path?: string | undefined;
+  port?: number | undefined;
   ynab: YnabConfig;
 };
 
@@ -57,7 +58,7 @@ type ManagedRequest = {
 
 type RequestResolution =
   | {
-      cleanup?: () => Promise<void>;
+      cleanup?: (() => Promise<void>) | undefined;
       managedRequest: ManagedRequest;
       status: "ready";
     }
@@ -66,12 +67,6 @@ type RequestResolution =
     };
 
 type HttpDebugDetails = Record<string, unknown>;
-
-type JsonRpcRequestLike = {
-  id?: unknown;
-  method?: unknown;
-  params?: unknown;
-};
 
 type InitializeParamsLike = {
   capabilities?: unknown;
@@ -92,9 +87,29 @@ function getRequestPath(req: Pick<Request, "path" | "url">) {
   return new URL(req.url, "http://127.0.0.1").pathname;
 }
 
+function toClientProfileHeaders(headers: Pick<Request, "headers">["headers"]): ClientProfileRequestContext["headers"] {
+  const normalizedHeaders: Record<string, string | string[] | undefined> = {};
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (typeof value === "string") {
+      normalizedHeaders[name] = value;
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      normalizedHeaders[name] = value;
+      continue;
+    }
+
+    normalizedHeaders[name] = undefined;
+  }
+
+  return normalizedHeaders;
+}
+
 function toClientProfileRequestContext(req: Pick<Request, "headers" | "method" | "path" | "url">): ClientProfileRequestContext {
   return {
-    headers: req.headers as Record<string, string | string[] | undefined>,
+    headers: toClientProfileHeaders(req.headers),
     method: req.method ?? "GET",
     path: getRequestPath(req),
   };
@@ -236,11 +251,11 @@ function hasHeaderValue(value: string | string[] | undefined) {
 function getRequestDebugDetails(
   req: Request,
   options: {
-    authMode?: RuntimeAuthConfig["mode"];
-    authRequired?: boolean;
+    authMode?: RuntimeAuthConfig["mode"] | undefined;
+    authRequired?: boolean | undefined;
   } = {},
 ): HttpDebugDetails {
-  const authSubject = req.auth?.extra?.subject;
+  const authSubject = req.auth?.extra?.["subject"];
   return {
     authMode: options.authMode,
     authClientId: req.auth?.clientId,
@@ -258,36 +273,43 @@ function getRequestDebugDetails(
 }
 
 function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
-  if (!parsedBody || typeof parsedBody !== "object") {
+  if (!isRecord(parsedBody)) {
     return {};
   }
 
-  const request = parsedBody as JsonRpcRequestLike;
   const details: HttpDebugDetails = {};
+  const method = getStringValue(parsedBody, "method");
 
-  if (typeof request.method === "string") {
-    details.jsonRpcMethod = request.method;
+  if (method) {
+    details["jsonRpcMethod"] = method;
   }
 
-  if ("id" in request) {
-    details.jsonRpcId = request.id;
+  if ("id" in parsedBody) {
+    details["jsonRpcId"] = parsedBody["id"];
   }
 
   return details;
 }
 
 function getInitializeParams(parsedBody: unknown) {
-  if (!parsedBody || typeof parsedBody !== "object") {
+  if (!isRecord(parsedBody)) {
     return undefined;
   }
 
-  const request = parsedBody as JsonRpcRequestLike;
-
-  if (request.method !== "initialize" || !request.params || typeof request.params !== "object") {
+  if (getStringValue(parsedBody, "method") !== "initialize") {
     return undefined;
   }
 
-  return request.params as InitializeParamsLike;
+  const params = getRecordValueIfObject(parsedBody, "params");
+
+  if (!params) {
+    return undefined;
+  }
+
+  return {
+    capabilities: params["capabilities"],
+    clientInfo: params["clientInfo"],
+  } satisfies InitializeParamsLike;
 }
 
 function reconcileResolvedProfile(
@@ -367,19 +389,24 @@ function isPayloadTooLargeError(error: unknown) {
     );
 }
 
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return isRecord(error) && typeof error["code"] === "string";
+}
+
 async function createManagedRequest(config: YnabConfig) {
   const mcpServer = createServer(config);
-  const transport = new StreamableHTTPServerTransport({
+  const nodeTransport = new StreamableHTTPServerTransport({
     enableJsonResponse: true,
-    sessionIdGenerator: undefined,
   });
-
-  await mcpServer.connect(transport);
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore The MCP SDK transport implementation matches the runtime contract,
+  // but exactOptionalPropertyTypes rejects its optional callback fields.
+  await mcpServer.connect(nodeTransport);
 
   return {
-    transport,
+    transport: nodeTransport,
     close: async () => {
-      await transport.close();
+      await nodeTransport.close();
       await mcpServer.close();
     },
   } satisfies ManagedRequest;
@@ -420,7 +447,7 @@ async function closeNodeServer(server: NodeHttpServer) {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => {
       if (error) {
-        if ((error as NodeJS.ErrnoException).code === "ERR_SERVER_NOT_RUNNING") {
+        if (isErrnoException(error) && error.code === "ERR_SERVER_NOT_RUNNING") {
           resolve();
           return;
         }
@@ -473,10 +500,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   function getRequestAuthDebugOptions(req: Pick<Request, "path" | "url">) {
     const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
 
-    return {
-      authMode: auth.mode,
-      authRequired: isProtectedMcpRequest || undefined,
-    };
+    return isProtectedMcpRequest
+      ? { authMode: auth.mode, authRequired: true }
+      : { authMode: auth.mode };
   }
 
   app.disable("x-powered-by");
@@ -490,7 +516,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   app.use((req, res, next) => {
     const detectedProfile = detectClientProfile(toClientProfileRequestContext(req));
 
-    setResolvedClientProfile(res.locals as Record<string, unknown>, detectedProfile);
+    setResolvedClientProfile(res.locals, detectedProfile);
     logClientProfileEvent("profile.detected", {
       method: req.method ?? "GET",
       path: getRequestPath(req),
@@ -534,7 +560,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   if (auth.mode === "oauth") {
     app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
-      const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+      const resolvedProfile = getResolvedClientProfile(res.locals);
 
       if (resolvedProfile?.profileId !== "chatgpt") {
         next();
@@ -545,7 +571,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     });
 
     app.use((req, res, next) => {
-      const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+      const resolvedProfile = getResolvedClientProfile(res.locals);
       const canonicalPath = getCanonicalOAuthDiscoveryPath(
         getRequestPath(req),
         resolvedProfile?.profileId ?? "generic",
@@ -665,7 +691,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
       const resolvedProfile = reconcileResolvedProfile(
         req,
-        res.locals as Record<string, unknown>,
+        res.locals,
         parsedBody,
       );
 
@@ -737,7 +763,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     throw new Error("HTTP server did not expose a TCP address");
   }
 
-  const resolvedAddress = address as AddressInfo;
+  const resolvedAddress: AddressInfo = address;
   let closed = false;
 
   return {

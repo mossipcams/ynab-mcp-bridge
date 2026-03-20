@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer as createNodeHttpServer } from "node:http";
 import { expect } from "vitest";
+import { getArrayValue, getNumberValue, getStringValue, isRecord } from "./typeUtils.js";
 const DEFAULT_REMOTE_ORIGIN = "https://claude.ai";
 const DEFAULT_REDIRECT_URI = `${DEFAULT_REMOTE_ORIGIN}/oauth/callback`;
 const DEFAULT_RESOURCE = "https://mcp.example.com/mcp";
@@ -113,7 +114,35 @@ export async function registerOAuthClient(httpServerUrl, overrides = {}) {
         }),
     });
     expect(registrationResponse.status).toBe(201);
-    return await registrationResponse.json();
+    const registration = await registrationResponse.json();
+    if (!isRecord(registration)) {
+        throw new Error("OAuth client registration did not return an object.");
+    }
+    const clientId = getStringValue(registration, "client_id");
+    if (!clientId) {
+        throw new Error("OAuth client registration did not return a client_id.");
+    }
+    return {
+        client_id: clientId,
+        ...(typeof getNumberValue(registration, "client_id_issued_at") === "number"
+            ? { client_id_issued_at: getNumberValue(registration, "client_id_issued_at") }
+            : {}),
+        ...(typeof getStringValue(registration, "client_name") === "string"
+            ? { client_name: getStringValue(registration, "client_name") }
+            : {}),
+        ...(Array.isArray(getArrayValue(registration, "grant_types"))
+            ? { grant_types: getArrayValue(registration, "grant_types")?.filter((value) => typeof value === "string") }
+            : {}),
+        ...(Array.isArray(getArrayValue(registration, "redirect_uris"))
+            ? { redirect_uris: getArrayValue(registration, "redirect_uris")?.filter((value) => typeof value === "string") }
+            : {}),
+        ...(Array.isArray(getArrayValue(registration, "response_types"))
+            ? { response_types: getArrayValue(registration, "response_types")?.filter((value) => typeof value === "string") }
+            : {}),
+        ...(typeof getStringValue(registration, "token_endpoint_auth_method") === "string"
+            ? { token_endpoint_auth_method: getStringValue(registration, "token_endpoint_auth_method") }
+            : {}),
+    };
 }
 export async function startAuthorization(httpServerUrl, clientId, codeChallenge = "test-challenge", overrides = {}) {
     return await fetch(new URL(`/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(DEFAULT_REDIRECT_URI)}&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256&scope=${encodeURIComponent(DEFAULT_SCOPE)}&state=client-state-123&resource=${encodeURIComponent(DEFAULT_RESOURCE)}`, httpServerUrl), {

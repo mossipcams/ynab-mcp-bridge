@@ -1,5 +1,6 @@
 import { genericProfile } from "./genericProfile.js";
 import { getRequestUserAgent } from "./requestContext.js";
+import { getStringValue, isRecord } from "../typeUtils.js";
 import type { ClientProfile } from "./types.js";
 
 const CODEX_DISCOVERY_PATHS = new Set([
@@ -32,9 +33,9 @@ export const codexProfile: ClientProfile = {
     return undefined;
   },
   matchesPreAuth: (context) => Boolean(codexProfile.detectPreAuth?.(context)),
-  matchesInitialize: (clientInfo) => (
-    typeof (clientInfo as { name?: unknown } | undefined)?.name === "string" &&
-    (clientInfo as { name: string }).name.toLowerCase().includes("codex")
+  matchesInitialize: (clientInfo) => Boolean(
+    isRecord(clientInfo) &&
+    getStringValue(clientInfo, "name")?.toLowerCase().includes("codex"),
   ),
   oauth: {
     ...genericProfile.oauth,

@@ -1,6 +1,6 @@
 import type { RequestContext } from "./types.js";
 
-function getFirstHeaderValue(value: string | string[] | undefined) {
+function getFirstHeaderValue(value: string | readonly string[] | undefined) {
   if (typeof value === "string") {
     return value.split(",")[0]?.trim();
   }
@@ -9,7 +9,7 @@ function getFirstHeaderValue(value: string | string[] | undefined) {
 }
 
 export function getRequestOrigin(context: RequestContext) {
-  return getFirstHeaderValue(context.headers.origin)?.toLowerCase();
+  return getFirstHeaderValue(context.headers["origin"])?.toLowerCase();
 }
 
 export function getRequestUserAgent(context: RequestContext) {

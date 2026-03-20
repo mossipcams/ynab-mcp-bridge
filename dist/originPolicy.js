@@ -17,14 +17,14 @@ function parseHostName(host) {
 }
 function getRequestHostName(headers) {
     const forwardedHost = getFirstHeaderValue(headers["x-forwarded-host"]);
-    const host = forwardedHost ?? getFirstHeaderValue(headers.host);
+    const host = forwardedHost ?? getFirstHeaderValue(headers["host"]);
     return parseHostName(host);
 }
 export function normalizeOrigin(origin) {
     return new URL(origin).origin;
 }
 export function resolveOriginPolicy(input) {
-    const originHeader = getFirstHeaderValue(input.headers.origin);
+    const originHeader = getFirstHeaderValue(input.headers["origin"]);
     if (!originHeader) {
         return {
             allowed: true,
@@ -67,12 +67,13 @@ export function resolveOriginPolicy(input) {
 }
 export function installCorsGuard(res, resolvedOrigin) {
     const originalSetHeader = res.setHeader.bind(res);
-    res.setHeader = ((name, value) => {
+    const guardedSetHeader = (name, value) => {
         if (name.toLowerCase() === "access-control-allow-origin") {
             return originalSetHeader(name, resolvedOrigin);
         }
         return originalSetHeader(name, value);
-    });
+    };
+    res.setHeader = guardedSetHeader;
 }
 export function applyCorsHeaders(res, responseOrigin) {
     for (const [name, value] of Object.entries(CORS_HEADERS)) {

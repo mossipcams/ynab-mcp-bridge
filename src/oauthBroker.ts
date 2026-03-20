@@ -302,7 +302,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
 
   const handleConsent: RequestHandler = async (req, res, next) => {
     try {
-      const { action, consentChallenge } = parseConsentRequestBody(req.body as unknown);
+      const { action, consentChallenge } = parseConsentRequestBody(req.body);
       logOAuthDebug("consent.received", {
         action,
         hasConsentChallenge: Boolean(consentChallenge),

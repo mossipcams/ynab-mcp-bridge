@@ -13,6 +13,7 @@ import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import { createServer } from "./server.js";
+import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 function getRequestPath(req) {
@@ -24,9 +25,24 @@ function getRequestPath(req) {
     }
     return new URL(req.url, "http://127.0.0.1").pathname;
 }
+function toClientProfileHeaders(headers) {
+    const normalizedHeaders = {};
+    for (const [name, value] of Object.entries(headers)) {
+        if (typeof value === "string") {
+            normalizedHeaders[name] = value;
+            continue;
+        }
+        if (Array.isArray(value)) {
+            normalizedHeaders[name] = value;
+            continue;
+        }
+        normalizedHeaders[name] = undefined;
+    }
+    return normalizedHeaders;
+}
 function toClientProfileRequestContext(req) {
     return {
-        headers: req.headers,
+        headers: toClientProfileHeaders(req.headers),
         method: req.method ?? "GET",
         path: getRequestPath(req),
     };
@@ -135,7 +151,7 @@ function hasHeaderValue(value) {
     return Boolean(getFirstHeaderValue(value));
 }
 function getRequestDebugDetails(req, options = {}) {
-    const authSubject = req.auth?.extra?.subject;
+    const authSubject = req.auth?.extra?.["subject"];
     return {
         authMode: options.authMode,
         authClientId: req.auth?.clientId,
@@ -152,28 +168,34 @@ function getRequestDebugDetails(req, options = {}) {
     };
 }
 function getJsonRpcDebugDetails(parsedBody) {
-    if (!parsedBody || typeof parsedBody !== "object") {
+    if (!isRecord(parsedBody)) {
         return {};
     }
-    const request = parsedBody;
     const details = {};
-    if (typeof request.method === "string") {
-        details.jsonRpcMethod = request.method;
+    const method = getStringValue(parsedBody, "method");
+    if (method) {
+        details["jsonRpcMethod"] = method;
     }
-    if ("id" in request) {
-        details.jsonRpcId = request.id;
+    if ("id" in parsedBody) {
+        details["jsonRpcId"] = parsedBody["id"];
     }
     return details;
 }
 function getInitializeParams(parsedBody) {
-    if (!parsedBody || typeof parsedBody !== "object") {
+    if (!isRecord(parsedBody)) {
         return undefined;
     }
-    const request = parsedBody;
-    if (request.method !== "initialize" || !request.params || typeof request.params !== "object") {
+    if (getStringValue(parsedBody, "method") !== "initialize") {
         return undefined;
     }
-    return request.params;
+    const params = getRecordValueIfObject(parsedBody, "params");
+    if (!params) {
+        return undefined;
+    }
+    return {
+        capabilities: params["capabilities"],
+        clientInfo: params["clientInfo"],
+    };
 }
 function reconcileResolvedProfile(req, locals, parsedBody) {
     const provisionalProfile = getResolvedClientProfile(locals);
@@ -233,17 +255,21 @@ function isPayloadTooLargeError(error) {
             ("status" in error && error.status === 413) ||
             ("statusCode" in error && error.statusCode === 413));
 }
+function isErrnoException(error) {
+    return isRecord(error) && typeof error["code"] === "string";
+}
 async function createManagedRequest(config) {
     const mcpServer = createServer(config);
-    const transport = new StreamableHTTPServerTransport({
+    const nodeTransport = new StreamableHTTPServerTransport({
         enableJsonResponse: true,
-        sessionIdGenerator: undefined,
     });
-    await mcpServer.connect(transport);
+    // @ts-ignore The MCP SDK transport implementation matches the runtime contract,
+    // but exactOptionalPropertyTypes rejects its optional callback fields.
+    await mcpServer.connect(nodeTransport);
     return {
-        transport,
+        transport: nodeTransport,
         close: async () => {
-            await transport.close();
+            await nodeTransport.close();
             await mcpServer.close();
         },
     };
@@ -272,7 +298,7 @@ async function closeNodeServer(server) {
     await new Promise((resolve, reject) => {
         server.close((error) => {
             if (error) {
-                if (error.code === "ERR_SERVER_NOT_RUNNING") {
+                if (isErrnoException(error) && error.code === "ERR_SERVER_NOT_RUNNING") {
                     resolve();
                     return;
                 }
@@ -315,10 +341,9 @@ export async function startHttpServer(options) {
     const jsonParser = express.json();
     function getRequestAuthDebugOptions(req) {
         const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
-        return {
-            authMode: auth.mode,
-            authRequired: isProtectedMcpRequest || undefined,
-        };
+        return isProtectedMcpRequest
+            ? { authMode: auth.mode, authRequired: true }
+            : { authMode: auth.mode };
     }
     app.disable("x-powered-by");
     app.set("trust proxy", 1);

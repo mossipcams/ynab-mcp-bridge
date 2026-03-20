@@ -26,6 +26,9 @@ export async function execute(input, api) {
             ]);
             const baselineResponses = responses.slice(0, baselineMonthIds.length);
             const latestResponse = responses[responses.length - 1];
+            if (!latestResponse) {
+                throw new Error("Latest month response was not returned.");
+            }
             const latestCategories = latestResponse.data.month.categories.filter((category) => !category.deleted && !category.hidden);
             const anomalies = latestCategories
                 .map((category) => {
