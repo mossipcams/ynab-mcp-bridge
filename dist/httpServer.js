@@ -175,6 +175,38 @@ function getInitializeParams(parsedBody) {
     }
     return request.params;
 }
+function reconcileResolvedProfile(req, locals, parsedBody) {
+    const provisionalProfile = getResolvedClientProfile(locals);
+    const initializeParams = getInitializeParams(parsedBody);
+    if (!provisionalProfile || !initializeParams) {
+        return provisionalProfile;
+    }
+    const confirmedProfile = detectInitializeClientProfile({
+        capabilities: initializeParams.capabilities,
+        clientInfo: initializeParams.clientInfo,
+    });
+    const reconciliation = reconcileClientProfile(provisionalProfile, confirmedProfile);
+    setResolvedClientProfile(locals, reconciliation.profile);
+    if (!reconciliation.mismatch && confirmedProfile) {
+        logClientProfileEvent("profile.detected", {
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+            profileId: confirmedProfile.profileId,
+            reason: confirmedProfile.reason,
+        });
+    }
+    else if (reconciliation.mismatch && confirmedProfile) {
+        logClientProfileEvent("profile.reconciled", {
+            confirmedProfileId: confirmedProfile.profileId,
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+            profileId: reconciliation.profile.profileId,
+            provisionalProfileId: provisionalProfile.profileId,
+            reason: reconciliation.profile.reason,
+        });
+    }
+    return getResolvedClientProfile(locals);
+}
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (Array.isArray(sessionId)) {
@@ -431,35 +463,7 @@ export async function startHttpServer(options) {
             res.once("close", () => {
                 void cleanup();
             });
-            const provisionalProfile = getResolvedClientProfile(res.locals);
-            const initializeParams = getInitializeParams(parsedBody);
-            if (provisionalProfile && initializeParams) {
-                const confirmedProfile = detectInitializeClientProfile({
-                    capabilities: initializeParams.capabilities,
-                    clientInfo: initializeParams.clientInfo,
-                });
-                const reconciliation = reconcileClientProfile(provisionalProfile, confirmedProfile);
-                setResolvedClientProfile(res.locals, reconciliation.profile);
-                if (!reconciliation.mismatch && confirmedProfile) {
-                    logClientProfileEvent("profile.detected", {
-                        method: req.method ?? "GET",
-                        path: getRequestPath(req),
-                        profileId: confirmedProfile.profileId,
-                        reason: confirmedProfile.reason,
-                    });
-                }
-                else if (reconciliation.mismatch && confirmedProfile) {
-                    logClientProfileEvent("profile.reconciled", {
-                        confirmedProfileId: confirmedProfile.profileId,
-                        method: req.method ?? "GET",
-                        path: getRequestPath(req),
-                        profileId: reconciliation.profile.profileId,
-                        provisionalProfileId: provisionalProfile.profileId,
-                        reason: reconciliation.profile.reason,
-                    });
-                }
-            }
-            const resolvedProfile = getResolvedClientProfile(res.locals);
+            const resolvedProfile = reconcileResolvedProfile(req, res.locals, parsedBody);
             logHttpDebug("transport.handoff", {
                 ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                 ...getJsonRpcDebugDetails(parsedBody),

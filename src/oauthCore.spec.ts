@@ -393,4 +393,50 @@ describe("createOAuthCore", () => {
       upstreamState: "missing-state",
     })).rejects.toThrow(InvalidRequestError);
   });
+
+  it("rejects client metadata without at least one https redirect URI", async () => {
+    const { core } = createCore();
+    const missingRedirectUrisClient = {
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    } as unknown as Parameters<typeof core.registerClient>[0];
+
+    await expect(core.registerClient(missingRedirectUrisClient))
+      .rejects.toThrow("redirect_uris must contain at least one https redirect URI.");
+
+    await expect(core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: [],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    })).rejects.toThrow("redirect_uris must contain at least one https redirect URI.");
+  });
+
+  it("rejects malformed authorization inputs before client matching", async () => {
+    const { core } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+
+    await expect(core.startAuthorization(client, {
+      codeChallenge: "",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+    })).rejects.toThrow("code_challenge is required.");
+
+    await expect(core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+    })).rejects.toThrow("redirect_uri is required.");
+  });
 });

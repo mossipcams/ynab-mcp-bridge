@@ -4,6 +4,7 @@ import { getEffectiveOAuthScopes } from "./config.js";
 import { logAppEvent } from "./logger.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthCore } from "./oauthCore.js";
+import { parseCallbackQuery, parseConsentRequestBody } from "./oauthSchemas.js";
 import { createOAuthStore } from "./oauthStore.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 function getConsentPageHeaders(authorizationUrl) {
@@ -77,13 +78,6 @@ function getTokenResponseDebugDetails(tokens) {
         hasTokenType: typeof tokens.token_type === "string" && tokens.token_type.length > 0,
         tokenResponseFields: Object.keys(tokens).sort(),
     };
-}
-function getBodyStringValue(body, key) {
-    if (!body || typeof body !== "object") {
-        return undefined;
-    }
-    const value = body[key];
-    return typeof value === "string" ? value : undefined;
 }
 export function createOAuthBroker(config) {
     const store = createOAuthStore(config.storePath);
@@ -207,6 +201,8 @@ export function createOAuthBroker(config) {
         async challengeForAuthorizationCode(client, authorizationCode) {
             return await core.getAuthorizationCodeChallenge(client, authorizationCode);
         },
+        // The MCP SDK provider interface fixes this method shape.
+        // eslint-disable-next-line max-params
         async exchangeAuthorizationCode(client, authorizationCode, _codeVerifier, redirectUri, resource) {
             try {
                 const tokens = await core.exchangeAuthorizationCode(client, authorizationCode, redirectUri, resource);
@@ -263,15 +259,11 @@ export function createOAuthBroker(config) {
     };
     const handleConsent = async (req, res, next) => {
         try {
-            const consentChallenge = getBodyStringValue(req.body, "consent_challenge");
-            const action = getBodyStringValue(req.body, "action");
+            const { action, consentChallenge } = parseConsentRequestBody(req.body);
             logOAuthDebug("consent.received", {
                 action,
                 hasConsentChallenge: Boolean(consentChallenge),
             });
-            if (!consentChallenge) {
-                throw new InvalidRequestError("Missing consent challenge.");
-            }
             const result = await core.approveConsent(consentChallenge, action ?? "");
             logOAuthDebug("consent.resolved", {
                 action: action ?? "",
@@ -290,32 +282,25 @@ export function createOAuthBroker(config) {
     };
     const handleCallback = async (req, res, next) => {
         try {
-            const upstreamState = typeof req.query.state === "string" ? req.query.state : undefined;
-            const upstreamError = typeof req.query.error === "string" ? req.query.error : undefined;
-            const upstreamErrorDescription = typeof req.query.error_description === "string"
-                ? req.query.error_description
-                : undefined;
-            const hasCode = typeof req.query.code === "string" && req.query.code.length > 0;
-            const hasError = typeof upstreamError === "string";
-            const hasState = typeof upstreamState === "string" && upstreamState.length > 0;
+            const callbackRequest = parseCallbackQuery(req.query);
             logOAuthDebug("callback.received", {
-                hasCode,
-                hasError,
-                hasState,
+                hasCode: callbackRequest.hasCode,
+                hasError: callbackRequest.hasError,
+                hasState: callbackRequest.hasState,
             });
-            if (!upstreamState) {
-                throw createMissingUpstreamStateError(upstreamError, upstreamErrorDescription);
+            if (!callbackRequest.upstreamState) {
+                throw createMissingUpstreamStateError(callbackRequest.error, callbackRequest.errorDescription);
             }
             const result = await core.handleCallback({
-                code: typeof req.query.code === "string" && req.query.code.length > 0 ? req.query.code : undefined,
-                error: upstreamError,
-                errorDescription: upstreamErrorDescription,
-                upstreamState,
+                code: callbackRequest.code,
+                error: callbackRequest.error,
+                errorDescription: callbackRequest.errorDescription,
+                upstreamState: callbackRequest.upstreamState,
             });
             logOAuthDebug("callback.completed", {
-                hasCode,
-                hasError,
-                hasState,
+                hasCode: callbackRequest.hasCode,
+                hasError: callbackRequest.hasError,
+                hasState: callbackRequest.hasState,
                 issuedAuthorizationCode: result.type === "redirect",
             });
             res.redirect(302, result.location);

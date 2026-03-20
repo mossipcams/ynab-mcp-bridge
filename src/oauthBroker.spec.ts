@@ -138,6 +138,62 @@ describe("oauth broker persistence", () => {
     ]));
   });
 
+  it("rejects repeated callback query parameters with an explicit validation error", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(
+      new URL("/oauth/callback?code=upstream-code-123&state=one&state=two", httpServer.url),
+      {
+        headers: {
+          Origin: "https://claude.ai",
+        },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("state must be a single string.");
+  });
+
+  it("rejects repeated consent form parameters with an explicit validation error", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/authorize/consent", httpServer.url), {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: "consent_challenge=one&consent_challenge=two&action=approve",
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("consent_challenge must be a single string.");
+  });
+
   it("keeps unapproved clients on the consent screen after restart", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
     const storePath = path.join(tempDir, "oauth-store.json");

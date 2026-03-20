@@ -51,6 +51,11 @@ jobs:
       - name: Run ESLint
         run: npm run lint
 
+      - name: Run Oxlint advisory pilot
+        if: matrix.node-version == '22.x'
+        continue-on-error: true
+        run: npm run lint:oxlint
+
       - name: Run TypeScript typecheck
         run: npm run typecheck
 

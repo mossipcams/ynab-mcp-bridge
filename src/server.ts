@@ -126,7 +126,7 @@ const toolRegistrations: ToolModule[] = [
   { title: "Get 70/20/10 Summary", name: GetBudgetRatioSummaryTool.name, description: GetBudgetRatioSummaryTool.description, inputSchema: GetBudgetRatioSummaryTool.inputSchema, execute: (input, api) => GetBudgetRatioSummaryTool.execute(input as Parameters<typeof GetBudgetRatioSummaryTool.execute>[0], api) },
 ];
 
-function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: ynab.API) {
+function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: ynab.API): void {
   registrar.registerTool(
     tool.name,
     {
@@ -139,7 +139,7 @@ function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: ynab.API)
   );
 }
 
-export function registerServerTools(registrar: ToolRegistrar, api: ynab.API) {
+export function registerServerTools(registrar: ToolRegistrar, api: ynab.API): string[] {
   const registeredToolNames: string[] = [];
 
   for (const tool of toolRegistrations) {
@@ -150,7 +150,7 @@ export function registerServerTools(registrar: ToolRegistrar, api: ynab.API) {
   return registeredToolNames;
 }
 
-export function createServer(config: YnabConfig, api = createYnabApi(config)) {
+export function createServer(config: YnabConfig, api = createYnabApi(config)): McpServer {
   const normalizedConfig = assertYnabConfig(config);
   const server = new McpServer(SERVER_INFO);
   const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -58,6 +59,95 @@ describe("code quality guardrails", () => {
     expect(eslintConfig).not.toContain('files: ["src/server.ts"]');
     expect(workflow).toContain("Run ESLint");
     expect(workflow).toContain("npm run lint");
+  });
+
+  it("defines the remaining explicit ESLint plugin and import guardrails for this slice", () => {
+    const eslintConfig = readFileSync(
+      new URL("../eslint.config.mjs", import.meta.url),
+      "utf8",
+    );
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+    const printedConfig = execFileSync(
+      "npx",
+      ["eslint", "--print-config", "src/server.ts"],
+      {
+        cwd: new URL("..", import.meta.url),
+        encoding: "utf8",
+      },
+    );
+
+    expect(packageJson.devDependencies["eslint-plugin-security"]).toBeTruthy();
+    expect(packageJson.devDependencies["eslint-plugin-sonarjs"]).toBeTruthy();
+    expect(eslintConfig).toContain("no-restricted-imports");
+    expect(printedConfig).toContain('"@typescript-eslint/no-unsafe-assignment"');
+    expect(printedConfig).toContain('"@typescript-eslint/no-unsafe-call"');
+    expect(printedConfig).toContain('"@typescript-eslint/no-unsafe-member-access"');
+    expect(printedConfig).toContain('"@typescript-eslint/no-unsafe-return"');
+  });
+
+  it("defines explicit exported return type enforcement for non-spec TypeScript files", () => {
+    const eslintConfig = readFileSync(
+      new URL("../eslint.config.mjs", import.meta.url),
+      "utf8",
+    );
+
+    expect(eslintConfig).toContain("@typescript-eslint/explicit-function-return-type");
+  });
+
+  it("defines the selected complexity thresholds for this slice", () => {
+    const eslintConfig = readFileSync(
+      new URL("../eslint.config.mjs", import.meta.url),
+      "utf8",
+    );
+
+    expect(eslintConfig).toContain("sonarjs/cognitive-complexity");
+    expect(eslintConfig).toContain("max-depth");
+    expect(eslintConfig).toContain("max-params");
+    expect(eslintConfig).toContain('["error", 10]');
+    expect(eslintConfig).toContain('["error", 3]');
+    expect(eslintConfig).toContain('["error", 4]');
+  });
+
+  it("includes fast-check when property-based testing is enabled for this slice", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+
+    expect(packageJson.devDependencies["fast-check"]).toBeTruthy();
+  });
+
+  it("removes legacy tsconfig path alias settings before the Oxlint pilot", () => {
+    const tsconfig = readFileSync(
+      new URL("../tsconfig.json", import.meta.url),
+      "utf8",
+    );
+
+    expect(tsconfig).not.toContain('"baseUrl"');
+    expect(tsconfig).not.toContain('"paths"');
+  });
+
+  it("defines the Oxlint pilot dependencies, config, and script", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+
+    expect(existsSync(new URL("../.oxlintrc.json", import.meta.url))).toBe(true);
+    expect(packageJson.devDependencies.oxlint).toBeTruthy();
+    expect(packageJson.devDependencies["oxlint-tsgolint"]).toBeTruthy();
+    expect(packageJson.scripts["lint:oxlint"]).toBeTruthy();
+  });
+
+  it("keeps Oxlint advisory when wired into CI", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(workflow).toContain("Run Oxlint advisory pilot");
+    expect(workflow).toContain("npm run lint:oxlint");
+    expect(workflow).toContain("continue-on-error: true");
   });
 
   it("defines Knip dead-code detection in repo config, package scripts, and CI", () => {

@@ -162,6 +162,73 @@ describe("createServer", () => {
     );
   });
 
+  it("keeps registered MCP tool schemas serializable and their handlers callable through the registrar", async () => {
+    const registerTool = vi.fn();
+    const api = {
+      months: {
+        getPlanMonth: vi.fn(async (planId: string, month: string) => ({
+          data: {
+            month: {
+              month,
+              income: 120_000,
+              budgeted: 100_000,
+              activity: -90_000,
+              to_be_budgeted: 30_000,
+              age_of_money: 42,
+              categories: [{ id: "category-1" }],
+            },
+          },
+        })),
+      },
+      plans: {
+        getPlans: vi.fn(async () => ({
+          data: {
+            plans: [{ id: "plan-1" }],
+            default_plan: { id: "plan-1" },
+          },
+        })),
+      },
+    };
+
+    registerServerTools(
+      {
+        registerTool,
+      },
+      api as any,
+    );
+
+    const planMonthRegistration = registerTool.mock.calls.find(
+      ([toolName]) => toolName === "ynab_get_plan_month",
+    );
+
+    expect(planMonthRegistration).toBeDefined();
+
+    const [, registration, handler] = planMonthRegistration!;
+    expect(() => JSON.stringify(registration.inputSchema)).not.toThrow();
+
+    const result = await handler({
+      month: "2024-01-01",
+    });
+
+    expect(result).toEqual({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          month: {
+            month: "2024-01-01",
+            income: 120_000,
+            budgeted: 100_000,
+            activity: -90_000,
+            to_be_budgeted: 30_000,
+            age_of_money: 42,
+            category_count: 1,
+          },
+        }),
+      }],
+    });
+    expect(api.months.getPlanMonth).toHaveBeenCalledWith("plan-1", "2024-01-01");
+  });
+
   it("defines an explicit tool registry instead of passing whole tool modules around", () => {
     const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
 
