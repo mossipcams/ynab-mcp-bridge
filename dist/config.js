@@ -165,6 +165,14 @@ function deriveTokenSigningSecret(clientSecret, publicUrl, clientId) {
         .update(`${clientSecret}\n${publicUrl}\n${clientId}`)
         .digest("base64url");
 }
+function assertRuntimeTransportCompatibility(auth, rawTransport, resolvedAllowedOrigins) {
+    if (auth.mode === "oauth" && rawTransport !== "http") {
+        throw new Error("OAuth deployment modes require HTTP transport.");
+    }
+    if (auth.mode === "oauth" && auth.deployment === "oauth-hardened" && resolvedAllowedOrigins.length === 0) {
+        throw new Error("oauth-hardened deployment requires MCP_ALLOWED_ORIGINS or --allowed-origins.");
+    }
+}
 function readLegacyAuthMode(args, env) {
     const authMode = readOptionalValue(readFlag(args, "--auth-mode")) ?? readOptionalValue(env.MCP_AUTH_MODE);
     if (!authMode) {
@@ -175,21 +183,25 @@ function readLegacyAuthMode(args, env) {
     }
     return authMode;
 }
+function isDeploymentMode(value) {
+    return value === "authless" || value === "oauth-single-tenant" || value === "oauth-hardened";
+}
+function assertDeploymentModeCompatibility(deploymentMode, legacyAuthMode) {
+    if (legacyAuthMode === "oauth" && deploymentMode === "authless") {
+        throw new Error("MCP_DEPLOYMENT_MODE=authless is incompatible with MCP_AUTH_MODE=oauth.");
+    }
+    if (legacyAuthMode === "none" && deploymentMode !== "authless") {
+        throw new Error(`MCP_DEPLOYMENT_MODE=${deploymentMode} is incompatible with MCP_AUTH_MODE=none.`);
+    }
+}
 function readDeploymentMode(args, env) {
     const deploymentMode = readOptionalValue(readFlag(args, "--deployment-mode")) ?? readOptionalValue(env.MCP_DEPLOYMENT_MODE);
     const legacyAuthMode = readLegacyAuthMode(args, env);
     if (deploymentMode) {
-        if (deploymentMode !== "authless" &&
-            deploymentMode !== "oauth-single-tenant" &&
-            deploymentMode !== "oauth-hardened") {
+        if (!isDeploymentMode(deploymentMode)) {
             throw new Error(`Unsupported deployment mode: ${deploymentMode}`);
         }
-        if (legacyAuthMode === "oauth" && deploymentMode === "authless") {
-            throw new Error("MCP_DEPLOYMENT_MODE=authless is incompatible with MCP_AUTH_MODE=oauth.");
-        }
-        if (legacyAuthMode === "none" && deploymentMode !== "authless") {
-            throw new Error(`MCP_DEPLOYMENT_MODE=${deploymentMode} is incompatible with MCP_AUTH_MODE=none.`);
-        }
+        assertDeploymentModeCompatibility(deploymentMode, legacyAuthMode);
         return deploymentMode;
     }
     return legacyAuthMode === "oauth" ? "oauth-single-tenant" : "authless";
@@ -308,12 +320,7 @@ export function resolveRuntimeConfig(args, env) {
     const resolvedAllowedOrigins = allowedOrigins.length > 0 ? allowedOrigins : (envAllowedOrigins ?? []);
     const resolvedAllowedHosts = allowedHosts.length > 0 ? allowedHosts : (envAllowedHosts ?? []);
     const auth = resolveRuntimeAuthConfig(args, env);
-    if (auth.mode === "oauth" && rawTransport !== "http") {
-        throw new Error("OAuth deployment modes require HTTP transport.");
-    }
-    if (auth.mode === "oauth" && auth.deployment === "oauth-hardened" && resolvedAllowedOrigins.length === 0) {
-        throw new Error("oauth-hardened deployment requires MCP_ALLOWED_ORIGINS or --allowed-origins.");
-    }
+    assertRuntimeTransportCompatibility(auth, rawTransport, resolvedAllowedOrigins);
     return {
         allowedOrigins: resolvedAllowedOrigins,
         allowedHosts: resolvedAllowedHosts,

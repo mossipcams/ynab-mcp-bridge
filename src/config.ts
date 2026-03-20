@@ -61,11 +61,21 @@ type BackendReadiness = {
 const CLOUDFLARE_ACCESS_ERROR =
   "Cloudflare Access OAuth settings must use the per-application OIDC SaaS endpoints under /cdn-cgi/access/sso/oidc/<client-id> for issuer, authorization, token, and jwks URLs.";
 
-function isCloudflareAccessHostname(hostname: string) {
+type CloudflareAccessUrls = {
+  authorizationUrl: string;
+  issuer: string;
+  jwksUrl: string;
+  tokenUrl: string;
+};
+
+function isCloudflareAccessHostname(hostname: string): boolean {
   return hostname === "cloudflareaccess.com" || hostname.endsWith(".cloudflareaccess.com");
 }
 
-function getCloudflareAccessClientId(url: URL, endpoint: "authorization" | "issuer" | "jwks" | "token") {
+function getCloudflareAccessClientId(
+  url: URL,
+  endpoint: "authorization" | "issuer" | "jwks" | "token",
+): string | undefined {
   const segments = url.pathname
     .split("/")
     .filter(Boolean);
@@ -99,7 +109,7 @@ export function validateCloudflareAccessOAuthSettings(config: {
   issuer: string;
   jwksUrl: string;
   tokenUrl: string;
-}) {
+}): void {
   const authorizationUrl = new URL(config.authorizationUrl);
   const issuerUrl = new URL(config.issuer);
   const jwksUrl = new URL(config.jwksUrl);
@@ -147,7 +157,7 @@ export function validateCloudflareAccessOAuthSettings(config: {
   }
 }
 
-function readFlag(args: string[], name: string) {
+function readFlag(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
 
   if (index === -1) {
@@ -157,12 +167,12 @@ function readFlag(args: string[], name: string) {
   return args[index + 1];
 }
 
-function readOptionalValue(value: string | undefined) {
+function readOptionalValue(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 }
 
-function readPathValue(value: string | undefined, name: string) {
+function readPathValue(value: string | undefined, name: string): string | undefined {
   const normalized = readOptionalValue(value);
 
   if (!normalized) {
@@ -176,23 +186,23 @@ function readPathValue(value: string | undefined, name: string) {
   return normalized;
 }
 
-function readFilePathValue(value: string | undefined) {
+function readFilePathValue(value: string | undefined): string | undefined {
   const normalized = readOptionalValue(value);
   return normalized ? normalized : undefined;
 }
 
-function hasValue(value: string | undefined) {
+function hasValue(value: string | undefined): boolean {
   return readOptionalValue(value) !== undefined;
 }
 
-function parseCsv(value: string) {
+function parseCsv(value: string): string[] {
   return value
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
 }
 
-export function getEffectiveOAuthScopes(scopes: string[]) {
+export function getEffectiveOAuthScopes(scopes: string[]): string[] {
   const normalizedScopes = [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))];
 
   if (!normalizedScopes.includes("offline_access")) {
@@ -202,7 +212,7 @@ export function getEffectiveOAuthScopes(scopes: string[]) {
   return normalizedScopes;
 }
 
-function readCsvFlag(args: string[], name: string) {
+function readCsvFlag(args: string[], name: string): string[] {
   const value = readFlag(args, name);
 
   if (!value) {
@@ -212,7 +222,7 @@ function readCsvFlag(args: string[], name: string) {
   return parseCsv(value);
 }
 
-function readUrlLikeValue(value: string | undefined, name: string) {
+function readUrlLikeValue(value: string | undefined, name: string): string | undefined {
   const normalized = readOptionalValue(value);
 
   if (!normalized) {
@@ -232,7 +242,7 @@ function readUrlLikeValue(value: string | undefined, name: string) {
   }
 }
 
-function readHostnameLikeValue(value: string | undefined, name: string) {
+function readHostnameLikeValue(value: string | undefined, name: string): string | undefined {
   const normalized = readOptionalValue(value);
 
   if (!normalized) {
@@ -246,7 +256,7 @@ function readHostnameLikeValue(value: string | undefined, name: string) {
   }
 }
 
-function buildCallbackUrl(publicUrl: string | undefined, callbackPath: string | undefined) {
+function buildCallbackUrl(publicUrl: string | undefined, callbackPath: string | undefined): string | undefined {
   if (!publicUrl || !callbackPath) {
     return undefined;
   }
@@ -254,7 +264,10 @@ function buildCallbackUrl(publicUrl: string | undefined, callbackPath: string | 
   return new URL(callbackPath, new URL(publicUrl).origin).href;
 }
 
-function buildCloudflareAccessUrls(hostname: string | undefined, clientId: string | undefined) {
+function buildCloudflareAccessUrls(
+  hostname: string | undefined,
+  clientId: string | undefined,
+): CloudflareAccessUrls | undefined {
   if (!hostname || !clientId) {
     return undefined;
   }
@@ -269,11 +282,15 @@ function buildCloudflareAccessUrls(hostname: string | undefined, clientId: strin
   };
 }
 
-function getDefaultOAuthStorePath() {
+function getDefaultOAuthStorePath(): string {
   return path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json");
 }
 
-function deriveTokenSigningSecret(clientSecret: string | undefined, publicUrl: string | undefined, clientId: string | undefined) {
+function deriveTokenSigningSecret(
+  clientSecret: string | undefined,
+  publicUrl: string | undefined,
+  clientId: string | undefined,
+): string | undefined {
   if (!clientSecret || !publicUrl || !clientId) {
     return undefined;
   }
@@ -283,7 +300,21 @@ function deriveTokenSigningSecret(clientSecret: string | undefined, publicUrl: s
     .digest("base64url");
 }
 
-function readLegacyAuthMode(args: string[], env: EnvConfig) {
+function assertRuntimeTransportCompatibility(
+  auth: RuntimeAuthConfig,
+  rawTransport: RuntimeTransport,
+  resolvedAllowedOrigins: string[],
+): void {
+  if (auth.mode === "oauth" && rawTransport !== "http") {
+    throw new Error("OAuth deployment modes require HTTP transport.");
+  }
+
+  if (auth.mode === "oauth" && auth.deployment === "oauth-hardened" && resolvedAllowedOrigins.length === 0) {
+    throw new Error("oauth-hardened deployment requires MCP_ALLOWED_ORIGINS or --allowed-origins.");
+  }
+}
+
+function readLegacyAuthMode(args: string[], env: EnvConfig): "none" | "oauth" | undefined {
   const authMode = readOptionalValue(readFlag(args, "--auth-mode")) ?? readOptionalValue(env.MCP_AUTH_MODE);
 
   if (!authMode) {
@@ -297,27 +328,33 @@ function readLegacyAuthMode(args: string[], env: EnvConfig) {
   return authMode;
 }
 
+function isDeploymentMode(value: string): value is DeploymentMode {
+  return value === "authless" || value === "oauth-single-tenant" || value === "oauth-hardened";
+}
+
+function assertDeploymentModeCompatibility(
+  deploymentMode: DeploymentMode,
+  legacyAuthMode: "none" | "oauth" | undefined,
+): void {
+  if (legacyAuthMode === "oauth" && deploymentMode === "authless") {
+    throw new Error("MCP_DEPLOYMENT_MODE=authless is incompatible with MCP_AUTH_MODE=oauth.");
+  }
+
+  if (legacyAuthMode === "none" && deploymentMode !== "authless") {
+    throw new Error(`MCP_DEPLOYMENT_MODE=${deploymentMode} is incompatible with MCP_AUTH_MODE=none.`);
+  }
+}
+
 function readDeploymentMode(args: string[], env: EnvConfig): DeploymentMode {
   const deploymentMode = readOptionalValue(readFlag(args, "--deployment-mode")) ?? readOptionalValue(env.MCP_DEPLOYMENT_MODE);
   const legacyAuthMode = readLegacyAuthMode(args, env);
 
   if (deploymentMode) {
-    if (
-      deploymentMode !== "authless" &&
-      deploymentMode !== "oauth-single-tenant" &&
-      deploymentMode !== "oauth-hardened"
-    ) {
+    if (!isDeploymentMode(deploymentMode)) {
       throw new Error(`Unsupported deployment mode: ${deploymentMode}`);
     }
 
-    if (legacyAuthMode === "oauth" && deploymentMode === "authless") {
-      throw new Error("MCP_DEPLOYMENT_MODE=authless is incompatible with MCP_AUTH_MODE=oauth.");
-    }
-
-    if (legacyAuthMode === "none" && deploymentMode !== "authless") {
-      throw new Error(`MCP_DEPLOYMENT_MODE=${deploymentMode} is incompatible with MCP_AUTH_MODE=none.`);
-    }
-
+    assertDeploymentModeCompatibility(deploymentMode, legacyAuthMode);
     return deploymentMode;
   }
 
@@ -417,7 +454,7 @@ function getBackendReadiness(env: EnvConfig): BackendReadiness {
   };
 }
 
-export function assertBackendEnvironment(env: EnvConfig) {
+export function assertBackendEnvironment(env: EnvConfig): BackendReadiness {
   const readiness = getBackendReadiness(env);
 
   if (!readiness.checks.ynabApiToken) {
@@ -474,13 +511,7 @@ export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeCon
   const resolvedAllowedHosts = allowedHosts.length > 0 ? allowedHosts : (envAllowedHosts ?? []);
   const auth = resolveRuntimeAuthConfig(args, env);
 
-  if (auth.mode === "oauth" && rawTransport !== "http") {
-    throw new Error("OAuth deployment modes require HTTP transport.");
-  }
-
-  if (auth.mode === "oauth" && auth.deployment === "oauth-hardened" && resolvedAllowedOrigins.length === 0) {
-    throw new Error("oauth-hardened deployment requires MCP_ALLOWED_ORIGINS or --allowed-origins.");
-  }
+  assertRuntimeTransportCompatibility(auth, rawTransport, resolvedAllowedOrigins);
 
   return {
     allowedOrigins: resolvedAllowedOrigins,

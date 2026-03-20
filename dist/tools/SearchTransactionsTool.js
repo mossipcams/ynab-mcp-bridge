@@ -38,34 +38,17 @@ export const inputSchema = {
     sort: z.enum(sortableValues).default("date_desc").describe("Sort order for matching transactions."),
 };
 function matchesFilters(transaction, input) {
-    if (input.includeTransfers === false && transaction.transfer_account_id) {
-        return false;
-    }
-    if (input.toDate && transaction.date > input.toDate) {
-        return false;
-    }
-    if (input.payeeId && transaction.payee_id !== input.payeeId) {
-        return false;
-    }
-    if (input.accountId && transaction.account_id !== input.accountId) {
-        return false;
-    }
-    if (input.categoryId && transaction.category_id !== input.categoryId) {
-        return false;
-    }
-    if (input.approved !== undefined && transaction.approved !== input.approved) {
-        return false;
-    }
-    if (input.cleared && transaction.cleared !== input.cleared) {
-        return false;
-    }
-    if (input.minAmount !== undefined && transaction.amount < input.minAmount) {
-        return false;
-    }
-    if (input.maxAmount !== undefined && transaction.amount > input.maxAmount) {
-        return false;
-    }
-    return true;
+    return [
+        input.includeTransfers !== false || !transaction.transfer_account_id,
+        !input.toDate || transaction.date <= input.toDate,
+        !input.payeeId || transaction.payee_id === input.payeeId,
+        !input.accountId || transaction.account_id === input.accountId,
+        !input.categoryId || transaction.category_id === input.categoryId,
+        input.approved === undefined || transaction.approved === input.approved,
+        !input.cleared || transaction.cleared === input.cleared,
+        input.minAmount === undefined || transaction.amount >= input.minAmount,
+        input.maxAmount === undefined || transaction.amount <= input.maxAmount,
+    ].every(Boolean);
 }
 function compareTransactions(left, right, sort) {
     switch (sort) {

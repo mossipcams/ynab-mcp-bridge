@@ -88,119 +88,130 @@ function parseGrants(value) {
     })
         .filter((entry) => entry !== undefined));
 }
+function toLegacyPendingConsentGrant(consentId, record) {
+    const pending = record;
+    if (typeof pending.clientId !== "string" ||
+        typeof pending.codeChallenge !== "string" ||
+        typeof pending.expiresAt !== "number" ||
+        typeof pending.redirectUri !== "string" ||
+        typeof pending.resource !== "string" ||
+        !Array.isArray(pending.scopes)) {
+        return undefined;
+    }
+    return {
+        clientId: pending.clientId,
+        clientName: pending.clientName,
+        codeChallenge: pending.codeChallenge,
+        consent: {
+            challenge: consentId,
+            expiresAt: pending.expiresAt,
+        },
+        grantId: `legacy-consent:${consentId}`,
+        redirectUri: pending.redirectUri,
+        resource: pending.resource,
+        scopes: pending.scopes,
+        state: pending.state,
+    };
+}
+function toLegacyPendingAuthorizationGrant(stateId, record) {
+    const pending = record;
+    if (typeof pending.clientId !== "string" ||
+        typeof pending.codeChallenge !== "string" ||
+        typeof pending.expiresAt !== "number" ||
+        typeof pending.redirectUri !== "string" ||
+        typeof pending.resource !== "string" ||
+        !Array.isArray(pending.scopes)) {
+        return undefined;
+    }
+    return {
+        clientId: pending.clientId,
+        codeChallenge: pending.codeChallenge,
+        grantId: `legacy-authorization:${stateId}`,
+        pendingAuthorization: {
+            expiresAt: pending.expiresAt,
+            stateId,
+        },
+        redirectUri: pending.redirectUri,
+        resource: pending.resource,
+        scopes: pending.scopes,
+        state: pending.state,
+    };
+}
+function migrateLegacyGrantRecords(records, toGrant, pushGrant) {
+    if (!records || typeof records !== "object") {
+        return;
+    }
+    for (const [recordId, record] of Object.entries(records)) {
+        const grant = toGrant(recordId, record);
+        if (grant) {
+            pushGrant(grant);
+        }
+    }
+}
+function toLegacyAuthorizationCodeGrant(code, record) {
+    const authorizationCode = record;
+    if (typeof authorizationCode.clientId !== "string" ||
+        typeof authorizationCode.codeChallenge !== "string" ||
+        typeof authorizationCode.expiresAt !== "number" ||
+        typeof authorizationCode.redirectUri !== "string" ||
+        typeof authorizationCode.resource !== "string" ||
+        !Array.isArray(authorizationCode.scopes) ||
+        typeof (authorizationCode.principalId ?? authorizationCode.subject) !== "string" ||
+        !authorizationCode.upstreamTokens ||
+        typeof authorizationCode.upstreamTokens !== "object") {
+        return undefined;
+    }
+    return {
+        authorizationCode: {
+            code,
+            expiresAt: authorizationCode.expiresAt,
+        },
+        clientId: authorizationCode.clientId,
+        codeChallenge: authorizationCode.codeChallenge,
+        grantId: `legacy-code:${code}`,
+        redirectUri: authorizationCode.redirectUri,
+        resource: authorizationCode.resource,
+        scopes: authorizationCode.scopes,
+        state: authorizationCode.state,
+        principalId: authorizationCode.principalId ?? authorizationCode.subject,
+        upstreamTokens: authorizationCode.upstreamTokens,
+    };
+}
+function toLegacyRefreshTokenGrant(token, record) {
+    const refreshToken = record;
+    if (typeof refreshToken.clientId !== "string" ||
+        typeof refreshToken.expiresAt !== "number" ||
+        typeof refreshToken.resource !== "string" ||
+        !Array.isArray(refreshToken.scopes) ||
+        typeof (refreshToken.principalId ?? refreshToken.subject) !== "string" ||
+        !refreshToken.upstreamTokens ||
+        typeof refreshToken.upstreamTokens !== "object") {
+        return undefined;
+    }
+    return {
+        clientId: refreshToken.clientId,
+        codeChallenge: "",
+        grantId: `legacy-refresh:${token}`,
+        redirectUri: "",
+        refreshToken: {
+            expiresAt: refreshToken.expiresAt,
+            token,
+        },
+        resource: refreshToken.resource,
+        scopes: refreshToken.scopes,
+        principalId: refreshToken.principalId ?? refreshToken.subject,
+        upstreamTokens: refreshToken.upstreamTokens,
+    };
+}
 function migrateLegacyState(parsed) {
     const grants = {};
     const pushGrant = (grant) => {
         grants[grant.grantId] = normalizeGrant(grant);
     };
-    if (parsed.pendingConsents && typeof parsed.pendingConsents === "object") {
-        for (const [consentId, record] of Object.entries(parsed.pendingConsents)) {
-            const pending = record;
-            if (typeof pending.clientId === "string" &&
-                typeof pending.codeChallenge === "string" &&
-                typeof pending.expiresAt === "number" &&
-                typeof pending.redirectUri === "string" &&
-                typeof pending.resource === "string" &&
-                Array.isArray(pending.scopes)) {
-                pushGrant({
-                    clientId: pending.clientId,
-                    clientName: pending.clientName,
-                    codeChallenge: pending.codeChallenge,
-                    consent: {
-                        challenge: consentId,
-                        expiresAt: pending.expiresAt,
-                    },
-                    grantId: `legacy-consent:${consentId}`,
-                    redirectUri: pending.redirectUri,
-                    resource: pending.resource,
-                    scopes: pending.scopes,
-                    state: pending.state,
-                });
-            }
-        }
-    }
-    if (parsed.pendingAuthorizations && typeof parsed.pendingAuthorizations === "object") {
-        for (const [stateId, record] of Object.entries(parsed.pendingAuthorizations)) {
-            const pending = record;
-            if (typeof pending.clientId === "string" &&
-                typeof pending.codeChallenge === "string" &&
-                typeof pending.expiresAt === "number" &&
-                typeof pending.redirectUri === "string" &&
-                typeof pending.resource === "string" &&
-                Array.isArray(pending.scopes)) {
-                pushGrant({
-                    clientId: pending.clientId,
-                    codeChallenge: pending.codeChallenge,
-                    grantId: `legacy-authorization:${stateId}`,
-                    pendingAuthorization: {
-                        expiresAt: pending.expiresAt,
-                        stateId,
-                    },
-                    redirectUri: pending.redirectUri,
-                    resource: pending.resource,
-                    scopes: pending.scopes,
-                    state: pending.state,
-                });
-            }
-        }
-    }
-    if (parsed.authorizationCodes && typeof parsed.authorizationCodes === "object") {
-        for (const [code, record] of Object.entries(parsed.authorizationCodes)) {
-            const authorizationCode = record;
-            if (typeof authorizationCode.clientId === "string" &&
-                typeof authorizationCode.codeChallenge === "string" &&
-                typeof authorizationCode.expiresAt === "number" &&
-                typeof authorizationCode.redirectUri === "string" &&
-                typeof authorizationCode.resource === "string" &&
-                Array.isArray(authorizationCode.scopes) &&
-                typeof (authorizationCode.principalId ?? authorizationCode.subject) === "string" &&
-                authorizationCode.upstreamTokens &&
-                typeof authorizationCode.upstreamTokens === "object") {
-                pushGrant({
-                    authorizationCode: {
-                        code,
-                        expiresAt: authorizationCode.expiresAt,
-                    },
-                    clientId: authorizationCode.clientId,
-                    codeChallenge: authorizationCode.codeChallenge,
-                    grantId: `legacy-code:${code}`,
-                    redirectUri: authorizationCode.redirectUri,
-                    resource: authorizationCode.resource,
-                    scopes: authorizationCode.scopes,
-                    state: authorizationCode.state,
-                    principalId: authorizationCode.principalId ?? authorizationCode.subject,
-                    upstreamTokens: authorizationCode.upstreamTokens,
-                });
-            }
-        }
-    }
-    if (parsed.refreshTokens && typeof parsed.refreshTokens === "object") {
-        for (const [token, record] of Object.entries(parsed.refreshTokens)) {
-            const refreshToken = record;
-            if (typeof refreshToken.clientId === "string" &&
-                typeof refreshToken.expiresAt === "number" &&
-                typeof refreshToken.resource === "string" &&
-                Array.isArray(refreshToken.scopes) &&
-                typeof (refreshToken.principalId ?? refreshToken.subject) === "string" &&
-                refreshToken.upstreamTokens &&
-                typeof refreshToken.upstreamTokens === "object") {
-                pushGrant({
-                    clientId: refreshToken.clientId,
-                    codeChallenge: "",
-                    grantId: `legacy-refresh:${token}`,
-                    redirectUri: "",
-                    refreshToken: {
-                        expiresAt: refreshToken.expiresAt,
-                        token,
-                    },
-                    resource: refreshToken.resource,
-                    scopes: refreshToken.scopes,
-                    principalId: refreshToken.principalId ?? refreshToken.subject,
-                    upstreamTokens: refreshToken.upstreamTokens,
-                });
-            }
-        }
-    }
+    migrateLegacyGrantRecords(parsed.pendingConsents, toLegacyPendingConsentGrant, pushGrant);
+    migrateLegacyGrantRecords(parsed.pendingAuthorizations, toLegacyPendingAuthorizationGrant, pushGrant);
+    migrateLegacyGrantRecords(parsed.authorizationCodes, toLegacyAuthorizationCodeGrant, pushGrant);
+    migrateLegacyGrantRecords(parsed.refreshTokens, toLegacyRefreshTokenGrant, pushGrant);
     return {
         approvals: parseApprovals(parsed.approvals),
         clients: parseClients(parsed.clients),
