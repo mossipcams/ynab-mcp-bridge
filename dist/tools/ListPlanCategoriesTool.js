@@ -39,9 +39,9 @@ export async function execute(input, api) {
         const pagedGroups = paginateEntries(groups, input);
         return toTextResult({
             category_groups: pagedGroups.entries.map((group) => compactObject({
-                id: input.includeIds === false ? undefined : group.id,
-                name: requestedFields.has("name") ? group.name : undefined,
-                categories: requestedFields.has("categories") ? group.categories : undefined,
+                id: input.includeIds === false ? undefined : group["id"],
+                name: requestedFields.has("name") ? group["name"] : undefined,
+                categories: requestedFields.has("categories") ? group["categories"] : undefined,
             })),
             category_group_count: groups.length,
             ...pagedGroups.metadata,

@@ -16,11 +16,11 @@ export type PendingAuthorization = {
   redirectUri: string;
   resource: string;
   scopes: string[];
-  state?: string;
+  state?: string | undefined;
 };
 
 export type PendingConsent = PendingAuthorization & {
-  clientName?: string;
+  clientName?: string | undefined;
 };
 
 type OAuthCoreStore = {
@@ -77,9 +77,9 @@ type AuthorizationRequest = {
 };
 
 type CallbackInput = {
-  code?: string;
-  error?: string;
-  errorDescription?: string;
+  code?: string | undefined;
+  error?: string | undefined;
+  errorDescription?: string | undefined;
   upstreamState: string;
 };
 

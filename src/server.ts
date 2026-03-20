@@ -1,6 +1,4 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import * as ynab from "ynab";
 
 import { assertYnabConfig, type YnabConfig } from "./config.js";
@@ -67,83 +65,602 @@ const READ_ONLY_TOOL_ANNOTATIONS = {
   openWorldHint: true,
 } as const;
 
-type ToolModule = {
-  title: string;
+type ToolRegistration = {
   name: string;
-  description: string;
-  inputSchema: ZodRawShapeCompat;
-  execute: (input: unknown, api: ynab.API) => Promise<CallToolResult>;
+  register: (registrar: ToolRegistrar, api: ynab.API) => void;
+  title: string;
 };
 
-type ToolRegistrar = Pick<McpServer, "registerTool">;
-
-const toolRegistrations: ToolModule[] = [
-  { title: "Get MCP Version", name: GetMcpVersionTool.name, description: GetMcpVersionTool.description, inputSchema: GetMcpVersionTool.inputSchema, execute: (input, api) => GetMcpVersionTool.execute(input as Parameters<typeof GetMcpVersionTool.execute>[0], api) },
-  { title: "Get User", name: GetUserTool.name, description: GetUserTool.description, inputSchema: GetUserTool.inputSchema, execute: (input, api) => GetUserTool.execute(input as Parameters<typeof GetUserTool.execute>[0], api) },
-  { title: "List Plans", name: ListPlansTool.name, description: ListPlansTool.description, inputSchema: ListPlansTool.inputSchema, execute: (input, api) => ListPlansTool.execute(input as Parameters<typeof ListPlansTool.execute>[0], api) },
-  { title: "Get Plan", name: GetPlanDetailsTool.name, description: GetPlanDetailsTool.description, inputSchema: GetPlanDetailsTool.inputSchema, execute: (input, api) => GetPlanDetailsTool.execute(input as Parameters<typeof GetPlanDetailsTool.execute>[0], api) },
-  { title: "Get Plan Settings", name: GetPlanSettingsTool.name, description: GetPlanSettingsTool.description, inputSchema: GetPlanSettingsTool.inputSchema, execute: (input, api) => GetPlanSettingsTool.execute(input as Parameters<typeof GetPlanSettingsTool.execute>[0], api) },
-  { title: "Get Plan Month", name: GetPlanMonthTool.name, description: GetPlanMonthTool.description, inputSchema: GetPlanMonthTool.inputSchema, execute: (input, api) => GetPlanMonthTool.execute(input as Parameters<typeof GetPlanMonthTool.execute>[0], api) },
-  { title: "List Plan Months", name: ListPlanMonthsTool.name, description: ListPlanMonthsTool.description, inputSchema: ListPlanMonthsTool.inputSchema, execute: (input, api) => ListPlanMonthsTool.execute(input as Parameters<typeof ListPlanMonthsTool.execute>[0], api) },
-  { title: "List Categories", name: ListPlanCategoriesTool.name, description: ListPlanCategoriesTool.description, inputSchema: ListPlanCategoriesTool.inputSchema, execute: (input, api) => ListPlanCategoriesTool.execute(input as Parameters<typeof ListPlanCategoriesTool.execute>[0], api) },
-  { title: "Get Category", name: GetCategoryTool.name, description: GetCategoryTool.description, inputSchema: GetCategoryTool.inputSchema, execute: (input, api) => GetCategoryTool.execute(input as Parameters<typeof GetCategoryTool.execute>[0], api) },
-  { title: "Get Month Category", name: GetMonthCategoryTool.name, description: GetMonthCategoryTool.description, inputSchema: GetMonthCategoryTool.inputSchema, execute: (input, api) => GetMonthCategoryTool.execute(input as Parameters<typeof GetMonthCategoryTool.execute>[0], api) },
-  { title: "List Transactions", name: ListTransactionsTool.name, description: ListTransactionsTool.description, inputSchema: ListTransactionsTool.inputSchema, execute: (input, api) => ListTransactionsTool.execute(input as Parameters<typeof ListTransactionsTool.execute>[0], api) },
-  { title: "Search Transactions", name: SearchTransactionsTool.name, description: SearchTransactionsTool.description, inputSchema: SearchTransactionsTool.inputSchema, execute: (input, api) => SearchTransactionsTool.execute(input as Parameters<typeof SearchTransactionsTool.execute>[0], api) },
-  { title: "Get Transactions By Month", name: GetTransactionsByMonthTool.name, description: GetTransactionsByMonthTool.description, inputSchema: GetTransactionsByMonthTool.inputSchema, execute: (input, api) => GetTransactionsByMonthTool.execute(input as Parameters<typeof GetTransactionsByMonthTool.execute>[0], api) },
-  { title: "Get Transaction", name: GetTransactionTool.name, description: GetTransactionTool.description, inputSchema: GetTransactionTool.inputSchema, execute: (input, api) => GetTransactionTool.execute(input as Parameters<typeof GetTransactionTool.execute>[0], api) },
-  { title: "Get Transactions By Account", name: GetTransactionsByAccountTool.name, description: GetTransactionsByAccountTool.description, inputSchema: GetTransactionsByAccountTool.inputSchema, execute: (input, api) => GetTransactionsByAccountTool.execute(input as Parameters<typeof GetTransactionsByAccountTool.execute>[0], api) },
-  { title: "Get Transactions By Category", name: GetTransactionsByCategoryTool.name, description: GetTransactionsByCategoryTool.description, inputSchema: GetTransactionsByCategoryTool.inputSchema, execute: (input, api) => GetTransactionsByCategoryTool.execute(input as Parameters<typeof GetTransactionsByCategoryTool.execute>[0], api) },
-  { title: "Get Transactions By Payee", name: GetTransactionsByPayeeTool.name, description: GetTransactionsByPayeeTool.description, inputSchema: GetTransactionsByPayeeTool.inputSchema, execute: (input, api) => GetTransactionsByPayeeTool.execute(input as Parameters<typeof GetTransactionsByPayeeTool.execute>[0], api) },
-  { title: "List Scheduled Transactions", name: ListScheduledTransactionsTool.name, description: ListScheduledTransactionsTool.description, inputSchema: ListScheduledTransactionsTool.inputSchema, execute: (input, api) => ListScheduledTransactionsTool.execute(input as Parameters<typeof ListScheduledTransactionsTool.execute>[0], api) },
-  { title: "Get Scheduled Transaction", name: GetScheduledTransactionTool.name, description: GetScheduledTransactionTool.description, inputSchema: GetScheduledTransactionTool.inputSchema, execute: (input, api) => GetScheduledTransactionTool.execute(input as Parameters<typeof GetScheduledTransactionTool.execute>[0], api) },
-  { title: "List Accounts", name: ListAccountsTool.name, description: ListAccountsTool.description, inputSchema: ListAccountsTool.inputSchema, execute: (input, api) => ListAccountsTool.execute(input as Parameters<typeof ListAccountsTool.execute>[0], api) },
-  { title: "Get Account", name: GetAccountTool.name, description: GetAccountTool.description, inputSchema: GetAccountTool.inputSchema, execute: (input, api) => GetAccountTool.execute(input as Parameters<typeof GetAccountTool.execute>[0], api) },
-  { title: "List Payees", name: ListPayeesTool.name, description: ListPayeesTool.description, inputSchema: ListPayeesTool.inputSchema, execute: (input, api) => ListPayeesTool.execute(input as Parameters<typeof ListPayeesTool.execute>[0], api) },
-  { title: "Get Payee", name: GetPayeeTool.name, description: GetPayeeTool.description, inputSchema: GetPayeeTool.inputSchema, execute: (input, api) => GetPayeeTool.execute(input as Parameters<typeof GetPayeeTool.execute>[0], api) },
-  { title: "List Payee Locations", name: ListPayeeLocationsTool.name, description: ListPayeeLocationsTool.description, inputSchema: ListPayeeLocationsTool.inputSchema, execute: (input, api) => ListPayeeLocationsTool.execute(input as Parameters<typeof ListPayeeLocationsTool.execute>[0], api) },
-  { title: "Get Payee Location", name: GetPayeeLocationTool.name, description: GetPayeeLocationTool.description, inputSchema: GetPayeeLocationTool.inputSchema, execute: (input, api) => GetPayeeLocationTool.execute(input as Parameters<typeof GetPayeeLocationTool.execute>[0], api) },
-  { title: "Get Payee Locations By Payee", name: GetPayeeLocationsByPayeeTool.name, description: GetPayeeLocationsByPayeeTool.description, inputSchema: GetPayeeLocationsByPayeeTool.inputSchema, execute: (input, api) => GetPayeeLocationsByPayeeTool.execute(input as Parameters<typeof GetPayeeLocationsByPayeeTool.execute>[0], api) },
-  { title: "Get Money Movements", name: GetMoneyMovementsTool.name, description: GetMoneyMovementsTool.description, inputSchema: GetMoneyMovementsTool.inputSchema, execute: (input, api) => GetMoneyMovementsTool.execute(input as Parameters<typeof GetMoneyMovementsTool.execute>[0], api) },
-  { title: "Get Money Movements By Month", name: GetMoneyMovementsByMonthTool.name, description: GetMoneyMovementsByMonthTool.description, inputSchema: GetMoneyMovementsByMonthTool.inputSchema, execute: (input, api) => GetMoneyMovementsByMonthTool.execute(input as Parameters<typeof GetMoneyMovementsByMonthTool.execute>[0], api) },
-  { title: "Get Money Movement Groups", name: GetMoneyMovementGroupsTool.name, description: GetMoneyMovementGroupsTool.description, inputSchema: GetMoneyMovementGroupsTool.inputSchema, execute: (input, api) => GetMoneyMovementGroupsTool.execute(input as Parameters<typeof GetMoneyMovementGroupsTool.execute>[0], api) },
-  { title: "Get Money Movement Groups By Month", name: GetMoneyMovementGroupsByMonthTool.name, description: GetMoneyMovementGroupsByMonthTool.description, inputSchema: GetMoneyMovementGroupsByMonthTool.inputSchema, execute: (input, api) => GetMoneyMovementGroupsByMonthTool.execute(input as Parameters<typeof GetMoneyMovementGroupsByMonthTool.execute>[0], api) },
-  { title: "Get Financial Snapshot", name: GetFinancialSnapshotTool.name, description: GetFinancialSnapshotTool.description, inputSchema: GetFinancialSnapshotTool.inputSchema, execute: (input, api) => GetFinancialSnapshotTool.execute(input as Parameters<typeof GetFinancialSnapshotTool.execute>[0], api) },
-  { title: "Get Financial Health Check", name: GetFinancialHealthCheckTool.name, description: GetFinancialHealthCheckTool.description, inputSchema: GetFinancialHealthCheckTool.inputSchema, execute: (input, api) => GetFinancialHealthCheckTool.execute(input as Parameters<typeof GetFinancialHealthCheckTool.execute>[0], api) },
-  { title: "Get Spending Summary", name: GetSpendingSummaryTool.name, description: GetSpendingSummaryTool.description, inputSchema: GetSpendingSummaryTool.inputSchema, execute: (input, api) => GetSpendingSummaryTool.execute(input as Parameters<typeof GetSpendingSummaryTool.execute>[0], api) },
-  { title: "Get Spending Anomalies", name: GetSpendingAnomaliesTool.name, description: GetSpendingAnomaliesTool.description, inputSchema: GetSpendingAnomaliesTool.inputSchema, execute: (input, api) => GetSpendingAnomaliesTool.execute(input as Parameters<typeof GetSpendingAnomaliesTool.execute>[0], api) },
-  { title: "Get Cash Flow Summary", name: GetCashFlowSummaryTool.name, description: GetCashFlowSummaryTool.description, inputSchema: GetCashFlowSummaryTool.inputSchema, execute: (input, api) => GetCashFlowSummaryTool.execute(input as Parameters<typeof GetCashFlowSummaryTool.execute>[0], api) },
-  { title: "Get Cash Runway", name: GetCashRunwayTool.name, description: GetCashRunwayTool.description, inputSchema: GetCashRunwayTool.inputSchema, execute: (input, api) => GetCashRunwayTool.execute(input as Parameters<typeof GetCashRunwayTool.execute>[0], api) },
-  { title: "Get Budget Health Summary", name: GetBudgetHealthSummaryTool.name, description: GetBudgetHealthSummaryTool.description, inputSchema: GetBudgetHealthSummaryTool.inputSchema, execute: (input, api) => GetBudgetHealthSummaryTool.execute(input as Parameters<typeof GetBudgetHealthSummaryTool.execute>[0], api) },
-  { title: "Get Upcoming Obligations", name: GetUpcomingObligationsTool.name, description: GetUpcomingObligationsTool.description, inputSchema: GetUpcomingObligationsTool.inputSchema, execute: (input, api) => GetUpcomingObligationsTool.execute(input as Parameters<typeof GetUpcomingObligationsTool.execute>[0], api) },
-  { title: "Get Goal Progress Summary", name: GetGoalProgressSummaryTool.name, description: GetGoalProgressSummaryTool.description, inputSchema: GetGoalProgressSummaryTool.inputSchema, execute: (input, api) => GetGoalProgressSummaryTool.execute(input as Parameters<typeof GetGoalProgressSummaryTool.execute>[0], api) },
-  { title: "Get Budget Cleanup Summary", name: GetBudgetCleanupSummaryTool.name, description: GetBudgetCleanupSummaryTool.description, inputSchema: GetBudgetCleanupSummaryTool.inputSchema, execute: (input, api) => GetBudgetCleanupSummaryTool.execute(input as Parameters<typeof GetBudgetCleanupSummaryTool.execute>[0], api) },
-  { title: "Get Income Summary", name: GetIncomeSummaryTool.name, description: GetIncomeSummaryTool.description, inputSchema: GetIncomeSummaryTool.inputSchema, execute: (input, api) => GetIncomeSummaryTool.execute(input as Parameters<typeof GetIncomeSummaryTool.execute>[0], api) },
-  { title: "Get Emergency Fund Coverage", name: GetEmergencyFundCoverageTool.name, description: GetEmergencyFundCoverageTool.description, inputSchema: GetEmergencyFundCoverageTool.inputSchema, execute: (input, api) => GetEmergencyFundCoverageTool.execute(input as Parameters<typeof GetEmergencyFundCoverageTool.execute>[0], api) },
-  { title: "Get Debt Summary", name: GetDebtSummaryTool.name, description: GetDebtSummaryTool.description, inputSchema: GetDebtSummaryTool.inputSchema, execute: (input, api) => GetDebtSummaryTool.execute(input as Parameters<typeof GetDebtSummaryTool.execute>[0], api) },
-  { title: "Get Recurring Expense Summary", name: GetRecurringExpenseSummaryTool.name, description: GetRecurringExpenseSummaryTool.description, inputSchema: GetRecurringExpenseSummaryTool.inputSchema, execute: (input, api) => GetRecurringExpenseSummaryTool.execute(input as Parameters<typeof GetRecurringExpenseSummaryTool.execute>[0], api) },
-  { title: "Get Category Trend Summary", name: GetCategoryTrendSummaryTool.name, description: GetCategoryTrendSummaryTool.description, inputSchema: GetCategoryTrendSummaryTool.inputSchema, execute: (input, api) => GetCategoryTrendSummaryTool.execute(input as Parameters<typeof GetCategoryTrendSummaryTool.execute>[0], api) },
-  { title: "Get 70/20/10 Summary", name: GetBudgetRatioSummaryTool.name, description: GetBudgetRatioSummaryTool.description, inputSchema: GetBudgetRatioSummaryTool.inputSchema, execute: (input, api) => GetBudgetRatioSummaryTool.execute(input as Parameters<typeof GetBudgetRatioSummaryTool.execute>[0], api) },
-];
-
-function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: ynab.API): void {
-  registrar.registerTool(
-    tool.name,
-    {
-      title: tool.title,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+type ToolRegistrar = {
+  registerTool: (
+    name: string,
+    config: {
+      annotations?: unknown;
+      description?: string;
+      inputSchema?: unknown;
+      title?: string;
     },
-    (input) => tool.execute(input, api),
+    cb: (input: Record<string, unknown>) => unknown,
+  ) => unknown;
+};
+
+function stripUndefinedProperties(input: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
   );
 }
+
+function executeTool<TResult>(
+  execute: (input: never, api: ynab.API) => TResult,
+  api: ynab.API,
+): (input: Record<string, unknown>) => TResult {
+  return (input: Record<string, unknown>): TResult => {
+    const sanitizedInput = stripUndefinedProperties(input);
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- MCP validates tool input before invocation.
+    return execute(sanitizedInput as never, api);
+  };
+}
+
+const toolRegistrations: ToolRegistration[] = [
+  {
+    title: "Get MCP Version",
+    name: GetMcpVersionTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetMcpVersionTool.name, {
+        title: "Get MCP Version",
+        description: GetMcpVersionTool.description,
+        inputSchema: GetMcpVersionTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetMcpVersionTool.execute, api));
+    },
+  },
+  {
+    title: "Get User",
+    name: GetUserTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetUserTool.name, {
+        title: "Get User",
+        description: GetUserTool.description,
+        inputSchema: GetUserTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetUserTool.execute, api));
+    },
+  },
+  {
+    title: "List Plans",
+    name: ListPlansTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(ListPlansTool.name, {
+        title: "List Plans",
+        description: ListPlansTool.description,
+        inputSchema: ListPlansTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(ListPlansTool.execute, api));
+    },
+  },
+  {
+    title: "Get Plan",
+    name: GetPlanDetailsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetPlanDetailsTool.name, {
+        title: "Get Plan",
+        description: GetPlanDetailsTool.description,
+        inputSchema: GetPlanDetailsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetPlanDetailsTool.execute, api));
+    },
+  },
+  {
+    title: "Get Plan Settings",
+    name: GetPlanSettingsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetPlanSettingsTool.name, {
+        title: "Get Plan Settings",
+        description: GetPlanSettingsTool.description,
+        inputSchema: GetPlanSettingsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetPlanSettingsTool.execute, api));
+    },
+  },
+  {
+    title: "Get Plan Month",
+    name: GetPlanMonthTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetPlanMonthTool.name, {
+        title: "Get Plan Month",
+        description: GetPlanMonthTool.description,
+        inputSchema: GetPlanMonthTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetPlanMonthTool.execute, api));
+    },
+  },
+  {
+    title: "List Plan Months",
+    name: ListPlanMonthsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(ListPlanMonthsTool.name, {
+        title: "List Plan Months",
+        description: ListPlanMonthsTool.description,
+        inputSchema: ListPlanMonthsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(ListPlanMonthsTool.execute, api));
+    },
+  },
+  {
+    title: "List Categories",
+    name: ListPlanCategoriesTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(ListPlanCategoriesTool.name, {
+        title: "List Categories",
+        description: ListPlanCategoriesTool.description,
+        inputSchema: ListPlanCategoriesTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(ListPlanCategoriesTool.execute, api));
+    },
+  },
+  {
+    title: "Get Category",
+    name: GetCategoryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetCategoryTool.name, {
+        title: "Get Category",
+        description: GetCategoryTool.description,
+        inputSchema: GetCategoryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetCategoryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Month Category",
+    name: GetMonthCategoryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetMonthCategoryTool.name, {
+        title: "Get Month Category",
+        description: GetMonthCategoryTool.description,
+        inputSchema: GetMonthCategoryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetMonthCategoryTool.execute, api));
+    },
+  },
+  {
+    title: "List Transactions",
+    name: ListTransactionsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(ListTransactionsTool.name, {
+        title: "List Transactions",
+        description: ListTransactionsTool.description,
+        inputSchema: ListTransactionsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(ListTransactionsTool.execute, api));
+    },
+  },
+  {
+    title: "Search Transactions",
+    name: SearchTransactionsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(SearchTransactionsTool.name, {
+        title: "Search Transactions",
+        description: SearchTransactionsTool.description,
+        inputSchema: SearchTransactionsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(SearchTransactionsTool.execute, api));
+    },
+  },
+  {
+    title: "Get Transactions By Month",
+    name: GetTransactionsByMonthTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetTransactionsByMonthTool.name, {
+        title: "Get Transactions By Month",
+        description: GetTransactionsByMonthTool.description,
+        inputSchema: GetTransactionsByMonthTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetTransactionsByMonthTool.execute, api));
+    },
+  },
+  {
+    title: "Get Transaction",
+    name: GetTransactionTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetTransactionTool.name, {
+        title: "Get Transaction",
+        description: GetTransactionTool.description,
+        inputSchema: GetTransactionTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetTransactionTool.execute, api));
+    },
+  },
+  {
+    title: "Get Transactions By Account",
+    name: GetTransactionsByAccountTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetTransactionsByAccountTool.name, {
+        title: "Get Transactions By Account",
+        description: GetTransactionsByAccountTool.description,
+        inputSchema: GetTransactionsByAccountTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetTransactionsByAccountTool.execute, api));
+    },
+  },
+  {
+    title: "Get Transactions By Category",
+    name: GetTransactionsByCategoryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetTransactionsByCategoryTool.name, {
+        title: "Get Transactions By Category",
+        description: GetTransactionsByCategoryTool.description,
+        inputSchema: GetTransactionsByCategoryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetTransactionsByCategoryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Transactions By Payee",
+    name: GetTransactionsByPayeeTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetTransactionsByPayeeTool.name, {
+        title: "Get Transactions By Payee",
+        description: GetTransactionsByPayeeTool.description,
+        inputSchema: GetTransactionsByPayeeTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetTransactionsByPayeeTool.execute, api));
+    },
+  },
+  {
+    title: "List Scheduled Transactions",
+    name: ListScheduledTransactionsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(ListScheduledTransactionsTool.name, {
+        title: "List Scheduled Transactions",
+        description: ListScheduledTransactionsTool.description,
+        inputSchema: ListScheduledTransactionsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(ListScheduledTransactionsTool.execute, api));
+    },
+  },
+  {
+    title: "Get Scheduled Transaction",
+    name: GetScheduledTransactionTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetScheduledTransactionTool.name, {
+        title: "Get Scheduled Transaction",
+        description: GetScheduledTransactionTool.description,
+        inputSchema: GetScheduledTransactionTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetScheduledTransactionTool.execute, api));
+    },
+  },
+  {
+    title: "List Accounts",
+    name: ListAccountsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(ListAccountsTool.name, {
+        title: "List Accounts",
+        description: ListAccountsTool.description,
+        inputSchema: ListAccountsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(ListAccountsTool.execute, api));
+    },
+  },
+  {
+    title: "Get Account",
+    name: GetAccountTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetAccountTool.name, {
+        title: "Get Account",
+        description: GetAccountTool.description,
+        inputSchema: GetAccountTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetAccountTool.execute, api));
+    },
+  },
+  {
+    title: "List Payees",
+    name: ListPayeesTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(ListPayeesTool.name, {
+        title: "List Payees",
+        description: ListPayeesTool.description,
+        inputSchema: ListPayeesTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(ListPayeesTool.execute, api));
+    },
+  },
+  {
+    title: "Get Payee",
+    name: GetPayeeTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetPayeeTool.name, {
+        title: "Get Payee",
+        description: GetPayeeTool.description,
+        inputSchema: GetPayeeTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetPayeeTool.execute, api));
+    },
+  },
+  {
+    title: "List Payee Locations",
+    name: ListPayeeLocationsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(ListPayeeLocationsTool.name, {
+        title: "List Payee Locations",
+        description: ListPayeeLocationsTool.description,
+        inputSchema: ListPayeeLocationsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(ListPayeeLocationsTool.execute, api));
+    },
+  },
+  {
+    title: "Get Payee Location",
+    name: GetPayeeLocationTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetPayeeLocationTool.name, {
+        title: "Get Payee Location",
+        description: GetPayeeLocationTool.description,
+        inputSchema: GetPayeeLocationTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetPayeeLocationTool.execute, api));
+    },
+  },
+  {
+    title: "Get Payee Locations By Payee",
+    name: GetPayeeLocationsByPayeeTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetPayeeLocationsByPayeeTool.name, {
+        title: "Get Payee Locations By Payee",
+        description: GetPayeeLocationsByPayeeTool.description,
+        inputSchema: GetPayeeLocationsByPayeeTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetPayeeLocationsByPayeeTool.execute, api));
+    },
+  },
+  {
+    title: "Get Money Movements",
+    name: GetMoneyMovementsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetMoneyMovementsTool.name, {
+        title: "Get Money Movements",
+        description: GetMoneyMovementsTool.description,
+        inputSchema: GetMoneyMovementsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetMoneyMovementsTool.execute, api));
+    },
+  },
+  {
+    title: "Get Money Movements By Month",
+    name: GetMoneyMovementsByMonthTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetMoneyMovementsByMonthTool.name, {
+        title: "Get Money Movements By Month",
+        description: GetMoneyMovementsByMonthTool.description,
+        inputSchema: GetMoneyMovementsByMonthTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetMoneyMovementsByMonthTool.execute, api));
+    },
+  },
+  {
+    title: "Get Money Movement Groups",
+    name: GetMoneyMovementGroupsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetMoneyMovementGroupsTool.name, {
+        title: "Get Money Movement Groups",
+        description: GetMoneyMovementGroupsTool.description,
+        inputSchema: GetMoneyMovementGroupsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetMoneyMovementGroupsTool.execute, api));
+    },
+  },
+  {
+    title: "Get Money Movement Groups By Month",
+    name: GetMoneyMovementGroupsByMonthTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetMoneyMovementGroupsByMonthTool.name, {
+        title: "Get Money Movement Groups By Month",
+        description: GetMoneyMovementGroupsByMonthTool.description,
+        inputSchema: GetMoneyMovementGroupsByMonthTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetMoneyMovementGroupsByMonthTool.execute, api));
+    },
+  },
+  {
+    title: "Get Financial Snapshot",
+    name: GetFinancialSnapshotTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetFinancialSnapshotTool.name, {
+        title: "Get Financial Snapshot",
+        description: GetFinancialSnapshotTool.description,
+        inputSchema: GetFinancialSnapshotTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetFinancialSnapshotTool.execute, api));
+    },
+  },
+  {
+    title: "Get Financial Health Check",
+    name: GetFinancialHealthCheckTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetFinancialHealthCheckTool.name, {
+        title: "Get Financial Health Check",
+        description: GetFinancialHealthCheckTool.description,
+        inputSchema: GetFinancialHealthCheckTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetFinancialHealthCheckTool.execute, api));
+    },
+  },
+  {
+    title: "Get Spending Summary",
+    name: GetSpendingSummaryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetSpendingSummaryTool.name, {
+        title: "Get Spending Summary",
+        description: GetSpendingSummaryTool.description,
+        inputSchema: GetSpendingSummaryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetSpendingSummaryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Spending Anomalies",
+    name: GetSpendingAnomaliesTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetSpendingAnomaliesTool.name, {
+        title: "Get Spending Anomalies",
+        description: GetSpendingAnomaliesTool.description,
+        inputSchema: GetSpendingAnomaliesTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetSpendingAnomaliesTool.execute, api));
+    },
+  },
+  {
+    title: "Get Cash Flow Summary",
+    name: GetCashFlowSummaryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetCashFlowSummaryTool.name, {
+        title: "Get Cash Flow Summary",
+        description: GetCashFlowSummaryTool.description,
+        inputSchema: GetCashFlowSummaryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetCashFlowSummaryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Cash Runway",
+    name: GetCashRunwayTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetCashRunwayTool.name, {
+        title: "Get Cash Runway",
+        description: GetCashRunwayTool.description,
+        inputSchema: GetCashRunwayTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetCashRunwayTool.execute, api));
+    },
+  },
+  {
+    title: "Get Budget Health Summary",
+    name: GetBudgetHealthSummaryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetBudgetHealthSummaryTool.name, {
+        title: "Get Budget Health Summary",
+        description: GetBudgetHealthSummaryTool.description,
+        inputSchema: GetBudgetHealthSummaryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetBudgetHealthSummaryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Upcoming Obligations",
+    name: GetUpcomingObligationsTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetUpcomingObligationsTool.name, {
+        title: "Get Upcoming Obligations",
+        description: GetUpcomingObligationsTool.description,
+        inputSchema: GetUpcomingObligationsTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetUpcomingObligationsTool.execute, api));
+    },
+  },
+  {
+    title: "Get Goal Progress Summary",
+    name: GetGoalProgressSummaryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetGoalProgressSummaryTool.name, {
+        title: "Get Goal Progress Summary",
+        description: GetGoalProgressSummaryTool.description,
+        inputSchema: GetGoalProgressSummaryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetGoalProgressSummaryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Budget Cleanup Summary",
+    name: GetBudgetCleanupSummaryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetBudgetCleanupSummaryTool.name, {
+        title: "Get Budget Cleanup Summary",
+        description: GetBudgetCleanupSummaryTool.description,
+        inputSchema: GetBudgetCleanupSummaryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetBudgetCleanupSummaryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Income Summary",
+    name: GetIncomeSummaryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetIncomeSummaryTool.name, {
+        title: "Get Income Summary",
+        description: GetIncomeSummaryTool.description,
+        inputSchema: GetIncomeSummaryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetIncomeSummaryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Emergency Fund Coverage",
+    name: GetEmergencyFundCoverageTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetEmergencyFundCoverageTool.name, {
+        title: "Get Emergency Fund Coverage",
+        description: GetEmergencyFundCoverageTool.description,
+        inputSchema: GetEmergencyFundCoverageTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetEmergencyFundCoverageTool.execute, api));
+    },
+  },
+  {
+    title: "Get Debt Summary",
+    name: GetDebtSummaryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetDebtSummaryTool.name, {
+        title: "Get Debt Summary",
+        description: GetDebtSummaryTool.description,
+        inputSchema: GetDebtSummaryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetDebtSummaryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Recurring Expense Summary",
+    name: GetRecurringExpenseSummaryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetRecurringExpenseSummaryTool.name, {
+        title: "Get Recurring Expense Summary",
+        description: GetRecurringExpenseSummaryTool.description,
+        inputSchema: GetRecurringExpenseSummaryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetRecurringExpenseSummaryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Category Trend Summary",
+    name: GetCategoryTrendSummaryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetCategoryTrendSummaryTool.name, {
+        title: "Get Category Trend Summary",
+        description: GetCategoryTrendSummaryTool.description,
+        inputSchema: GetCategoryTrendSummaryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetCategoryTrendSummaryTool.execute, api));
+    },
+  },
+  {
+    title: "Get 70/20/10 Summary",
+    name: GetBudgetRatioSummaryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetBudgetRatioSummaryTool.name, {
+        title: "Get 70/20/10 Summary",
+        description: GetBudgetRatioSummaryTool.description,
+        inputSchema: GetBudgetRatioSummaryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetBudgetRatioSummaryTool.execute, api));
+    },
+  },
+];
 
 export function registerServerTools(registrar: ToolRegistrar, api: ynab.API): string[] {
   const registeredToolNames: string[] = [];
 
   for (const tool of toolRegistrations) {
-    registerTool(registrar, tool, api);
+    tool.register(registrar, api);
     registeredToolNames.push(tool.name);
   }
 
@@ -154,8 +671,14 @@ export function createServer(config: YnabConfig, api = createYnabApi(config)): M
   const normalizedConfig = assertYnabConfig(config);
   const server = new McpServer(SERVER_INFO);
   const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
+  const registrar: ToolRegistrar = {
+    registerTool: (name, toolConfig, cb) => {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- This adapter intentionally erases MCP's heavy generic types.
+      return server.registerTool(name, toolConfig as never, cb as never);
+    },
+  };
 
-  registerServerTools(server, configuredApi);
+  registerServerTools(registrar, configuredApi);
 
   return server;
 }

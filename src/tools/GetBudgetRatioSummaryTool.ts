@@ -19,6 +19,7 @@ export const inputSchema = {
 };
 
 type CategoryBucketName = "needs" | "wants" | "savings_debt";
+const CATEGORY_BUCKET_NAMES: readonly CategoryBucketName[] = ["needs", "wants", "savings_debt"];
 
 function inGroupList(name: string | undefined, allowedNames: string[]) {
   return !!name && allowedNames.includes(name);
@@ -66,7 +67,8 @@ export async function execute(
 
       const incomeMilliunits = response.data.month.income;
       const buckets = Object.fromEntries(
-        (Object.entries(bucketDefinitions) as Array<[CategoryBucketName, typeof bucketDefinitions[CategoryBucketName]]>).map(([bucketName, definition]) => {
+        CATEGORY_BUCKET_NAMES.map((bucketName) => {
+          const definition = bucketDefinitions[bucketName];
           const bucketCategories = categories.filter((category) => inGroupList(category.category_group_name, definition.groupNames));
           const amountMilliunits = bucketCategories.reduce((sum, category) => sum + definition.amount(category), 0);
 
@@ -78,7 +80,8 @@ export async function execute(
       );
 
       const topCategories = Object.fromEntries(
-        (Object.entries(bucketDefinitions) as Array<[CategoryBucketName, typeof bucketDefinitions[CategoryBucketName]]>).map(([bucketName, definition]) => {
+        CATEGORY_BUCKET_NAMES.map((bucketName) => {
+          const definition = bucketDefinitions[bucketName];
           const bucketCategories = categories.filter((category) => inGroupList(category.category_group_name, definition.groupNames));
 
           return [

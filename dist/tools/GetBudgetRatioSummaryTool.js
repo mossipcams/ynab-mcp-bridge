@@ -11,6 +11,7 @@ export const inputSchema = {
     savingsDebtGroupNames: z.array(z.string()).default([]).describe("Category group names that count as savings or debt."),
     topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of categories to include per bucket."),
 };
+const CATEGORY_BUCKET_NAMES = ["needs", "wants", "savings_debt"];
 function inGroupList(name, allowedNames) {
     return !!name && allowedNames.includes(name);
 }
@@ -42,7 +43,8 @@ export async function execute(input, api) {
                 },
             };
             const incomeMilliunits = response.data.month.income;
-            const buckets = Object.fromEntries(Object.entries(bucketDefinitions).map(([bucketName, definition]) => {
+            const buckets = Object.fromEntries(CATEGORY_BUCKET_NAMES.map((bucketName) => {
+                const definition = bucketDefinitions[bucketName];
                 const bucketCategories = categories.filter((category) => inGroupList(category.category_group_name, definition.groupNames));
                 const amountMilliunits = bucketCategories.reduce((sum, category) => sum + definition.amount(category), 0);
                 return [
@@ -50,7 +52,8 @@ export async function execute(input, api) {
                     buildAllocationBreakdown(amountMilliunits, incomeMilliunits, definition.targetPercent),
                 ];
             }));
-            const topCategories = Object.fromEntries(Object.entries(bucketDefinitions).map(([bucketName, definition]) => {
+            const topCategories = Object.fromEntries(CATEGORY_BUCKET_NAMES.map((bucketName) => {
+                const definition = bucketDefinitions[bucketName];
                 const bucketCategories = categories.filter((category) => inGroupList(category.category_group_name, definition.groupNames));
                 return [
                     bucketName,

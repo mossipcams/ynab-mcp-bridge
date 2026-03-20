@@ -91,8 +91,8 @@ function matchesFilters(
 }
 
 function compareTransactions(
-  left: SearchableTransaction,
-  right: SearchableTransaction,
+  left: Pick<SearchableTransaction, "amount" | "date" | "id">,
+  right: Pick<SearchableTransaction, "amount" | "date" | "id">,
   sort: (typeof sortableValues)[number],
 ) {
   switch (sort) {
@@ -141,8 +141,8 @@ export async function execute(
 
     const transactions = response.data.transactions
       .filter((transaction) => !transaction.deleted)
-      .filter((transaction) => matchesFilters(transaction as SearchableTransaction, input))
-      .sort((left, right) => compareTransactions(left as SearchableTransaction, right as SearchableTransaction, sort))
+      .filter((transaction) => matchesFilters(transaction, input))
+      .sort((left, right) => compareTransactions(left, right, sort))
       .map((transaction) => ({
         id: transaction.id,
         date: transaction.date,

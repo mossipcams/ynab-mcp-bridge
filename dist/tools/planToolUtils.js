@@ -1,17 +1,11 @@
 import { getYnabApiRuntimeContext } from "../ynabApi.js";
+import { toPlanId } from "../ynabTypes.js";
 import { getErrorMessage } from "./errorUtils.js";
-function _getPlanId(inputPlanId, configuredPlanId) {
-    const planId = inputPlanId?.trim() || configuredPlanId?.trim() || "";
-    if (!planId) {
-        throw new Error("No plan ID provided. Please provide a plan ID or set YNAB_PLAN_ID.");
-    }
-    return planId;
-}
 function getApiConfiguredPlanId(api) {
-    return getYnabApiRuntimeContext(api)?.config.planId?.trim();
+    return getYnabApiRuntimeContext(api)?.config.planId;
 }
 function getRuntimePlanIdOverride(api) {
-    return getYnabApiRuntimeContext(api)?.runtimePlanIdOverride?.trim();
+    return getYnabApiRuntimeContext(api)?.runtimePlanIdOverride;
 }
 function setRuntimePlanIdOverride(api, planId) {
     const runtimeContext = getYnabApiRuntimeContext(api);
@@ -21,7 +15,7 @@ function setRuntimePlanIdOverride(api, planId) {
     runtimeContext.runtimePlanIdOverride = planId;
 }
 function getConfiguredPlanId(inputPlanId, api, options) {
-    const explicitPlanId = inputPlanId?.trim();
+    const explicitPlanId = toPlanId(inputPlanId);
     if (explicitPlanId) {
         return explicitPlanId;
     }
@@ -30,17 +24,22 @@ function getConfiguredPlanId(inputPlanId, api, options) {
         return runtimePlanIdOverride;
     }
     if (!options.ignoreConfiguredPlanId) {
-        return getApiConfiguredPlanId(api) ?? "";
+        return getApiConfiguredPlanId(api);
     }
-    return "";
+    return undefined;
 }
 function pickResolvedPlanId(plans, defaultPlanId, excludedPlanIds) {
-    if (defaultPlanId && !excludedPlanIds.has(defaultPlanId)) {
-        return defaultPlanId;
+    const normalizedDefaultPlanId = toPlanId(defaultPlanId);
+    if (normalizedDefaultPlanId && !excludedPlanIds.has(normalizedDefaultPlanId)) {
+        return normalizedDefaultPlanId;
     }
-    const remainingPlans = plans.filter((plan) => !excludedPlanIds.has(plan.id));
+    const remainingPlans = plans
+        .map((plan) => ({ ...plan, id: toPlanId(plan.id) }))
+        .filter((plan) => plan.id !== undefined)
+        .filter((plan) => !excludedPlanIds.has(plan.id));
     if (remainingPlans.length === 1) {
-        return remainingPlans[0].id;
+        const [remainingPlan] = remainingPlans;
+        return remainingPlan?.id;
     }
     return undefined;
 }

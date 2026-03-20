@@ -6,9 +6,20 @@ import * as GetPlanSettingsTool from "./tools/GetPlanSettingsTool.js";
 import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
 import * as ListPlansTool from "./tools/ListPlansTool.js";
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
+import { toPlanId } from "./ynabTypes.js";
 
 function parseResponseText(result: { content: Array<{ text: string }> }) {
   return JSON.parse(result.content[0].text);
+}
+
+function requirePlanId(value: string) {
+  const planId = toPlanId(value);
+
+  if (!planId) {
+    throw new Error(`Expected valid plan id: ${value}`);
+  }
+
+  return planId;
 }
 
 describe("plan read tools", () => {
@@ -100,25 +111,26 @@ describe("plan read tools", () => {
   });
 
   it("gets plan settings using the env fallback when needed", async () => {
-    const api = attachYnabApiRuntimeContext({
-      plans: {
-        getPlanSettingsById: vi.fn().mockResolvedValue({
-          data: {
-            settings: {
-              date_format: { format: "MM/DD/YYYY" },
-              currency_format: { iso_code: "USD" },
-            },
+    const plans = {
+      getPlanSettingsById: vi.fn().mockResolvedValue({
+        data: {
+          settings: {
+            date_format: { format: "MM/DD/YYYY" },
+            currency_format: { iso_code: "USD" },
           },
-        }),
-      },
+        },
+      }),
+    };
+    const api = attachYnabApiRuntimeContext({
+      plans,
     }, {
       apiToken: "token-1",
-      planId: "plan-env",
+      planId: requirePlanId("plan-env"),
     });
 
     const result = await GetPlanSettingsTool.execute({}, api as any);
 
-    expect(api.plans.getPlanSettingsById).toHaveBeenCalledWith("plan-env");
+    expect(plans.getPlanSettingsById).toHaveBeenCalledWith("plan-env");
     expect(parseResponseText(result)).toEqual({
       settings: {
         date_format: { format: "MM/DD/YYYY" },
@@ -165,43 +177,44 @@ describe("plan read tools", () => {
   });
 
   it("recovers from a stale configured plan id by resolving a fresh default plan", async () => {
-    const api = attachYnabApiRuntimeContext({
-      plans: {
-        getPlans: vi.fn().mockResolvedValue({
+    const plans = {
+      getPlans: vi.fn().mockResolvedValue({
+        data: {
+          plans: [
+            { id: "plan-2", name: "Work" },
+          ],
+          default_plan: { id: "plan-2", name: "Work" },
+        },
+      }),
+      getPlanSettingsById: vi
+        .fn()
+        .mockRejectedValueOnce({
+          error: {
+            name: "not_found",
+            detail: "Plan not found",
+          },
+        })
+        .mockResolvedValueOnce({
           data: {
-            plans: [
-              { id: "plan-2", name: "Work" },
-            ],
-            default_plan: { id: "plan-2", name: "Work" },
+            settings: {
+              date_format: { format: "MM/DD/YYYY" },
+              currency_format: { iso_code: "USD" },
+            },
           },
         }),
-        getPlanSettingsById: vi
-          .fn()
-          .mockRejectedValueOnce({
-            error: {
-              name: "not_found",
-              detail: "Plan not found",
-            },
-          })
-          .mockResolvedValueOnce({
-            data: {
-              settings: {
-                date_format: { format: "MM/DD/YYYY" },
-                currency_format: { iso_code: "USD" },
-              },
-            },
-          }),
-      },
+    };
+    const api = attachYnabApiRuntimeContext({
+      plans,
     }, {
       apiToken: "token-1",
-      planId: "plan-stale",
+      planId: requirePlanId("plan-stale"),
     });
 
     const result = await GetPlanSettingsTool.execute({}, api as any);
 
-    expect(api.plans.getPlanSettingsById).toHaveBeenNthCalledWith(1, "plan-stale");
-    expect(api.plans.getPlans).toHaveBeenCalledOnce();
-    expect(api.plans.getPlanSettingsById).toHaveBeenNthCalledWith(2, "plan-2");
+    expect(plans.getPlanSettingsById).toHaveBeenNthCalledWith(1, "plan-stale");
+    expect(plans.getPlans).toHaveBeenCalledOnce();
+    expect(plans.getPlanSettingsById).toHaveBeenNthCalledWith(2, "plan-2");
     expect(parseResponseText(result)).toEqual({
       settings: {
         date_format: { format: "MM/DD/YYYY" },
@@ -211,26 +224,27 @@ describe("plan read tools", () => {
   });
 
   it("does not override an explicit invalid plan id", async () => {
+    const plans = {
+      getPlans: vi.fn(),
+      getPlanSettingsById: vi.fn().mockRejectedValue({
+        error: {
+          name: "not_found",
+          detail: "Plan not found",
+        },
+      }),
+    };
     const api = attachYnabApiRuntimeContext({
-      plans: {
-        getPlans: vi.fn(),
-        getPlanSettingsById: vi.fn().mockRejectedValue({
-          error: {
-            name: "not_found",
-            detail: "Plan not found",
-          },
-        }),
-      },
+      plans,
     }, {
       apiToken: "token-1",
-      planId: "plan-env",
+      planId: requirePlanId("plan-env"),
     });
 
     const result = await GetPlanSettingsTool.execute({ planId: "plan-explicit" }, api as any);
 
-    expect(api.plans.getPlanSettingsById).toHaveBeenCalledOnce();
-    expect(api.plans.getPlanSettingsById).toHaveBeenCalledWith("plan-explicit");
-    expect(api.plans.getPlans).not.toHaveBeenCalled();
+    expect(plans.getPlanSettingsById).toHaveBeenCalledOnce();
+    expect(plans.getPlanSettingsById).toHaveBeenCalledWith("plan-explicit");
+    expect(plans.getPlans).not.toHaveBeenCalled();
     expect("isError" in result && result.isError).toBe(true);
     expect(parseResponseText(result)).toEqual({
       success: false,

@@ -1,6 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 describe("code quality guardrails", () => {
   it("defines Dependency Cruiser architecture enforcement in repo config, package scripts, and CI", () => {
@@ -36,9 +39,19 @@ describe("code quality guardrails", () => {
 
   it("defines strict type-aware ESLint in repo config, package scripts, and CI", () => {
     expect(existsSync(new URL("../eslint.config.mjs", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("../tsconfig.eslint.json", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("../tsconfig.eslint.clientProfiles.json", import.meta.url))).toBe(true);
 
     const eslintConfig = readFileSync(
       new URL("../eslint.config.mjs", import.meta.url),
+      "utf8",
+    );
+    const eslintTsconfig = readFileSync(
+      new URL("../tsconfig.eslint.json", import.meta.url),
+      "utf8",
+    );
+    const eslintClientProfilesTsconfig = readFileSync(
+      new URL("../tsconfig.eslint.clientProfiles.json", import.meta.url),
       "utf8",
     );
     const packageJson = JSON.parse(
@@ -53,12 +66,60 @@ describe("code quality guardrails", () => {
     expect(packageJson.devDependencies["@typescript-eslint/eslint-plugin"]).toBeTruthy();
     expect(packageJson.devDependencies["@typescript-eslint/parser"]).toBeTruthy();
     expect(packageJson.scripts.lint).toBeTruthy();
+    expect(packageJson.scripts.lint).toContain("lint:repo");
+    expect(packageJson.scripts.lint).toContain("lint:specs");
+    expect(packageJson.scripts["lint:repo"]).toContain("lint:repo:fast");
+    expect(packageJson.scripts["lint:repo"]).toContain("lint:repo:typed:core");
+    expect(packageJson.scripts["lint:repo"]).toContain("lint:repo:typed:client-profiles");
+    expect(packageJson.scripts["lint:repo:fast"]).toContain("--max-old-space-size=4096");
+    expect(packageJson.scripts["lint:repo:fast"]).toContain("src/tools/**/*.ts");
+    expect(packageJson.scripts["lint:repo:fast"]).toContain("src/server.ts");
+    expect(packageJson.scripts["lint:repo:fast"]).toContain("src/httpServer.ts");
+    expect(packageJson.scripts["lint:repo:fast"]).toContain("src/stdioServer.ts");
+    expect(packageJson.scripts["lint:repo:fast"]).toContain("src/index.ts");
+    expect(packageJson.scripts["lint:repo:fast"]).toContain("artifacts/**");
+    expect(packageJson.scripts["lint:repo:typed:core"]).toContain("--max-old-space-size=4096");
+    expect(packageJson.scripts["lint:repo:typed:core"]).toContain("src/*.ts");
+    expect(packageJson.scripts["lint:repo:typed:core"]).toContain("src/server.ts");
+    expect(packageJson.scripts["lint:repo:typed:client-profiles"]).toContain("--max-old-space-size=4096");
+    expect(packageJson.scripts["lint:repo:typed:client-profiles"]).toContain("src/clientProfiles/**/*.ts");
+    expect(packageJson.scripts["lint:specs"]).toContain("--max-old-space-size=8192");
+    expect(packageJson.scripts["lint:specs"]).toContain("src/**/*.spec.ts");
     expect(eslintConfig).toContain("strictTypeChecked");
     expect(eslintConfig).toContain("parserOptions");
-    expect(eslintConfig).toContain("projectService");
+    expect(eslintConfig).toContain('project: "./tsconfig.eslint.json"');
+    expect(eslintConfig).toContain('project: "./tsconfig.eslint.clientProfiles.json"');
+    expect(eslintConfig).not.toContain("projectService");
+    expect(eslintConfig).toContain('"artifacts/**"');
+    expect(eslintConfig).toContain('"src/server.ts"');
+    expect(eslintConfig).toContain('"src/httpServer.ts"');
+    expect(eslintConfig).toContain('"src/stdioServer.ts"');
+    expect(eslintConfig).toContain('"src/index.ts"');
+    expect(eslintTsconfig).toContain("\"./tsconfig.json\"");
+    expect(eslintTsconfig).toContain("\"src/*.ts\"");
+    expect(eslintTsconfig).toContain("\"src/server.ts\"");
+    expect(eslintClientProfilesTsconfig).toContain("\"src/clientProfiles/**/*.ts\"");
+    expect(eslintTsconfig).toContain("\"**/*.contract.ts\"");
     expect(eslintConfig).not.toContain('files: ["src/server.ts"]');
     expect(workflow).toContain("Run ESLint");
     expect(workflow).toContain("npm run lint");
+  });
+
+  it("pins TypeScript 5.9 and enables the agreed strict compiler options", () => {
+    const tsconfig = readFileSync(
+      new URL("../tsconfig.json", import.meta.url),
+      "utf8",
+    );
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+
+    expect(packageJson.devDependencies.typescript).toMatch(/\b5\.9\./);
+    expect(tsconfig).toContain('"strict": true');
+    expect(tsconfig).toContain('"exactOptionalPropertyTypes": true');
+    expect(tsconfig).toContain('"noUncheckedIndexedAccess": true');
+    expect(tsconfig).toContain('"noPropertyAccessFromIndexSignature": true');
+    expect(tsconfig).toContain('"noImplicitOverride": true');
   });
 
   it("defines the remaining explicit ESLint plugin and import guardrails for this slice", () => {
@@ -69,18 +130,28 @@ describe("code quality guardrails", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("../package.json", import.meta.url), "utf8"),
     );
-    const printedConfig = execFileSync(
-      "npx",
-      ["eslint", "--print-config", "src/server.ts"],
-      {
-        cwd: new URL("..", import.meta.url),
-        encoding: "utf8",
-      },
-    );
 
     expect(packageJson.devDependencies["eslint-plugin-security"]).toBeTruthy();
     expect(packageJson.devDependencies["eslint-plugin-sonarjs"]).toBeTruthy();
     expect(eslintConfig).toContain("no-restricted-imports");
+  });
+
+  it("explicitly forbids type assertions and keeps no-unsafe rules in the effective lint config", () => {
+    const eslintConfig = readFileSync(
+      new URL("../eslint.config.mjs", import.meta.url),
+      "utf8",
+    );
+    const printedConfig = execFileSync(
+      "npx",
+      ["eslint", "--print-config", "src/config.ts"],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+      },
+    );
+
+    expect(eslintConfig).toContain("@typescript-eslint/consistent-type-assertions");
+    expect(eslintConfig).toContain('"never"');
     expect(printedConfig).toContain('"@typescript-eslint/no-unsafe-assignment"');
     expect(printedConfig).toContain('"@typescript-eslint/no-unsafe-call"');
     expect(printedConfig).toContain('"@typescript-eslint/no-unsafe-member-access"');
@@ -149,7 +220,6 @@ describe("code quality guardrails", () => {
     expect(workflow).toContain("npm run lint:oxlint");
     expect(workflow).toContain("continue-on-error: true");
   });
-
   it("defines Knip dead-code detection in repo config, package scripts, and CI", () => {
     expect(existsSync(new URL("../knip.json", import.meta.url))).toBe(true);
 
@@ -185,24 +255,28 @@ describe("code quality guardrails", () => {
       "utf8",
     );
 
-    const installIndex = workflow.indexOf("Install dependencies");
+    expect(workflow).toContain("strategy:");
+    expect(workflow).toContain("node-version: [22.x, 24.x]");
+    expect(workflow).toContain("quality:");
+
     const testsIndex = workflow.indexOf("Run tests");
+    const coverageIndex = workflow.indexOf("Run coverage thresholds");
     const dependencyRulesIndex = workflow.indexOf("Run dependency rules");
     const eslintIndex = workflow.indexOf("Run ESLint");
     const typecheckIndex = workflow.indexOf("Run TypeScript typecheck");
     const knipIndex = workflow.indexOf("Run Knip");
     const buildIndex = workflow.indexOf("Build package");
 
-    expect(installIndex).toBeGreaterThanOrEqual(0);
-    expect(testsIndex).toBeGreaterThan(installIndex);
-    expect(dependencyRulesIndex).toBeGreaterThan(testsIndex);
+    expect(testsIndex).toBeGreaterThanOrEqual(0);
+    expect(coverageIndex).toBeGreaterThan(testsIndex);
+    expect(dependencyRulesIndex).toBeGreaterThan(coverageIndex);
     expect(eslintIndex).toBeGreaterThan(dependencyRulesIndex);
     expect(typecheckIndex).toBeGreaterThan(eslintIndex);
     expect(knipIndex).toBeGreaterThan(typecheckIndex);
     expect(buildIndex).toBeGreaterThan(knipIndex);
   });
 
-  it("defines a dedicated typecheck that includes test files in package scripts and CI", () => {
+  it("keeps production typecheck in CI and exposes a separate test typecheck script", () => {
     expect(existsSync(new URL("../tsconfig.test.json", import.meta.url))).toBe(true);
 
     const testTsconfig = readFileSync(
@@ -219,9 +293,16 @@ describe("code quality guardrails", () => {
 
     expect(testTsconfig).toContain("\"**/*.spec.ts\"");
     expect(testTsconfig).not.toContain("\"**/*.test.ts\"");
-    expect(packageJson.scripts.typecheck).toContain("tsconfig.test.json");
+    expect(packageJson.scripts.typecheck).toContain("--max-old-space-size=12288");
+    expect(packageJson.scripts.typecheck).toContain("tsconfig.json");
+    expect(packageJson.scripts.typecheck).not.toContain("tsconfig.test.json");
+    expect(packageJson.scripts["typecheck:tests"]).toContain("--max-old-space-size=12288");
+    expect(packageJson.scripts["typecheck:tests"]).toContain("tsconfig.test.json");
+    expect(packageJson.scripts["typecheck:all"]).toContain("npm run typecheck");
+    expect(packageJson.scripts["typecheck:all"]).toContain("npm run typecheck:tests");
     expect(workflow).toContain("Run TypeScript typecheck");
     expect(workflow).toContain("npm run typecheck");
+    expect(workflow).not.toContain("npm run typecheck:tests");
   });
 
   it("lints spec files with test-specific overrides instead of ignoring them", () => {
@@ -253,6 +334,7 @@ describe("code quality guardrails", () => {
     expect(packageJson.scripts["test:ci"]).toContain("--reporter=junit");
     expect(packageJson.scripts["test:ci"]).toContain("--outputFile.junit=");
     expect(workflow).toContain("npm run test:ci");
+    expect(workflow).toContain("if: always()");
     expect(workflow).toContain("actions/upload-artifact@v4");
     expect(workflow).toContain("artifacts/test-results");
   });

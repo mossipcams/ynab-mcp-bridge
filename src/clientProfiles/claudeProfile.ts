@@ -1,5 +1,6 @@
 import { genericProfile } from "./genericProfile.js";
 import { getRequestOrigin } from "./requestContext.js";
+import { getStringValue, isRecord } from "../typeUtils.js";
 import type { ClientProfile } from "./types.js";
 
 export const claudeProfile: ClientProfile = {
@@ -10,9 +11,9 @@ export const claudeProfile: ClientProfile = {
     preAuthReason: "origin:claude.ai",
   },
   matchesPreAuth: (context) => getRequestOrigin(context) === "https://claude.ai",
-  matchesInitialize: (clientInfo) => (
-    typeof (clientInfo as { name?: unknown } | undefined)?.name === "string" &&
-    (clientInfo as { name: string }).name.toLowerCase().includes("claude")
+  matchesInitialize: (clientInfo) => Boolean(
+    isRecord(clientInfo) &&
+    getStringValue(clientInfo, "name")?.toLowerCase().includes("claude"),
   ),
   oauth: {
     ...genericProfile.oauth,

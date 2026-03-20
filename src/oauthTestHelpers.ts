@@ -4,20 +4,11 @@ import { createServer as createNodeHttpServer } from "node:http";
 import { expect } from "vitest";
 
 import type { RuntimeAuthConfig } from "./config.js";
+import { getArrayValue, getNumberValue, getStringValue, isRecord } from "./typeUtils.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
 
 type Cleanup = () => Promise<void>;
-
-type RegistrationResponse = {
-  client_id: string;
-  client_id_issued_at?: number;
-  client_name?: string;
-  grant_types?: string[];
-  redirect_uris?: string[];
-  response_types?: string[];
-  token_endpoint_auth_method?: string;
-};
 
 const DEFAULT_REMOTE_ORIGIN = "https://claude.ai";
 const DEFAULT_REDIRECT_URI = `${DEFAULT_REMOTE_ORIGIN}/oauth/callback`;
@@ -51,7 +42,7 @@ export function createCloudflareOAuthAuth(overrides: Partial<OAuthAuthConfig> = 
 
 export async function startUpstreamOAuthServer(cleanups: Cleanup[]) {
   let lastTokenRequest: {
-    authorization?: string;
+    authorization?: string | undefined;
     body: URLSearchParams;
   } | undefined;
 
@@ -156,7 +147,39 @@ export async function registerOAuthClient(
   });
 
   expect(registrationResponse.status).toBe(201);
-  return await registrationResponse.json() as RegistrationResponse;
+  const registration: unknown = await registrationResponse.json();
+
+  if (!isRecord(registration)) {
+    throw new Error("OAuth client registration did not return an object.");
+  }
+
+  const clientId = getStringValue(registration, "client_id");
+
+  if (!clientId) {
+    throw new Error("OAuth client registration did not return a client_id.");
+  }
+
+  return {
+    client_id: clientId,
+    ...(typeof getNumberValue(registration, "client_id_issued_at") === "number"
+      ? { client_id_issued_at: getNumberValue(registration, "client_id_issued_at") }
+      : {}),
+    ...(typeof getStringValue(registration, "client_name") === "string"
+      ? { client_name: getStringValue(registration, "client_name") }
+      : {}),
+    ...(Array.isArray(getArrayValue(registration, "grant_types"))
+      ? { grant_types: getArrayValue(registration, "grant_types")?.filter((value): value is string => typeof value === "string") }
+      : {}),
+    ...(Array.isArray(getArrayValue(registration, "redirect_uris"))
+      ? { redirect_uris: getArrayValue(registration, "redirect_uris")?.filter((value): value is string => typeof value === "string") }
+      : {}),
+    ...(Array.isArray(getArrayValue(registration, "response_types"))
+      ? { response_types: getArrayValue(registration, "response_types")?.filter((value): value is string => typeof value === "string") }
+      : {}),
+    ...(typeof getStringValue(registration, "token_endpoint_auth_method") === "string"
+      ? { token_endpoint_auth_method: getStringValue(registration, "token_endpoint_auth_method") }
+      : {}),
+  };
 }
 
 export async function startAuthorization(

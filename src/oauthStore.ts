@@ -21,13 +21,13 @@ type ApprovalRecord = {
 
 type PendingConsentRecord = {
   clientId: string;
-  clientName?: string;
+  clientName?: string | undefined;
   codeChallenge: string;
   expiresAt: number;
   redirectUri: string;
   resource: string;
   scopes: string[];
-  state?: string;
+  state?: string | undefined;
 };
 
 type PendingAuthorizationRecord = Omit<PendingConsentRecord, "clientName">;
@@ -53,7 +53,7 @@ type LegacyPersistedOAuthState = {
   pendingAuthorizations?: unknown;
   pendingConsents?: unknown;
   refreshTokens?: unknown;
-  version?: number;
+  version?: number | undefined;
 };
 
 type PersistedOAuthState = {
@@ -72,9 +72,9 @@ function isApprovalRecord(value: unknown): value is ApprovalRecord {
     return false;
   }
 
-  return typeof value.clientId === "string" &&
-    typeof value.resource === "string" &&
-    Array.isArray(value.scopes);
+  return typeof value["clientId"] === "string" &&
+    typeof value["resource"] === "string" &&
+    Array.isArray(value["scopes"]);
 }
 
 function normalizeApprovalRecord(record: ApprovalRecord) {
@@ -82,6 +82,50 @@ function normalizeApprovalRecord(record: ApprovalRecord) {
     ...record,
     scopes: normalizeScopes(record.scopes),
   };
+}
+
+function isOAuthTokens(value: unknown): value is OAuthTokens {
+  return isRecord(value) &&
+    typeof value["access_token"] === "string" &&
+    typeof value["token_type"] === "string";
+}
+
+function isOAuthClientInformationFull(value: unknown): value is OAuthClientInformationFull {
+  return isRecord(value) && typeof value["client_id"] === "string";
+}
+
+function isAuthorizationCodeStep(value: unknown): value is NonNullable<OAuthGrant["authorizationCode"]> {
+  return isRecord(value) &&
+    typeof value["code"] === "string" &&
+    typeof value["expiresAt"] === "number";
+}
+
+function isConsentStep(value: unknown): value is NonNullable<OAuthGrant["consent"]> {
+  return isRecord(value) &&
+    typeof value["challenge"] === "string" &&
+    typeof value["expiresAt"] === "number";
+}
+
+function isPendingAuthorizationStep(value: unknown): value is NonNullable<OAuthGrant["pendingAuthorization"]> {
+  return isRecord(value) &&
+    typeof value["expiresAt"] === "number" &&
+    typeof value["stateId"] === "string";
+}
+
+function fromRecordEntries<T>(entries: Iterable<readonly [string, T]>): Record<string, T> {
+  const record: Record<string, T> = {};
+
+  for (const [key, value] of entries) {
+    record[key] = value;
+  }
+
+  return record;
+}
+
+function isRefreshTokenStep(value: unknown): value is NonNullable<OAuthGrant["refreshToken"]> {
+  return isRecord(value) &&
+    typeof value["expiresAt"] === "number" &&
+    typeof value["token"] === "string";
 }
 
 function createEmptyState(): PersistedOAuthState {
@@ -103,59 +147,68 @@ function parseApprovals(value: unknown) {
     .map(normalizeApprovalRecord);
 }
 
-function parseClients(value: unknown) {
-  if (!value || typeof value !== "object") {
+function parseClients(value: unknown): Record<string, OAuthClientInformationFull> {
+  if (!isRecord(value)) {
     return {};
   }
 
-  return value as Record<string, OAuthClientInformationFull>;
+  return fromRecordEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, OAuthClientInformationFull] => isOAuthClientInformationFull(entry[1]),
+    ),
+  );
 }
 
+// This legacy persistence parser intentionally validates several optional grant steps in one place.
+// eslint-disable-next-line sonarjs/cognitive-complexity
 function parseGrantRecord(value: unknown): OAuthGrant | undefined {
-  if (!value || typeof value !== "object") {
+  if (!isRecord(value)) {
     return undefined;
   }
 
-  const grant = value as Partial<OAuthGrant> & {
-    subject?: string;
-  };
+  const grantId = value["grantId"];
+  const clientId = value["clientId"];
+  const codeChallenge = value["codeChallenge"];
+  const redirectUri = value["redirectUri"];
+  const resource = value["resource"];
+  const scopes = value["scopes"];
 
   if (
-    typeof grant.grantId !== "string" ||
-    typeof grant.clientId !== "string" ||
-    typeof grant.codeChallenge !== "string" ||
-    typeof grant.redirectUri !== "string" ||
-    typeof grant.resource !== "string" ||
-    !Array.isArray(grant.scopes)
+    typeof grantId !== "string" ||
+    typeof clientId !== "string" ||
+    typeof codeChallenge !== "string" ||
+    typeof redirectUri !== "string" ||
+    typeof resource !== "string" ||
+    !Array.isArray(scopes)
   ) {
     return undefined;
   }
 
   return normalizeGrant({
-    authorizationCode: grant.authorizationCode,
-    clientId: grant.clientId,
-    clientName: grant.clientName,
-    codeChallenge: grant.codeChallenge,
-    consent: grant.consent,
-    grantId: grant.grantId,
-    pendingAuthorization: grant.pendingAuthorization,
-    redirectUri: grant.redirectUri,
-    refreshToken: grant.refreshToken,
-    resource: grant.resource,
-    scopes: grant.scopes,
-    state: grant.state,
-    principalId: grant.principalId,
-    subject: grant.subject,
-    upstreamTokens: grant.upstreamTokens,
+    ...(isAuthorizationCodeStep(value["authorizationCode"]) ? { authorizationCode: value["authorizationCode"] } : {}),
+    clientId,
+    ...(typeof value["clientName"] === "string" ? { clientName: value["clientName"] } : {}),
+    codeChallenge,
+    ...(isConsentStep(value["consent"]) ? { consent: value["consent"] } : {}),
+    grantId,
+    ...(isPendingAuthorizationStep(value["pendingAuthorization"]) ? { pendingAuthorization: value["pendingAuthorization"] } : {}),
+    redirectUri,
+    ...(isRefreshTokenStep(value["refreshToken"]) ? { refreshToken: value["refreshToken"] } : {}),
+    resource,
+    scopes: scopes.filter((scope): scope is string => typeof scope === "string"),
+    ...(typeof value["state"] === "string" ? { state: value["state"] } : {}),
+    ...(typeof value["principalId"] === "string" ? { principalId: value["principalId"] } : {}),
+    ...(typeof value["subject"] === "string" ? { subject: value["subject"] } : {}),
+    ...(isOAuthTokens(value["upstreamTokens"]) ? { upstreamTokens: value["upstreamTokens"] } : {}),
   });
 }
 
-function parseGrants(value: unknown) {
+function parseGrants(value: unknown): Record<string, OAuthGrant> {
   if (!value || typeof value !== "object") {
     return {};
   }
 
-  return Object.fromEntries(
+  return fromRecordEntries(
     Object.entries(value)
       .map(([grantId, record]) => {
         const parsed = parseGrantRecord(record);
@@ -177,32 +230,41 @@ function toLegacyPendingConsentGrant(
   consentId: string,
   record: unknown,
 ): OAuthGrantInput | undefined {
-  const pending = record as Partial<PendingConsentRecord>;
+  if (!isRecord(record)) {
+    return undefined;
+  }
+
+  const clientId = record["clientId"];
+  const codeChallenge = record["codeChallenge"];
+  const expiresAt = record["expiresAt"];
+  const redirectUri = record["redirectUri"];
+  const resource = record["resource"];
+  const scopes = record["scopes"];
 
   if (
-    typeof pending.clientId !== "string" ||
-    typeof pending.codeChallenge !== "string" ||
-    typeof pending.expiresAt !== "number" ||
-    typeof pending.redirectUri !== "string" ||
-    typeof pending.resource !== "string" ||
-    !Array.isArray(pending.scopes)
+    typeof clientId !== "string" ||
+    typeof codeChallenge !== "string" ||
+    typeof expiresAt !== "number" ||
+    typeof redirectUri !== "string" ||
+    typeof resource !== "string" ||
+    !Array.isArray(scopes)
   ) {
     return undefined;
   }
 
   return {
-    clientId: pending.clientId,
-    clientName: pending.clientName,
-    codeChallenge: pending.codeChallenge,
+    clientId,
+    ...(typeof record["clientName"] === "string" ? { clientName: record["clientName"] } : {}),
+    codeChallenge,
     consent: {
       challenge: consentId,
-      expiresAt: pending.expiresAt,
+      expiresAt,
     },
     grantId: `legacy-consent:${consentId}`,
-    redirectUri: pending.redirectUri,
-    resource: pending.resource,
-    scopes: pending.scopes,
-    state: pending.state,
+    redirectUri,
+    resource,
+    scopes: scopes.filter((scope): scope is string => typeof scope === "string"),
+    ...(typeof record["state"] === "string" ? { state: record["state"] } : {}),
   };
 }
 
@@ -210,31 +272,40 @@ function toLegacyPendingAuthorizationGrant(
   stateId: string,
   record: unknown,
 ): OAuthGrantInput | undefined {
-  const pending = record as Partial<PendingAuthorizationRecord>;
+  if (!isRecord(record)) {
+    return undefined;
+  }
+
+  const clientId = record["clientId"];
+  const codeChallenge = record["codeChallenge"];
+  const expiresAt = record["expiresAt"];
+  const redirectUri = record["redirectUri"];
+  const resource = record["resource"];
+  const scopes = record["scopes"];
 
   if (
-    typeof pending.clientId !== "string" ||
-    typeof pending.codeChallenge !== "string" ||
-    typeof pending.expiresAt !== "number" ||
-    typeof pending.redirectUri !== "string" ||
-    typeof pending.resource !== "string" ||
-    !Array.isArray(pending.scopes)
+    typeof clientId !== "string" ||
+    typeof codeChallenge !== "string" ||
+    typeof expiresAt !== "number" ||
+    typeof redirectUri !== "string" ||
+    typeof resource !== "string" ||
+    !Array.isArray(scopes)
   ) {
     return undefined;
   }
 
   return {
-    clientId: pending.clientId,
-    codeChallenge: pending.codeChallenge,
+    clientId,
+    codeChallenge,
     grantId: `legacy-authorization:${stateId}`,
     pendingAuthorization: {
-      expiresAt: pending.expiresAt,
+      expiresAt,
       stateId,
     },
-    redirectUri: pending.redirectUri,
-    resource: pending.resource,
-    scopes: pending.scopes,
-    state: pending.state,
+    redirectUri,
+    resource,
+    scopes: scopes.filter((scope): scope is string => typeof scope === "string"),
+    ...(typeof record["state"] === "string" ? { state: record["state"] } : {}),
   };
 }
 
@@ -260,20 +331,32 @@ function toLegacyAuthorizationCodeGrant(
   code: string,
   record: unknown,
 ): OAuthGrantInput | undefined {
-  const authorizationCode = record as Partial<AuthorizationCodeRecord> & {
-    subject?: string;
-  };
+  if (!isRecord(record)) {
+    return undefined;
+  }
+
+  const clientId = record["clientId"];
+  const codeChallenge = record["codeChallenge"];
+  const expiresAt = record["expiresAt"];
+  const redirectUri = record["redirectUri"];
+  const resource = record["resource"];
+  const scopes = record["scopes"];
+  const principalId = typeof record["principalId"] === "string"
+    ? record["principalId"]
+    : typeof record["subject"] === "string"
+      ? record["subject"]
+      : undefined;
+  const upstreamTokens = record["upstreamTokens"];
 
   if (
-    typeof authorizationCode.clientId !== "string" ||
-    typeof authorizationCode.codeChallenge !== "string" ||
-    typeof authorizationCode.expiresAt !== "number" ||
-    typeof authorizationCode.redirectUri !== "string" ||
-    typeof authorizationCode.resource !== "string" ||
-    !Array.isArray(authorizationCode.scopes) ||
-    typeof (authorizationCode.principalId ?? authorizationCode.subject) !== "string" ||
-    !authorizationCode.upstreamTokens ||
-    typeof authorizationCode.upstreamTokens !== "object"
+    typeof clientId !== "string" ||
+    typeof codeChallenge !== "string" ||
+    typeof expiresAt !== "number" ||
+    typeof redirectUri !== "string" ||
+    typeof resource !== "string" ||
+    !Array.isArray(scopes) ||
+    typeof principalId !== "string" ||
+    !isOAuthTokens(upstreamTokens)
   ) {
     return undefined;
   }
@@ -281,17 +364,17 @@ function toLegacyAuthorizationCodeGrant(
   return {
     authorizationCode: {
       code,
-      expiresAt: authorizationCode.expiresAt,
+      expiresAt,
     },
-    clientId: authorizationCode.clientId,
-    codeChallenge: authorizationCode.codeChallenge,
+    clientId,
+    codeChallenge,
     grantId: `legacy-code:${code}`,
-    redirectUri: authorizationCode.redirectUri,
-    resource: authorizationCode.resource,
-    scopes: authorizationCode.scopes,
-    state: authorizationCode.state,
-    principalId: authorizationCode.principalId ?? authorizationCode.subject,
-    upstreamTokens: authorizationCode.upstreamTokens as OAuthTokens,
+    redirectUri,
+    resource,
+    scopes: scopes.filter((scope): scope is string => typeof scope === "string"),
+    ...(typeof record["state"] === "string" ? { state: record["state"] } : {}),
+    principalId,
+    upstreamTokens,
   };
 }
 
@@ -299,35 +382,45 @@ function toLegacyRefreshTokenGrant(
   token: string,
   record: unknown,
 ): OAuthGrantInput | undefined {
-  const refreshToken = record as Partial<RefreshTokenRecord> & {
-    subject?: string;
-  };
+  if (!isRecord(record)) {
+    return undefined;
+  }
+
+  const clientId = record["clientId"];
+  const expiresAt = record["expiresAt"];
+  const resource = record["resource"];
+  const scopes = record["scopes"];
+  const principalId = typeof record["principalId"] === "string"
+    ? record["principalId"]
+    : typeof record["subject"] === "string"
+      ? record["subject"]
+      : undefined;
+  const upstreamTokens = record["upstreamTokens"];
 
   if (
-    typeof refreshToken.clientId !== "string" ||
-    typeof refreshToken.expiresAt !== "number" ||
-    typeof refreshToken.resource !== "string" ||
-    !Array.isArray(refreshToken.scopes) ||
-    typeof (refreshToken.principalId ?? refreshToken.subject) !== "string" ||
-    !refreshToken.upstreamTokens ||
-    typeof refreshToken.upstreamTokens !== "object"
+    typeof clientId !== "string" ||
+    typeof expiresAt !== "number" ||
+    typeof resource !== "string" ||
+    !Array.isArray(scopes) ||
+    typeof principalId !== "string" ||
+    !isOAuthTokens(upstreamTokens)
   ) {
     return undefined;
   }
 
   return {
-    clientId: refreshToken.clientId,
+    clientId,
     codeChallenge: "",
     grantId: `legacy-refresh:${token}`,
     redirectUri: "",
     refreshToken: {
-      expiresAt: refreshToken.expiresAt,
+      expiresAt,
       token,
     },
-    resource: refreshToken.resource,
-    scopes: refreshToken.scopes,
-    principalId: refreshToken.principalId ?? refreshToken.subject,
-    upstreamTokens: refreshToken.upstreamTokens as OAuthTokens,
+    resource,
+    scopes: scopes.filter((scope): scope is string => typeof scope === "string"),
+    principalId,
+    upstreamTokens,
   };
 }
 
@@ -377,22 +470,32 @@ function loadState(storePath: string | undefined): PersistedOAuthState {
   }
 
   try {
-    const parsed = JSON.parse(readFileSync(storePath, "utf8")) as LegacyPersistedOAuthState & {
-      grants?: unknown;
-    };
+    const parsed: unknown = JSON.parse(readFileSync(storePath, "utf8"));
 
-    if (parsed.version === 2 || parsed.grants !== undefined) {
+    if (!isRecord(parsed)) {
+      return createEmptyState();
+    }
+
+    if (parsed["version"] === 2 || parsed["grants"] !== undefined) {
       return {
-        approvals: parseApprovals(parsed.approvals),
-        clients: parseClients(parsed.clients),
-        grants: parseGrants(parsed.grants),
+        approvals: parseApprovals(parsed["approvals"]),
+        clients: parseClients(parsed["clients"]),
+        grants: parseGrants(parsed["grants"]),
         version: 2,
       };
     }
 
-    return migrateLegacyState(parsed);
+    return migrateLegacyState({
+      approvals: parsed["approvals"],
+      authorizationCodes: parsed["authorizationCodes"],
+      clients: parsed["clients"],
+      pendingAuthorizations: parsed["pendingAuthorizations"],
+      pendingConsents: parsed["pendingConsents"],
+      refreshTokens: parsed["refreshTokens"],
+      ...(typeof parsed["version"] === "number" ? { version: parsed["version"] } : {}),
+    });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if (isRecord(error) && error["code"] === "ENOENT") {
       return createEmptyState();
     }
 

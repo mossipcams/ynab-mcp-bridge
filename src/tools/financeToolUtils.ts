@@ -1,10 +1,10 @@
 type CompactObjectValue = unknown;
 
 type RollupEntry = {
-  id?: string;
+  id?: string | undefined;
   name: string;
   amountMilliunits: number;
-  transactionCount?: number;
+  transactionCount?: number | undefined;
 };
 
 export function formatMilliunits(value: number) {
@@ -57,7 +57,7 @@ export function buildUpcomingWindowSummary(inflowMilliunits: number, outflowMill
   };
 }
 
-export function compactObject<T extends Record<string, CompactObjectValue>>(input: T) {
+export function compactObject(input: Record<string, CompactObjectValue>) {
   return Object.fromEntries(
     Object.entries(input).filter(([, value]) => {
       if (value === undefined || value === null) {
@@ -70,9 +70,7 @@ export function compactObject<T extends Record<string, CompactObjectValue>>(inpu
 
       return true;
     }),
-  ) as {
-    [K in keyof T as T[K] extends undefined | null ? never : K]: Exclude<T[K], undefined | null>;
-  };
+  );
 }
 
 export function toTopRollups(entries: RollupEntry[], limit: number) {

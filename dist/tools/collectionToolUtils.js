@@ -4,12 +4,12 @@ export function formatAmountMilliunits(value) {
     return formatMilliunits(value);
 }
 export function projectRecord(entry, allFields, options = {}) {
-    const requestedFields = (options.fields?.length ? options.fields : allFields);
+    const requestedFields = options.fields?.length ? options.fields : allFields;
     const projected = Object.fromEntries(requestedFields
         .filter((field) => field in entry)
         .map((field) => [field, entry[field]]));
-    if (options.includeIds !== false && entry.id !== undefined) {
-        projected.id = entry.id;
+    if (options.includeIds !== false && entry["id"] !== undefined) {
+        projected["id"] = entry["id"];
     }
     return compactObject(projected);
 }

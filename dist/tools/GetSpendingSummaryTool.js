@@ -10,7 +10,12 @@ export const inputSchema = {
     topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of top rollups to include."),
 };
 function toMonthEnd(month) {
-    const [year, monthNumber] = month.split("-").map((value) => Number.parseInt(value, 10));
+    const [yearValue, monthValue] = month.split("-");
+    const year = Number.parseInt(yearValue ?? "", 10);
+    const monthNumber = Number.parseInt(monthValue ?? "", 10);
+    if (!Number.isInteger(year) || !Number.isInteger(monthNumber)) {
+        throw new Error(`Invalid month value: ${month}`);
+    }
     return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
 }
 function isWithinRange(date, fromMonth, toMonth) {

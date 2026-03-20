@@ -38,8 +38,8 @@ function getClientId(payload) {
     if (typeof payload.client_id === "string" && payload.client_id.length > 0) {
         return payload.client_id;
     }
-    if (typeof payload.azp === "string" && payload.azp.length > 0) {
-        return payload.azp;
+    if (typeof payload["azp"] === "string" && payload["azp"].length > 0) {
+        return payload["azp"];
     }
     if (typeof payload.sub === "string" && payload.sub.length > 0) {
         return payload.sub;
@@ -63,11 +63,11 @@ export function createOAuthTokenVerifier(config) {
                 }
                 return {
                     clientId: getClientId(payload),
-                    expiresAt: typeof payload.exp === "number" ? payload.exp : undefined,
+                    ...(typeof payload.exp === "number" ? { expiresAt: payload.exp } : {}),
                     extra: {
-                        subject: payload.sub,
+                        ...(typeof payload.sub === "string" ? { subject: payload.sub } : {}),
                     },
-                    resource,
+                    ...(resource ? { resource } : {}),
                     scopes,
                     token,
                 };

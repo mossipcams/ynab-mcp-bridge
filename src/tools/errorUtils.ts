@@ -3,16 +3,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function getYnabApiErrorMessage(error: unknown): string | undefined {
-  if (!isRecord(error) || !isRecord(error.error)) {
+  if (!isRecord(error) || !isRecord(error["error"])) {
     return undefined;
   }
 
-  const detail = error.error.detail;
+  const errorRecord = error["error"];
+  const detail = errorRecord["detail"];
   if (typeof detail === "string" && detail.length > 0) {
     return detail;
   }
 
-  const name = error.error.name;
+  const name = errorRecord["name"];
   if (typeof name === "string" && name.length > 0) {
     return name;
   }

@@ -132,7 +132,13 @@ export function parseAuthorizationRequest(input) {
     if (!result.success) {
         throw new InvalidRequestError(getFirstIssueMessage(result.error));
     }
-    return result.data;
+    return {
+        codeChallenge: result.data.codeChallenge,
+        redirectUri: result.data.redirectUri,
+        ...(result.data.resource ? { resource: result.data.resource } : {}),
+        ...(result.data.scopes ? { scopes: result.data.scopes } : {}),
+        ...(result.data.state ? { state: result.data.state } : {}),
+    };
 }
 export function parseConsentRequestBody(body) {
     const result = consentBodySchema.safeParse(body);
@@ -147,9 +153,14 @@ export function parseConsentRequestBody(body) {
     if (consentChallengeError) {
         throw new InvalidRequestError(consentChallengeError);
     }
+    const action = toOptionalString(result.data.action);
+    const consentChallenge = toOptionalString(result.data.consent_challenge);
+    if (typeof consentChallenge !== "string") {
+        throw new InvalidRequestError("Missing consent challenge.");
+    }
     return {
-        action: toOptionalString(result.data.action),
-        consentChallenge: toOptionalString(result.data.consent_challenge),
+        ...(action ? { action } : {}),
+        consentChallenge,
     };
 }
 export function parseCallbackQuery(query) {
@@ -169,12 +180,12 @@ export function parseCallbackQuery(query) {
     const errorDescription = toOptionalString(result.data.error_description);
     const upstreamState = toOptionalString(result.data.state);
     return {
-        code,
-        error,
-        errorDescription,
+        ...(code ? { code } : {}),
+        ...(error ? { error } : {}),
+        ...(errorDescription ? { errorDescription } : {}),
         hasCode: typeof code === "string" && code.length > 0,
         hasError: typeof error === "string",
         hasState: typeof upstreamState === "string" && upstreamState.length > 0,
-        upstreamState,
+        ...(upstreamState ? { upstreamState } : {}),
     };
 }

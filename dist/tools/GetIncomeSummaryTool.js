@@ -10,7 +10,12 @@ export const inputSchema = {
     topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of income sources to include."),
 };
 function toMonthEnd(month) {
-    const [year, monthNumber] = month.split("-").map((value) => Number.parseInt(value, 10));
+    const [yearValue, monthValue] = month.split("-");
+    const year = Number.parseInt(yearValue ?? "", 10);
+    const monthNumber = Number.parseInt(monthValue ?? "", 10);
+    if (!Number.isInteger(year) || !Number.isInteger(monthNumber)) {
+        throw new Error(`Invalid month value: ${month}`);
+    }
     return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
 }
 function toMonthKey(date) {
@@ -56,8 +61,8 @@ export async function execute(input, api) {
             const medianIncome = sortedIncomeValues.length === 0
                 ? 0
                 : sortedIncomeValues.length % 2 === 1
-                    ? sortedIncomeValues[(sortedIncomeValues.length - 1) / 2]
-                    : (sortedIncomeValues[(sortedIncomeValues.length / 2) - 1] + sortedIncomeValues[sortedIncomeValues.length / 2]) / 2;
+                    ? (sortedIncomeValues[(sortedIncomeValues.length - 1) / 2] ?? 0)
+                    : (((sortedIncomeValues[(sortedIncomeValues.length / 2) - 1] ?? 0) + (sortedIncomeValues[sortedIncomeValues.length / 2] ?? 0)) / 2);
             const minIncome = sortedIncomeValues[0] ?? 0;
             const maxIncome = sortedIncomeValues[sortedIncomeValues.length - 1] ?? 0;
             const volatilityPercent = averageIncome === 0 ? 0 : ((maxIncome - minIncome) / averageIncome) * 100;

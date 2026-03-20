@@ -1,6 +1,8 @@
 import { ServerError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
+import { getStringValue, isRecord } from "./typeUtils.js";
+
 type UpstreamAuthorizationRecord = {
   resource: string;
   scopes: string[];
@@ -29,9 +31,9 @@ type UpstreamTokenErrorDetails = {
 };
 
 class UpstreamTokenExchangeError extends ServerError {
-  upstreamError?: string;
-  upstreamErrorDescription?: string;
-  upstreamErrorFields?: string[];
+  upstreamError: string | undefined;
+  upstreamErrorDescription: string | undefined;
+  upstreamErrorFields: string[] | undefined;
   upstreamStatus: number;
 
   constructor(message: string, details: UpstreamTokenErrorDetails) {
@@ -54,11 +56,14 @@ function summarizeUpstreamTokenError(bodyText: string, status: number): Upstream
   }
 
   try {
-    const parsed = JSON.parse(bodyText) as Record<string, unknown>;
-    const error = typeof parsed.error === "string" ? parsed.error : undefined;
-    const errorDescription = typeof parsed.error_description === "string"
-      ? parsed.error_description
-      : undefined;
+    const parsed: unknown = JSON.parse(bodyText);
+
+    if (!isRecord(parsed)) {
+      return details;
+    }
+
+    const error = getStringValue(parsed, "error");
+    const errorDescription = getStringValue(parsed, "error_description");
     const errorFields = [
       ...(error ? ["error"] : []),
       ...(errorDescription ? ["error_description"] : []),
@@ -66,13 +71,17 @@ function summarizeUpstreamTokenError(bodyText: string, status: number): Upstream
 
     return {
       ...details,
-      upstreamError: error,
-      upstreamErrorDescription: errorDescription,
-      upstreamErrorFields: errorFields.length > 0 ? errorFields : undefined,
+      ...(error ? { upstreamError: error } : {}),
+      ...(errorDescription ? { upstreamErrorDescription: errorDescription } : {}),
+      ...(errorFields.length > 0 ? { upstreamErrorFields: errorFields } : {}),
     };
   } catch {
     return details;
   }
+}
+
+function isOAuthTokens(value: unknown): value is OAuthTokens {
+  return isRecord(value) && typeof value["access_token"] === "string";
 }
 
 async function exchangeTokens(url: string, body: URLSearchParams, failureMessage: string) {
@@ -93,7 +102,13 @@ async function exchangeTokens(url: string, body: URLSearchParams, failureMessage
     );
   }
 
-  return await response.json() as OAuthTokens;
+  const tokens: unknown = await response.json();
+
+  if (!isOAuthTokens(tokens)) {
+    throw new ServerError("Upstream token exchange returned an invalid token payload.");
+  }
+
+  return tokens;
 }
 
 export function createUpstreamOAuthAdapter(options: CreateUpstreamOAuthAdapterOptions): UpstreamOAuthAdapter {

@@ -19,7 +19,14 @@ export const inputSchema = {
 };
 
 function toMonthEnd(month: string) {
-  const [year, monthNumber] = month.split("-").map((value) => Number.parseInt(value, 10));
+  const [yearValue, monthValue] = month.split("-");
+  const year = Number.parseInt(yearValue ?? "", 10);
+  const monthNumber = Number.parseInt(monthValue ?? "", 10);
+
+  if (!Number.isInteger(year) || !Number.isInteger(monthNumber)) {
+    throw new Error(`Invalid month value: ${month}`);
+  }
+
   return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
 }
 
@@ -47,7 +54,7 @@ export async function execute(
       );
 
       const incomeByMonth = new Map<string, number>(listMonthsInRange(fromMonth, toMonth).map((month) => [month, 0]));
-      const incomeByPayee = new Map<string, { id?: string; name: string; amountMilliunits: number; transactionCount: number }>();
+      const incomeByPayee = new Map<string, { id?: string | undefined; name: string; amountMilliunits: number; transactionCount: number }>();
 
       for (const transaction of transactions) {
         const month = toMonthKey(transaction.date);
@@ -76,8 +83,8 @@ export async function execute(
       const medianIncome = sortedIncomeValues.length === 0
         ? 0
         : sortedIncomeValues.length % 2 === 1
-          ? sortedIncomeValues[(sortedIncomeValues.length - 1) / 2]
-          : (sortedIncomeValues[(sortedIncomeValues.length / 2) - 1] + sortedIncomeValues[sortedIncomeValues.length / 2]) / 2;
+          ? (sortedIncomeValues[(sortedIncomeValues.length - 1) / 2] ?? 0)
+          : (((sortedIncomeValues[(sortedIncomeValues.length / 2) - 1] ?? 0) + (sortedIncomeValues[sortedIncomeValues.length / 2] ?? 0)) / 2);
       const minIncome = sortedIncomeValues[0] ?? 0;
       const maxIncome = sortedIncomeValues[sortedIncomeValues.length - 1] ?? 0;
       const volatilityPercent = averageIncome === 0 ? 0 : ((maxIncome - minIncome) / averageIncome) * 100;

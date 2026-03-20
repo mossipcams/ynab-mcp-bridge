@@ -4,33 +4,33 @@ export type OAuthGrant = {
   authorizationCode?: {
     code: string;
     expiresAt: number;
-  };
+  } | undefined;
   clientId: string;
-  clientName?: string;
+  clientName?: string | undefined;
   codeChallenge: string;
   consent?: {
     challenge: string;
     expiresAt: number;
-  };
+  } | undefined;
   grantId: string;
   pendingAuthorization?: {
     expiresAt: number;
     stateId: string;
-  };
+  } | undefined;
   redirectUri: string;
   refreshToken?: {
     expiresAt: number;
     token: string;
-  };
+  } | undefined;
   resource: string;
   scopes: string[];
-  state?: string;
-  principalId?: string;
-  upstreamTokens?: OAuthTokens;
+  state?: string | undefined;
+  principalId?: string | undefined;
+  upstreamTokens?: OAuthTokens | undefined;
 };
 
 export type OAuthGrantInput = OAuthGrant & {
-  subject?: string;
+  subject?: string | undefined;
 };
 
 export function normalizeScopes(scopes: string[]) {

@@ -9,7 +9,12 @@ export const inputSchema = {
     toMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).optional().describe("The last month in ISO format. Defaults to fromMonth."),
 };
 function toMonthEnd(month) {
-    const [year, monthNumber] = month.split("-").map((value) => Number.parseInt(value, 10));
+    const [yearValue, monthValue] = month.split("-");
+    const year = Number.parseInt(yearValue ?? "", 10);
+    const monthNumber = Number.parseInt(monthValue ?? "", 10);
+    if (!Number.isInteger(year) || !Number.isInteger(monthNumber)) {
+        throw new Error(`Invalid month value: ${month}`);
+    }
     return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
 }
 function isWithinRange(date, fromMonth, toMonth) {

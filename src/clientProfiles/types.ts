@@ -1,43 +1,45 @@
+import type { ReadonlyArrayOf, ReadonlyObject, ReadonlyRecord } from "../typeUtils.js";
+
 export type ClientProfileId = "chatgpt" | "claude" | "codex" | "generic";
 
 export type SetupHookResult = "handle" | "pass";
 
-export type DetectedClientProfile = {
+export type DetectedClientProfile = ReadonlyObject<{
   profileId: ClientProfileId;
   reason: string;
-};
+}>;
 
-export type RequestContext = {
-  headers: Record<string, string | string[] | undefined>;
+export type RequestContext = ReadonlyObject<{
+  headers: ReadonlyRecord<string, string | ReadonlyArrayOf<string> | undefined>;
   method: string;
   path: string;
-};
+}>;
 
 export type ClientProfile = {
   detectPreAuth?: (context: RequestContext) => DetectedClientProfile | undefined;
   id: ClientProfileId;
   matchesPreAuth: (context: RequestContext) => boolean;
   matchesInitialize: (clientInfo: unknown, capabilities: unknown) => boolean;
-  detection?: {
+  detection?: ReadonlyObject<{
     initializeReason?: string;
     preAuthReason?: string;
-  };
-  oauth: {
+  }>;
+  oauth: ReadonlyObject<{
     allowDynamicClientRegistration: boolean;
-    discoveryPathVariants: string[];
+    discoveryPathVariants: ReadonlyArrayOf<string>;
     tolerateExtraDiscoveryProbes: boolean;
     tolerateMissingResourceParam: boolean;
     tokenRequestLeniency: "strict" | "normal" | "lenient";
-  };
-  transport: {
+  }>;
+  transport: ReadonlyObject<{
     acceptSessionHeaderButIgnoreIt: boolean;
     preferJsonResponse: boolean;
     requireStatelessPostOnly: boolean;
-  };
-  hooks: {
+  }>;
+  hooks: ReadonlyObject<{
     onAuthorizeRequest: (context: RequestContext) => SetupHookResult;
     onDiscoveryRequest: (context: RequestContext) => SetupHookResult;
     onInitialize: (clientInfo: unknown, capabilities: unknown) => void;
     onTokenRequest: (context: RequestContext) => SetupHookResult;
-  };
+  }>;
 };

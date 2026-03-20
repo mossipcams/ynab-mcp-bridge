@@ -1,21 +1,13 @@
 import { compactObject, formatMilliunits } from "./financeToolUtils.js";
 
 type ProjectionOptions<FieldName extends string> = {
-  fields?: FieldName[];
+  fields?: readonly FieldName[];
   includeIds?: boolean;
 };
 
 type PaginationOptions = {
   limit?: number;
   offset?: number;
-};
-
-type PageMetadata = {
-  returned_count: number;
-  offset: number;
-  limit: number;
-  has_more: boolean;
-  next_offset?: number;
 };
 
 const DEFAULT_LIMIT = 50;
@@ -32,15 +24,15 @@ export function projectRecord<
   allFields: readonly FieldName[],
   options: ProjectionOptions<FieldName> = {},
 ) {
-  const requestedFields = (options.fields?.length ? options.fields : allFields) as readonly string[];
+  const requestedFields = options.fields?.length ? options.fields : allFields;
   const projected = Object.fromEntries(
     requestedFields
       .filter((field) => field in entry)
       .map((field) => [field, entry[field]]),
   );
 
-  if (options.includeIds !== false && entry.id !== undefined) {
-    projected.id = entry.id;
+  if (options.includeIds !== false && entry["id"] !== undefined) {
+    projected["id"] = entry["id"];
   }
 
   return compactObject(projected);
@@ -63,7 +55,7 @@ export function paginateEntries<Entry>(
       limit,
       has_more: nextOffset < entries.length,
       next_offset: nextOffset < entries.length ? nextOffset : undefined,
-    }) as PageMetadata,
+    }),
   };
 }
 

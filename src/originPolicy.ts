@@ -22,7 +22,7 @@ function parseHostName(host: string | undefined) {
 
 function getRequestHostName(headers: Record<string, string | string[] | undefined>) {
   const forwardedHost = getFirstHeaderValue(headers["x-forwarded-host"]);
-  const host = forwardedHost ?? getFirstHeaderValue(headers.host);
+  const host = forwardedHost ?? getFirstHeaderValue(headers["host"]);
 
   return parseHostName(host);
 }
@@ -32,11 +32,11 @@ export function normalizeOrigin(origin: string) {
 }
 
 export function resolveOriginPolicy(input: {
-  allowOpaqueNullOrigin?: boolean;
+  allowOpaqueNullOrigin?: boolean | undefined;
   allowedOrigins: Set<string>;
   headers: Record<string, string | string[] | undefined>;
 }) {
-  const originHeader = getFirstHeaderValue(input.headers.origin);
+  const originHeader = getFirstHeaderValue(input.headers["origin"]);
 
   if (!originHeader) {
     return {
@@ -86,12 +86,14 @@ export function resolveOriginPolicy(input: {
 
 export function installCorsGuard(res: Response, resolvedOrigin: string) {
   const originalSetHeader = res.setHeader.bind(res);
-  res.setHeader = ((name: string, value: number | string | readonly string[]) => {
+  const guardedSetHeader: typeof res.setHeader = (name: string, value: number | string | readonly string[]) => {
     if (name.toLowerCase() === "access-control-allow-origin") {
       return originalSetHeader(name, resolvedOrigin);
     }
     return originalSetHeader(name, value);
-  }) as typeof res.setHeader;
+  };
+
+  res.setHeader = guardedSetHeader;
 }
 
 export function applyCorsHeaders(res: Response, responseOrigin: string | undefined) {

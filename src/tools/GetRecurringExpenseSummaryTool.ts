@@ -5,7 +5,7 @@ import { formatAmount } from "./financialDiagnosticsUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 type RecurringCandidate = {
-  payeeId?: string | null;
+  payeeId?: string | null | undefined;
   payeeName: string;
   dates: string[];
   amounts: number[];
@@ -67,7 +67,7 @@ export async function execute(
         }
 
         const key = transaction.payee_id ?? transaction.payee_name ?? "unknown-payee";
-        const candidate = candidates.get(key) ?? {
+        const candidate: RecurringCandidate = candidates.get(key) ?? {
           payeeId: transaction.payee_id,
           payeeName: transaction.payee_name ?? "Unknown Payee",
           dates: [],

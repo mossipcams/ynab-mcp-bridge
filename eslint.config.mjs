@@ -5,18 +5,46 @@ import securityPlugin from "eslint-plugin-security";
 import sonarjsPlugin from "eslint-plugin-sonarjs";
 import globals from "globals";
 
+const NON_TYPED_TS_IGNORES = [
+  "src/**/*.spec.ts",
+  "src/**/*.contract.ts",
+];
+
+const TYPE_CHECKED_FILES = [
+  "src/*.ts",
+  "src/clientProfiles/**/*.ts",
+];
+
+const TYPE_CHECKED_IGNORES = [
+  ...NON_TYPED_TS_IGNORES,
+  "src/httpServer.ts",
+  "src/index.ts",
+  "src/server.ts",
+  "src/stdioServer.ts",
+];
+
+const baseTypeScriptConfigs = [
+  ...tsPlugin.configs["flat/recommended"],
+  ...tsPlugin.configs["flat/strict"],
+].map((config) => ({
+  ...config,
+  files: ["**/*.ts"],
+  ignores: NON_TYPED_TS_IGNORES,
+}));
+
 const typeCheckedConfigs = [
   ...tsPlugin.configs["flat/recommended-type-checked"],
   ...tsPlugin.configs["flat/strict-type-checked"],
 ].map((config) => ({
   ...config,
-  files: ["**/*.ts"],
-  ignores: ["src/**/*.spec.ts"],
+  files: TYPE_CHECKED_FILES,
+  ignores: TYPE_CHECKED_IGNORES,
 }));
 
 export default [
   {
     ignores: [
+      "artifacts/**",
       "dist/**",
       "node_modules/**",
       "coverage/**",
@@ -32,8 +60,32 @@ export default [
       },
     },
   },
+  ...baseTypeScriptConfigs,
   // strictTypeChecked rules come from the TypeScript ESLint flat strict preset.
   ...typeCheckedConfigs,
+  {
+    files: ["**/*.ts"],
+    ignores: NON_TYPED_TS_IGNORES,
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+      parser: tsParser,
+    },
+    rules: {
+      "no-unused-vars": "off",
+      "@typescript-eslint/consistent-type-assertions": ["error", {
+        assertionStyle: "never",
+      }],
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-unused-vars": ["error", {
+        argsIgnorePattern: "^_",
+        varsIgnorePattern: "^_",
+      }],
+      "@typescript-eslint/require-await": "off",
+    },
+  },
   {
     files: ["src/**/*.spec.ts"],
     languageOptions: {
@@ -57,23 +109,47 @@ export default [
     },
     rules: {
       "no-unused-vars": "off",
+      "@typescript-eslint/consistent-type-assertions": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-misused-promises": "off",
       "@typescript-eslint/unbound-method": "off",
     },
   },
   {
-    files: ["**/*.ts"],
-    ignores: ["src/**/*.spec.ts"],
+    files: ["src/*.ts"],
+    ignores: TYPE_CHECKED_IGNORES,
     languageOptions: {
       globals: {
         ...globals.node,
       },
       parser: tsParser,
       parserOptions: {
-        projectService: true,
+        project: "./tsconfig.eslint.json",
         tsconfigRootDir: import.meta.dirname,
       },
+    },
+  },
+  {
+    files: ["src/clientProfiles/**/*.ts"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+      parser: tsParser,
+      parserOptions: {
+        project: "./tsconfig.eslint.clientProfiles.json",
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+  {
+    files: TYPE_CHECKED_FILES,
+    ignores: TYPE_CHECKED_IGNORES,
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+      parser: tsParser,
     },
     plugins: {
       security: securityPlugin,
@@ -88,7 +164,7 @@ export default [
       }],
       "no-unused-vars": "off",
       "@typescript-eslint/consistent-type-assertions": ["error", {
-        assertionStyle: "as",
+        assertionStyle: "never",
       }],
       "@typescript-eslint/no-dynamic-delete": "off",
       "@typescript-eslint/no-non-null-assertion": "off",
@@ -98,11 +174,6 @@ export default [
       "@typescript-eslint/no-unsafe-return": "error",
       "@typescript-eslint/no-unnecessary-condition": "off",
       "@typescript-eslint/no-unnecessary-type-assertion": "off",
-      "@typescript-eslint/no-unused-vars": ["error", {
-        argsIgnorePattern: "^_",
-        varsIgnorePattern: "^_",
-      }],
-      "@typescript-eslint/require-await": "off",
       "@typescript-eslint/restrict-template-expressions": ["error", {
         allowNumber: true,
       }],
