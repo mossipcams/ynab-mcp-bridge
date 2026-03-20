@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.11.0...ynab-mcp-bridge-v0.12.0) (2026-03-20)
+
+
+### Features
+
+* add branded type guardrails ([#145](https://github.com/mossipcams/ynab-mcp-bridge/issues/145)) ([5e844b2](https://github.com/mossipcams/ynab-mcp-bridge/commit/5e844b255b4cfefebdb96331e55f78999b9a8a1a))
+
 ## [0.11.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.6...ynab-mcp-bridge-v0.11.0) (2026-03-20)
 
 
