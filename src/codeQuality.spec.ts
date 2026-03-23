@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+const ESLINT_BIN = fileURLToPath(new URL("../node_modules/eslint/bin/eslint.js", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 describe("code quality guardrails", () => {
@@ -142,8 +143,8 @@ describe("code quality guardrails", () => {
       "utf8",
     );
     const printedConfig = execFileSync(
-      "npx",
-      ["eslint", "--print-config", "src/config.ts"],
+      process.execPath,
+      [ESLINT_BIN, "--print-config", "src/config.ts"],
       {
         cwd: REPO_ROOT,
         encoding: "utf8",
