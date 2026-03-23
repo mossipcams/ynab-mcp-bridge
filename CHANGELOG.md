@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.12.0...ynab-mcp-bridge-v0.12.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* remove 70/20/10 summary tool ([#149](https://github.com/mossipcams/ynab-mcp-bridge/issues/149)) ([5cfb1da](https://github.com/mossipcams/ynab-mcp-bridge/commit/5cfb1daf98bd07d46b59ee56b3984d7c207ab5ee))
+
 ## [0.12.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.11.0...ynab-mcp-bridge-v0.12.0) (2026-03-20)
 
 
