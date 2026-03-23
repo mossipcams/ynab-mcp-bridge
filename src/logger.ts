@@ -62,7 +62,7 @@ function sanitizeLogValue(value: unknown): unknown {
 }
 
 function getDefaultDestination(): DestinationStream {
-  return {
+  const destination: DestinationStream = {
     write(chunk: string | Uint8Array) {
       const line = typeof chunk === "string"
         ? chunk.trimEnd()
@@ -71,7 +71,9 @@ function getDefaultDestination(): DestinationStream {
       console.error(line);
       return true;
     },
-  } as DestinationStream;
+  };
+
+  return destination;
 }
 
 export function createLogger(options: {
@@ -97,9 +99,16 @@ export function logEvent(
   scope: string,
   event: string,
   details: Record<string, unknown> = {},
-) {
+) : void {
+  const sanitizedDetails = sanitizeLogValue(details);
+
+  if (!isRecord(sanitizedDetails)) {
+    logger.info({ event, scope }, event);
+    return;
+  }
+
   logger.info({
-    ...sanitizeLogValue(details) as Record<string, unknown>,
+    ...sanitizedDetails,
     event,
     scope,
   }, event);

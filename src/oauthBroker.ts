@@ -248,7 +248,9 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     async challengeForAuthorizationCode(client, authorizationCode) {
       return await core.getAuthorizationCodeChallenge(client, authorizationCode);
     },
-    async exchangeAuthorizationCode(client, authorizationCode, _codeVerifier, redirectUri, resource) {
+    async exchangeAuthorizationCode(
+      ...[client, authorizationCode, _codeVerifier, redirectUri, resource]: Parameters<OAuthServerProvider["exchangeAuthorizationCode"]>
+    ) {
       try {
         const tokens = await core.exchangeAuthorizationCode(client, authorizationCode, redirectUri, resource);
         logOAuthDebug("token.exchange.succeeded", {

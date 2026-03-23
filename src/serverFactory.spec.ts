@@ -250,10 +250,11 @@ describe("createServer", () => {
   it("defines an explicit tool registry instead of passing whole tool modules around", () => {
     const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
 
-    expect(source).toContain("name: GetMcpVersionTool.name");
-    expect(source).toContain("GetAccountTool.execute(");
+    expect(source).toContain('registerTool(registrar, "Get MCP Version", GetMcpVersionTool, api)');
+    expect(source).toContain('registerTool(registrar, "Get Account", GetAccountTool, api)');
     expect(source).not.toContain("module: GetAccountTool");
     expect(source).not.toContain("module.execute");
+    expect(source).not.toContain("input as Parameters<typeof");
   });
 
   it("requires explicit config instead of reading the API token from environment", () => {

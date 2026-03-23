@@ -75,12 +75,6 @@ type RequestResolution =
 
 type HttpDebugDetails = Record<string, unknown>;
 
-type JsonRpcRequestLike = {
-  id?: unknown;
-  method?: unknown;
-  params?: unknown;
-};
-
 type InitializeParamsLike = {
   capabilities?: unknown;
   clientInfo?: unknown;
@@ -88,7 +82,7 @@ type InitializeParamsLike = {
 
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 
-function getRequestPath(req: Pick<Request, "path" | "url">) {
+function getRequestPath(req: Pick<Request, "path" | "url">): string {
   if (typeof req.path === "string" && req.path.length > 0) {
     return req.path;
   }
@@ -367,22 +361,20 @@ function reconcileResolvedProfile(
   return getResolvedClientProfile(locals);
 }
 
-function getToolCallName(parsedBody: unknown) {
-  if (!parsedBody || typeof parsedBody !== "object") {
+function getToolCallName(parsedBody: unknown): string | undefined {
+  if (!isRecord(parsedBody)) {
     return undefined;
   }
 
-  const request = parsedBody as JsonRpcRequestLike;
-
-  if (request.method !== "tools/call" || !request.params || typeof request.params !== "object") {
+  if (getStringValue(parsedBody, "method") !== "tools/call") {
     return undefined;
   }
 
-  const name = (request.params as { name?: unknown }).name;
-  return typeof name === "string" ? name : undefined;
+  const params = getRecordValueIfObject(parsedBody, "params");
+  return params ? getStringValue(params, "name") : undefined;
 }
 
-function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">) {
+function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">): boolean {
   const sessionId = req.headers["mcp-session-id"];
 
   if (Array.isArray(sessionId)) {
@@ -399,7 +391,7 @@ function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">) {
     .filter(Boolean).length > 1;
 }
 
-function isJsonParseError(error: unknown) {
+function isJsonParseError(error: unknown): boolean {
   return error instanceof SyntaxError || (
     typeof error === "object" &&
     error !== null &&
@@ -408,7 +400,7 @@ function isJsonParseError(error: unknown) {
   );
 }
 
-function isPayloadTooLargeError(error: unknown) {
+function isPayloadTooLargeError(error: unknown): boolean {
   return typeof error === "object" &&
     error !== null &&
     (
@@ -422,7 +414,7 @@ function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return isRecord(error) && typeof error["code"] === "string";
 }
 
-async function createManagedRequest(config: YnabConfig) {
+async function createManagedRequest(config: YnabConfig): Promise<ManagedRequest> {
   const mcpServer = createServer(config);
   const nodeTransport = new StreamableHTTPServerTransport({
     enableJsonResponse: true,
@@ -472,7 +464,7 @@ function writeRequestResolution(res: Response, resolution: Exclude<RequestResolu
   }
 }
 
-async function closeNodeServer(server: NodeHttpServer) {
+async function closeNodeServer(server: NodeHttpServer): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => {
       if (error) {
@@ -490,7 +482,7 @@ async function closeNodeServer(server: NodeHttpServer) {
   });
 }
 
-function allowsOpaqueNullOrigin(req: Pick<Request, "method" | "path" | "url">, authMode: RuntimeAuthConfig["mode"]) {
+function allowsOpaqueNullOrigin(req: Pick<Request, "method" | "path" | "url">, authMode: RuntimeAuthConfig["mode"]): boolean {
   return authMode === "oauth" &&
     req.method === "POST" &&
     getRequestPath(req) === "/authorize/consent";
@@ -526,7 +518,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const app = express();
   const jsonParser = express.json();
 
-  function getRequestAuthDebugOptions(req: Pick<Request, "path" | "url">) {
+  function getRequestAuthDebugOptions(req: Pick<Request, "path" | "url">): { authMode: RuntimeAuthConfig["mode"]; authRequired?: true } {
     const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
 
     return isProtectedMcpRequest
@@ -538,7 +530,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   app.set("trust proxy", 1);
 
   app.use((req, res, next) => {
-    const requestContext = createRequestContext(req.headers as Record<string, string | string[] | undefined>);
+    const requestContext = createRequestContext(toClientProfileHeaders(req.headers));
 
     runWithRequestContext(requestContext, () => {
       res.setHeader(getCorrelationHeaderName(), requestContext.correlationId);
