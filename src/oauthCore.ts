@@ -1,4 +1,5 @@
 import {
+  InvalidClientMetadataError,
   InvalidGrantError,
   InvalidRequestError,
   InvalidScopeError,
@@ -6,8 +7,9 @@ import {
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { getEffectiveOAuthScopes } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import type { OAuthGrant } from "./oauthGrant.js";
-import { parseAuthorizationRequest, parseClientMetadata } from "./oauthSchemas.js";
+import { getRequestLogFields } from "./requestContext.js";
 
 export type PendingAuthorization = {
   clientId: string;
@@ -16,11 +18,11 @@ export type PendingAuthorization = {
   redirectUri: string;
   resource: string;
   scopes: string[];
-  state?: string | undefined;
+  state?: string;
 };
 
 export type PendingConsent = PendingAuthorization & {
-  clientName?: string | undefined;
+  clientName?: string;
 };
 
 type OAuthCoreStore = {
@@ -77,9 +79,9 @@ type AuthorizationRequest = {
 };
 
 type CallbackInput = {
-  code?: string | undefined;
-  error?: string | undefined;
-  errorDescription?: string | undefined;
+  code?: string;
+  error?: string;
+  errorDescription?: string;
   upstreamState: string;
 };
 
@@ -103,6 +105,104 @@ function isExpired(expiresAt: number | undefined, now: number) {
   return expiresAt !== undefined && expiresAt <= now;
 }
 
+function getErrorDetails(error: unknown) {
+  if (error instanceof Error) {
+    const upstreamError = "upstreamError" in error && typeof error.upstreamError === "string"
+      ? error.upstreamError
+      : undefined;
+    const upstreamErrorDescription = "upstreamErrorDescription" in error &&
+      typeof error.upstreamErrorDescription === "string"
+      ? error.upstreamErrorDescription
+      : undefined;
+    const upstreamErrorFields = "upstreamErrorFields" in error &&
+      Array.isArray(error.upstreamErrorFields) &&
+      error.upstreamErrorFields.every((field) => typeof field === "string")
+      ? error.upstreamErrorFields
+      : undefined;
+
+    return {
+      errorMessage: error.message,
+      errorName: error.name,
+      upstreamError,
+      upstreamErrorDescription,
+      upstreamErrorFields,
+    };
+  }
+
+  return {
+    errorMessage: String(error),
+    errorName: "UnknownError",
+  };
+}
+
+function validateRegisteredRedirectUris(redirectUris: string[] | undefined) {
+  for (const redirectUri of redirectUris ?? []) {
+    let parsedRedirectUri: URL;
+
+    try {
+      parsedRedirectUri = new URL(redirectUri);
+    } catch {
+      throw new InvalidClientMetadataError(`redirect_uris must contain valid absolute URLs: ${redirectUri}`);
+    }
+
+    if (parsedRedirectUri.protocol !== "https:") {
+      throw new InvalidClientMetadataError(`redirect_uris must use https: ${redirectUri}`);
+    }
+  }
+}
+
+function validateClientMetadata(client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">) {
+  validateRegisteredRedirectUris(client.redirect_uris);
+
+  const unsupportedFields = [
+    "client_uri",
+    "contacts",
+    "jwks",
+    "jwks_uri",
+    "logo_uri",
+    "policy_uri",
+    "software_id",
+    "software_statement",
+    "software_version",
+    "tos_uri",
+  ] as const;
+
+  for (const field of unsupportedFields) {
+    if (field in client && client[field] !== undefined) {
+      throw new InvalidClientMetadataError(`${field} is not supported by this bridge.`);
+    }
+  }
+
+  const allowedGrantTypes = new Set(["authorization_code", "refresh_token"]);
+  const invalidGrantType = (client.grant_types ?? ["authorization_code"])
+    .find((grantType) => !allowedGrantTypes.has(grantType));
+
+  if (invalidGrantType) {
+    throw new InvalidClientMetadataError(`Unsupported grant type: ${invalidGrantType}`);
+  }
+
+  const allowedResponseTypes = new Set(["code"]);
+  const responseTypes = client.response_types ?? ["code"];
+  const invalidResponseType = responseTypes.find((responseType) => !allowedResponseTypes.has(responseType));
+
+  if (invalidResponseType) {
+    throw new InvalidClientMetadataError(`Unsupported response type: ${invalidResponseType}`);
+  }
+
+  if (responseTypes.length !== 1 || responseTypes[0] !== "code") {
+    throw new InvalidClientMetadataError("response_types must be exactly [\"code\"].");
+  }
+
+  const allowedAuthMethods = new Set(["client_secret_post", "none"]);
+  const tokenEndpointAuthMethod = client.token_endpoint_auth_method ?? "none";
+
+  if (!allowedAuthMethods.has(tokenEndpointAuthMethod)) {
+    throw new InvalidClientMetadataError(
+      `Unsupported token endpoint auth method: ${tokenEndpointAuthMethod}`,
+    );
+  }
+}
+
 function assertRegisteredRedirectUri(client: OAuthClientInformationFull, redirectUri: string) {
   if (!client.redirect_uris.includes(redirectUri)) {
     throw new InvalidRequestError("redirect_uri does not match a registered client redirect URI.");
@@ -116,13 +216,13 @@ function toPendingConsent(grant: OAuthGrant): PendingConsent {
 
   return {
     clientId: grant.clientId,
-    clientName: grant.clientName,
     codeChallenge: grant.codeChallenge,
     expiresAt: grant.consent.expiresAt,
     redirectUri: grant.redirectUri,
     resource: grant.resource,
     scopes: grant.scopes,
-    state: grant.state,
+    ...(grant.clientName ? { clientName: grant.clientName } : {}),
+    ...(grant.state ? { state: grant.state } : {}),
   };
 }
 
@@ -130,10 +230,10 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
   async function registerClient(
     client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">,
   ) {
-    const parsedClient = parseClientMetadata(client);
+    validateClientMetadata(client);
 
     const registeredClient: OAuthClientInformationFull = {
-      ...parsedClient,
+      ...client,
       client_id: dependencies.createClientId?.() ?? dependencies.createId(),
       client_id_issued_at: Math.floor(dependencies.now() / 1000),
     };
@@ -143,13 +243,12 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
   }
 
   async function startAuthorization(client: OAuthClientInformationFull, params: AuthorizationRequest) {
-    const parsedParams = parseAuthorizationRequest(params);
-    assertRegisteredRedirectUri(client, parsedParams.redirectUri);
+    assertRegisteredRedirectUri(client, params.redirectUri);
 
     const scopes = getEffectiveOAuthScopes(
-      parsedParams.scopes && parsedParams.scopes.length > 0 ? parsedParams.scopes : config.defaultScopes,
+      params.scopes && params.scopes.length > 0 ? params.scopes : config.defaultScopes,
     );
-    const resource = parsedParams.resource?.href ?? config.defaultResource;
+    const resource = params.resource?.href ?? config.defaultResource;
 
     if (store.isClientApproved({
       clientId: client.client_id,
@@ -159,16 +258,16 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       const upstreamState = dependencies.createId();
       store.saveGrant({
         clientId: client.client_id,
-        codeChallenge: parsedParams.codeChallenge,
+        codeChallenge: params.codeChallenge,
         grantId: upstreamState,
         pendingAuthorization: {
           expiresAt: dependencies.now() + 10 * 60 * 1000,
           stateId: upstreamState,
         },
-        redirectUri: parsedParams.redirectUri,
+        redirectUri: params.redirectUri,
         resource,
         scopes,
-        state: parsedParams.state,
+        state: params.state,
       });
 
       return {
@@ -185,16 +284,16 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     const grant: OAuthGrant = {
       clientId: client.client_id,
       clientName: client.client_name,
-      codeChallenge: parsedParams.codeChallenge,
+      codeChallenge: params.codeChallenge,
       consent: {
         challenge: consentChallenge,
         expiresAt: dependencies.now() + 10 * 60 * 1000,
       },
       grantId: consentChallenge,
-      redirectUri: parsedParams.redirectUri,
+      redirectUri: params.redirectUri,
       resource,
       scopes,
-      state: parsedParams.state,
+      state: params.state,
     };
 
     store.saveGrant(grant);
@@ -411,7 +510,25 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       throw new InvalidGrantError("resource does not match the refresh token.");
     }
 
-    const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(grant.upstreamTokens?.refresh_token ?? "");
+    let refreshedUpstreamTokens: OAuthTokens;
+
+    try {
+      refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(
+        grant.upstreamTokens?.refresh_token ?? "",
+      );
+    } catch (error) {
+      logAppEvent("oauth", "token.refresh.failed", {
+        ...getRequestLogFields(),
+        clientId: client.client_id,
+        grantType: "refresh_token",
+        hasRefreshToken: typeof refreshToken === "string" && refreshToken.length > 0,
+        hasResource: Boolean(resource?.href),
+        scopeCount: scopes?.length ?? 0,
+        ...getErrorDetails(error),
+      });
+      throw error;
+    }
+
     const nextUpstreamTokens: OAuthTokens = {
       ...grant.upstreamTokens,
       ...refreshedUpstreamTokens,

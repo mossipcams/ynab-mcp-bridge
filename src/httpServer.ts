@@ -75,6 +75,12 @@ type RequestResolution =
 
 type HttpDebugDetails = Record<string, unknown>;
 
+type JsonRpcRequestLike = {
+  id?: unknown;
+  method?: unknown;
+  params?: unknown;
+};
+
 type InitializeParamsLike = {
   capabilities?: unknown;
   clientInfo?: unknown;

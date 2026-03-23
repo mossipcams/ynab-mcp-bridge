@@ -9,6 +9,7 @@ import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { getEffectiveOAuthScopes, type RuntimeAuthConfig } from "./config.js";
 import { createLocalTokenService } from "./localTokenService.js";
+import { logAppEvent } from "./logger.js";
 import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
 import { parseCallbackQuery, parseConsentRequestBody } from "./oauthSchemas.js";
 import { createOAuthStore } from "./oauthStore.js";
@@ -30,7 +31,7 @@ function getConsentPageHeaders(authorizationUrl: string) {
 }
 
 function logOAuthDebug(event: string, details: Record<string, unknown>) {
-  console.error("[oauth]", event, {
+  logAppEvent("oauth", event, {
     ...getRequestLogFields(),
     ...details,
   });
@@ -102,7 +103,6 @@ function getTokenResponseDebugDetails(tokens: OAuthTokens) {
     tokenResponseFields: Object.keys(tokens).sort(),
   };
 }
-
 export function createOAuthBroker(config: OAuthAuthConfig): {
   callbackPath: string;
   callbackUrl: string;
@@ -248,8 +248,6 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     async challengeForAuthorizationCode(client, authorizationCode) {
       return await core.getAuthorizationCodeChallenge(client, authorizationCode);
     },
-    // The MCP SDK provider interface fixes this method shape.
-    // eslint-disable-next-line max-params
     async exchangeAuthorizationCode(client, authorizationCode, _codeVerifier, redirectUri, resource) {
       try {
         const tokens = await core.exchangeAuthorizationCode(client, authorizationCode, redirectUri, resource);
@@ -330,33 +328,33 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
 
   const handleCallback: RequestHandler = async (req, res, next) => {
     try {
-      const callbackRequest = parseCallbackQuery(req.query);
+      const parsedQuery = parseCallbackQuery(req.query);
 
       logOAuthDebug("callback.received", {
-        hasCode: callbackRequest.hasCode,
-        hasError: callbackRequest.hasError,
-        hasState: callbackRequest.hasState,
+        hasCode: parsedQuery.hasCode,
+        hasError: parsedQuery.hasError,
+        hasState: parsedQuery.hasState,
       });
 
-      if (!callbackRequest.upstreamState) {
-        throw createMissingUpstreamStateError(callbackRequest.error, callbackRequest.errorDescription);
+      if (!parsedQuery.upstreamState) {
+        throw createMissingUpstreamStateError(parsedQuery.error, parsedQuery.errorDescription);
       }
 
       const result = await core.handleCallback({
-        code: callbackRequest.code,
-        error: callbackRequest.error,
-        errorDescription: callbackRequest.errorDescription,
-        upstreamState: callbackRequest.upstreamState,
+        ...(parsedQuery.code ? { code: parsedQuery.code } : {}),
+        ...(parsedQuery.error ? { error: parsedQuery.error } : {}),
+        ...(parsedQuery.errorDescription ? { errorDescription: parsedQuery.errorDescription } : {}),
+        upstreamState: parsedQuery.upstreamState,
       });
       logOAuthDebug("callback.completed", {
-        hasCode: callbackRequest.hasCode,
-        hasError: callbackRequest.hasError,
-        hasState: callbackRequest.hasState,
+        hasCode: parsedQuery.hasCode,
+        hasError: parsedQuery.hasError,
+        hasState: parsedQuery.hasState,
         issuedAuthorizationCode: result.type === "redirect",
       });
       res.redirect(302, result.location);
     } catch (error) {
-      console.error("[oauth]", "callback.failed", {
+      logAppEvent("oauth", "callback.failed", {
         ...getRequestLogFields(),
         ...getErrorDetails(error),
         path: req.path,

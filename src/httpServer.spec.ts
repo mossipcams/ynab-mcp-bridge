@@ -3,9 +3,11 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createServer as createNodeHttpServer, request as httpRequest } from "node:http";
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startHttpServer } from "./httpServer.js";
+import { setLoggerDestinationForTests } from "./logger.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
@@ -21,6 +23,27 @@ describe("startHttpServer", () => {
   const ynab = {
     apiToken: "test-token",
   } as const;
+
+  function createBufferedDestination() {
+    const destination = new PassThrough();
+    const chunks: string[] = [];
+
+    destination.on("data", (chunk) => {
+      chunks.push(chunk.toString("utf8"));
+    });
+
+    return {
+      destination,
+      readEntries() {
+        return chunks
+          .join("")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+      },
+    };
+  }
 
   function getStructuredLogEntry(call: unknown[]) {
     if (call.length !== 1 || typeof call[0] !== "string") {
@@ -242,6 +265,8 @@ describe("startHttpServer", () => {
   });
 
   afterEach(async () => {
+    setLoggerDestinationForTests();
+
     while (cleanups.length > 0) {
       const cleanup = cleanups.pop();
       await cleanup?.();
@@ -2463,7 +2488,8 @@ describe("startHttpServer", () => {
   });
 
   it("logs redacted refresh failures when the upstream provider rejects a refresh exchange", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const correlationId = "corr-refresh-failure-123";
     const refreshUserAgent = "chatgpt-refresh-client/1.0";
     let lastTokenRequestBody: URLSearchParams | undefined;
@@ -2531,7 +2557,6 @@ describe("startHttpServer", () => {
 
     const upstreamOrigin = `http://127.0.0.1:${address.port}`;
     cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
       await new Promise<void>((resolve, reject) => {
         upstreamServer.close((error) => {
           if (error) {
@@ -2621,284 +2646,39 @@ describe("startHttpServer", () => {
 
     expect(refreshResponse.ok).toBe(false);
     expect(lastTokenRequestBody?.get("grant_type")).toBe("refresh_token");
-    const tokenRequestCall = findLogCall(consoleErrorSpy, "request.received", (details) => (
-      details.path === "/token" &&
-      details.method === "POST" &&
-      details.userAgent === refreshUserAgent &&
-      details.correlationId === correlationId
+    const tokenRequestEntry = sink.readEntries().find((entry) => (
+      entry.scope === "http" &&
+      entry.event === "request.received" &&
+      entry.path === "/token" &&
+      entry.method === "POST" &&
+      entry.userAgent === refreshUserAgent &&
+      entry.correlationId === correlationId
     ));
-    const refreshFailedCall = findOAuthLogCall(consoleErrorSpy, "token.refresh.failed", (details) => (
-      details.clientId === registration.client_id &&
-      details.grantType === "refresh_token" &&
-      details.hasRefreshToken === true &&
-      details.hasResource === true &&
-      details.scopeCount === 0 &&
-      details.errorName === "ServerError" &&
-      details.errorMessage === "Upstream refresh exchange failed with status 400." &&
-      details.upstreamError === "invalid_grant" &&
-      details.upstreamErrorDescription === "Refresh token is invalid." &&
-      Array.isArray(details.upstreamErrorFields) &&
-      details.upstreamErrorFields.includes("error") &&
-      details.upstreamErrorFields.includes("error_description") &&
-      !("refreshToken" in details)
+    const refreshFailedEntry = sink.readEntries().find((entry) => (
+      entry.scope === "oauth" &&
+      entry.event === "token.refresh.failed" &&
+      entry.clientId === registration.client_id &&
+      entry.grantType === "refresh_token" &&
+      entry.hasRefreshToken === true &&
+      entry.hasResource === true &&
+      entry.scopeCount === 0 &&
+      entry.errorName === "ServerError" &&
+      entry.errorMessage === "Upstream refresh exchange failed with status 400." &&
+      entry.upstreamError === "invalid_grant" &&
+      entry.upstreamErrorDescription === "Refresh token is invalid." &&
+      Array.isArray(entry.upstreamErrorFields) &&
+      entry.upstreamErrorFields.includes("error") &&
+      entry.upstreamErrorFields.includes("error_description") &&
+      !("refreshToken" in entry)
     ));
 
-    expect(tokenRequestCall).toBeTruthy();
-    expect(refreshFailedCall).toBeTruthy();
-
-    const tokenRequestDetails = getLogDetails(tokenRequestCall);
-    const refreshFailedDetails = getLogDetails(refreshFailedCall);
-
-    expect(tokenRequestDetails?.correlationId).toBe(correlationId);
-    expect(typeof tokenRequestDetails?.requestId).toBe("string");
-    expect(tokenRequestDetails?.requestId).not.toBe("");
-    expect(refreshFailedDetails?.correlationId).toBe(correlationId);
-    expect(refreshFailedDetails?.requestId).toBe(tokenRequestDetails?.requestId);
-  });
-
-  it("logs ChatGPT for OpenAI-style OAuth discovery and broker routes when chatgpt user agents drive the flow", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const metadataUserAgent = "chatgpt-web/1.0";
-    const authorizeUserAgent = "chatgpt-browser/1.0";
-    const callbackUserAgent = "chatgpt-callback/1.0";
-    const tokenUserAgent = "chatgpt-token-client/1.0";
-    const upstream = await startUpstreamOAuthServer(cleanups);
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createCloudflareOAuthAuth({
-        authorizationUrl: upstream.authorizationUrl,
-        issuer: upstream.issuer,
-        jwksUrl: upstream.jwksUrl,
-        tokenUrl: upstream.tokenUrl,
-      }),
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
-
-    const metadataResponse = await fetch(new URL("/.well-known/openid-configuration", httpServer.url), {
-      headers: {
-        "User-Agent": metadataUserAgent,
-      },
-    });
-
-    expect(metadataResponse.status).toBe(200);
-
-    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        client_name: "ChatGPT Web",
-        grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://chatgpt.com/oauth/callback"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-      }),
-    });
-
-    expect(registrationResponse.status).toBe(201);
-    const registration = await registrationResponse.json() as {
-      client_id: string;
-    };
-    const codeVerifier = "chatgpt-code-verifier-123456789";
-    const codeChallenge = createCodeChallenge(codeVerifier);
-
-    const authorizeResponse = await fetch(new URL(
-      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://chatgpt.com/oauth/callback")}&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        "User-Agent": authorizeUserAgent,
-      },
-    });
-
-    expect(authorizeResponse.status).toBe(200);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    expect(consentResponse.status).toBe(302);
-    const consentLocation = consentResponse.headers.get("location");
-    expect(consentLocation).toBeTruthy();
-    const upstreamState = new URL(consentLocation!, httpServer.url).searchParams.get("state");
-
-    const callbackResponse = await fetch(new URL(
-      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        "User-Agent": callbackUserAgent,
-      },
-    });
-    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
-
-    const tokenResponse = await fetch(new URL("/token", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": tokenUserAgent,
-      },
-      body: new URLSearchParams({
-        client_id: registration.client_id,
-        code: localAuthorizationCode!,
-        code_verifier: codeVerifier,
-        grant_type: "authorization_code",
-        redirect_uri: "https://chatgpt.com/oauth/callback",
-        resource: "https://mcp.example.com/mcp",
-      }),
-    });
-
-    expect(tokenResponse.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/.well-known/openid-configuration" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/authorize" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/oauth/callback" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/token" &&
-      details.method === "POST" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-  });
-
-  it("logs Codex for OAuth discovery aliases and broker routes when codex user agents drive the flow", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const discoveryUserAgent = "OpenAI Codex/0.1.0";
-    const authorizeUserAgent = "OpenAI Codex Browser/0.1.0";
-    const callbackUserAgent = "OpenAI Codex Callback/0.1.0";
-    const tokenUserAgent = "OpenAI Codex Token/0.1.0";
-    const upstream = await startUpstreamOAuthServer(cleanups);
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createCloudflareOAuthAuth({
-        authorizationUrl: upstream.authorizationUrl,
-        issuer: upstream.issuer,
-        jwksUrl: upstream.jwksUrl,
-        tokenUrl: upstream.tokenUrl,
-      }),
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
-
-    const discoveryResponse = await fetch(new URL("/.well-known/oauth-authorization-server/sse", httpServer.url), {
-      headers: {
-        "User-Agent": discoveryUserAgent,
-      },
-    });
-
-    expect(discoveryResponse.status).toBe(200);
-
-    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        client_name: "OpenAI Codex",
-        grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://codex.openai.com/oauth/callback"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-      }),
-    });
-
-    expect(registrationResponse.status).toBe(201);
-    const registration = await registrationResponse.json() as {
-      client_id: string;
-    };
-    const codeVerifier = "codex-code-verifier-123456789";
-    const codeChallenge = createCodeChallenge(codeVerifier);
-
-    const authorizeResponse = await fetch(new URL(
-      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://codex.openai.com/oauth/callback")}&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        "User-Agent": authorizeUserAgent,
-      },
-    });
-
-    expect(authorizeResponse.status).toBe(200);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    expect(consentResponse.status).toBe(302);
-    const consentLocation = consentResponse.headers.get("location");
-    expect(consentLocation).toBeTruthy();
-    const upstreamState = new URL(consentLocation!, httpServer.url).searchParams.get("state");
-
-    const callbackResponse = await fetch(new URL(
-      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        "User-Agent": callbackUserAgent,
-      },
-    });
-    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
-
-    const tokenResponse = await fetch(new URL("/token", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": tokenUserAgent,
-      },
-      body: new URLSearchParams({
-        client_id: registration.client_id,
-        code: localAuthorizationCode!,
-        code_verifier: codeVerifier,
-        grant_type: "authorization_code",
-        redirect_uri: "https://codex.openai.com/oauth/callback",
-        resource: "https://mcp.example.com/mcp",
-      }),
-    });
-
-    expect(tokenResponse.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/.well-known/oauth-authorization-server/sse" &&
-      details.profileId === "codex"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/authorize" &&
-      details.profileId === "codex" &&
-      details.reason === "user-agent:codex"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/oauth/callback" &&
-      details.profileId === "codex" &&
-      details.reason === "user-agent:codex"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/token" &&
-      details.method === "POST" &&
-      details.profileId === "codex" &&
-      details.reason === "user-agent:codex"
-    ))).toBeTruthy();
+    expect(tokenRequestEntry).toBeTruthy();
+    expect(refreshFailedEntry).toBeTruthy();
+    expect(tokenRequestEntry?.correlationId).toBe(correlationId);
+    expect(typeof tokenRequestEntry?.requestId).toBe("string");
+    expect(tokenRequestEntry?.requestId).not.toBe("");
+    expect(refreshFailedEntry?.correlationId).toBe(correlationId);
+    expect(refreshFailedEntry?.requestId).toBe(tokenRequestEntry?.requestId);
   });
 
   it("logs ChatGPT for OpenAI-style OAuth discovery and broker routes when chatgpt user agents drive the flow", async () => {
