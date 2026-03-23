@@ -54,4 +54,30 @@ describe("logger", () => {
       scope: "oauth",
     });
   });
+
+  it("preserves boolean token presence flags while redacting token values", () => {
+    const sink = createBufferedDestination();
+    const logger = createLogger({
+      destination: sink.destination,
+    });
+
+    logEvent(logger, "oauth", "token.exchange.succeeded", {
+      hasAccessToken: true,
+      hasRefreshToken: true,
+      issuedAccessToken: true,
+      issuedRefreshToken: true,
+      refreshToken: "refresh-secret",
+    });
+
+    expect(sink.readEntries()).toHaveLength(1);
+    expect(sink.readEntries()[0]).toMatchObject({
+      event: "token.exchange.succeeded",
+      hasAccessToken: true,
+      hasRefreshToken: true,
+      issuedAccessToken: true,
+      issuedRefreshToken: true,
+      refreshToken: "[Redacted]",
+      scope: "oauth",
+    });
+  });
 });

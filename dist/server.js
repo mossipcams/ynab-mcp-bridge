@@ -1,6 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { assertYnabConfig } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import { getPackageInfo } from "./packageInfo.js";
+import { getRequestLogFields, markToolCallStarted } from "./requestContext.js";
 import { attachYnabApiRuntimeContext, createYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
 import * as GetBudgetCleanupSummaryTool from "./tools/GetBudgetCleanupSummaryTool.js";
@@ -113,7 +115,30 @@ function registerTool(registrar, tool, api) {
         description: tool.description,
         inputSchema: tool.inputSchema,
         annotations: READ_ONLY_TOOL_ANNOTATIONS,
-    }, (input) => tool.execute(input, api));
+    }, async (input) => {
+        markToolCallStarted();
+        logAppEvent("mcp", "tool.call.started", {
+            ...getRequestLogFields(),
+            toolName: tool.name,
+        });
+        try {
+            const result = await tool.execute(input, api);
+            const failed = "isError" in result && result.isError === true;
+            logAppEvent("mcp", failed ? "tool.call.failed" : "tool.call.succeeded", {
+                ...getRequestLogFields(),
+                toolName: tool.name,
+            });
+            return result;
+        }
+        catch (error) {
+            logAppEvent("mcp", "tool.call.failed", {
+                ...getRequestLogFields(),
+                error,
+                toolName: tool.name,
+            });
+            throw error;
+        }
+    });
 }
 export function registerServerTools(registrar, api) {
     const registeredToolNames = [];

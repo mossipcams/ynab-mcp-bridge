@@ -5,6 +5,7 @@ import { logAppEvent } from "./logger.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthCore } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
+import { getRequestLogFields } from "./requestContext.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 function getConsentPageHeaders(authorizationUrl) {
     const authorizationOrigin = new URL(authorizationUrl).origin;
@@ -17,7 +18,10 @@ function getConsentPageHeaders(authorizationUrl) {
     };
 }
 function logOAuthDebug(event, details) {
-    console.error("[oauth]", event, details);
+    logAppEvent("oauth", event, {
+        ...getRequestLogFields(),
+        ...details,
+    });
 }
 function getErrorDetails(error) {
     if (error instanceof Error) {
@@ -321,7 +325,8 @@ export function createOAuthBroker(config) {
             res.redirect(302, result.location);
         }
         catch (error) {
-            logAppEvent("oauth", "callback.failed", {
+            logOAuthDebug("callback.failed", {
+                ...getRequestLogFields(),
                 ...getErrorDetails(error),
                 path: req.path,
             });

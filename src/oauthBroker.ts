@@ -8,6 +8,7 @@ import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { getEffectiveOAuthScopes, type RuntimeAuthConfig } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
@@ -29,7 +30,7 @@ function getConsentPageHeaders(authorizationUrl: string) {
 }
 
 function logOAuthDebug(event: string, details: Record<string, unknown>) {
-  console.error("[oauth]", event, {
+  logAppEvent("oauth", event, {
     ...getRequestLogFields(),
     ...details,
   });
@@ -373,7 +374,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       });
       res.redirect(302, result.location);
     } catch (error) {
-      console.error("[oauth]", "callback.failed", {
+      logOAuthDebug("callback.failed", {
         ...getRequestLogFields(),
         ...getErrorDetails(error),
         path: req.path,
