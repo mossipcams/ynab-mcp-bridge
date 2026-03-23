@@ -1,3 +1,49 @@
+# Remove 70/20/10 Tool Plan
+
+## Goal
+
+Remove the `ynab_get_70_20_10_summary` tool from the server registry so it is no longer exposed, and clean up the implementation and coverage that only exist for that tool.
+
+## Constraints And Notes
+
+- The current checkout is on `fix/cors-cf-utility-dedup`, not `main`.
+- The worktree is dirty with unrelated changes already present.
+- Per repo rules, implementation should not switch branches automatically in a way that could disturb this checkout. If you approve implementation, I will pause once more before code changes if we need to isolate the work in a fresh branch or worktree from `main`.
+
+## Tasks
+
+- [ ] Task 1: Add a failing registry test that proves the tool is still exposed today
+  Test to write:
+  Update `src/serverFactory.spec.ts` so it fails unless the registered tool count and tool name lists exclude `ynab_get_70_20_10_summary`, and so the explicit registration assertion no longer expects the `Get 70/20/10 Summary` tool metadata.
+  Code to implement:
+  No production code in this task. Only the spec changes needed to make removal expectations explicit.
+  How to verify it works:
+  Run `npm test -- --run src/serverFactory.spec.ts` and show the failure caused by the tool still being registered.
+
+- [ ] Task 2: Remove the tool from the server registry and implementation surface
+  Test to write:
+  Reuse the failing expectations from Task 1 as the red test.
+  Code to implement:
+  Remove the `GetBudgetRatioSummaryTool` import and registration from `src/server.ts`, then remove the now-unused implementation file `src/tools/GetBudgetRatioSummaryTool.ts`.
+  How to verify it works:
+  Re-run `npm test -- --run src/serverFactory.spec.ts` and show it passing. Then run `npm run typecheck` to confirm there are no dangling imports or type errors from the removal.
+
+- [ ] Task 3: Remove direct tool coverage that no longer applies and verify behavior stays clean
+  Test to write:
+  Update `src/financeAdvancedTools.spec.ts` by removing the `70/20/10` tool case so the suite reflects the supported advanced tools only.
+  Code to implement:
+  Delete the obsolete spec block and clean up any now-unused imports in that spec file.
+  How to verify it works:
+  Run `npm test -- --run src/financeAdvancedTools.spec.ts` and then `npm run build` if the targeted tests and typecheck pass, to confirm the repo still compiles without the removed tool.
+
+## Review Bar
+
+- The tool name is absent from the runtime registry.
+- No source file imports or references the removed tool.
+- Targeted tests, typecheck, and build provide proof that the removal is complete.
+
+Plan ready. Approve to proceed.
+
 # Type Discipline Implementation Plan
 
 ## Goal
@@ -15,7 +61,7 @@ This first slice will enforce the discipline in config and shared/public types, 
 
 ## Tasks
 
-- [x] Task 1: Add quality guardrail tests for strict config and lint policy
+- [ ] Task 1: Add quality guardrail tests for strict config and lint policy
   Test to write:
   Add or extend a repo-quality spec in `src/codeQuality.spec.ts` that fails unless:
   `package.json` declares TypeScript 5.9,
@@ -27,7 +73,7 @@ This first slice will enforce the discipline in config and shared/public types, 
   How to verify it works:
   Run the new targeted Vitest spec and show it failing before config changes. Confirm the failure points at the missing flags/rules rather than unrelated issues.
 
-- [x] Task 2: Tighten TypeScript compiler configuration to the agreed strict baseline
+- [ ] Task 2: Tighten TypeScript compiler configuration to the agreed strict baseline
   Test to write:
   Use the failing guardrail test from Task 1 as the red test for config requirements.
   Code to implement:
@@ -39,7 +85,7 @@ This first slice will enforce the discipline in config and shared/public types, 
   How to verify it works:
   Re-run the targeted guardrail spec to green, then run `npm run typecheck` to expose any real breakages introduced by the stricter config.
 
-- [x] Task 3: Make ESLint policy explicit for type assertions and unsafe operations
+- [ ] Task 3: Make ESLint policy explicit for type assertions and unsafe operations
   Test to write:
   Extend the same quality spec so it fails unless `eslint.config.mjs` explicitly sets `@typescript-eslint/consistent-type-assertions` to `"never"` and preserves the type-aware unsafe-operation rules.
   Code to implement:
@@ -48,7 +94,7 @@ This first slice will enforce the discipline in config and shared/public types, 
   How to verify it works:
   Run the targeted spec again, then run `npm run lint`. If lint surfaces new unsafe patterns, capture them and stop to re-plan if the fix set expands beyond the planned slice.
 
-- [x] Task 4: Introduce shared branded-type primitives and readonly-first helper types
+- [ ] Task 4: Introduce shared branded-type primitives and readonly-first helper types
   Test to write:
   Add a compile-time contract file in `src/` that uses `// @ts-expect-error` and assignability checks to prove:
   plain `string` is not assignable to branded IDs,
@@ -64,7 +110,7 @@ This first slice will enforce the discipline in config and shared/public types, 
   How to verify it works:
   Run `npm run typecheck` and show the contract file passing. Confirm no emitted runtime code or tooling additions are needed.
 
-- [x] Task 5: Migrate the highest-value public/domain boundaries to the new types
+- [ ] Task 5: Migrate the highest-value public/domain boundaries to the new types
   Test to write:
   Add or extend targeted specs around the most important entry points, likely config resolution and one or two representative tools/helpers, so they fail when mutable arrays or raw strings are still accepted where branded/readonly types should be used.
   Prefer adding specs under `src/*.spec.ts` rather than any `tests/` directory.
@@ -77,7 +123,7 @@ This first slice will enforce the discipline in config and shared/public types, 
   How to verify it works:
   Run the targeted specs for the migrated modules, then `npm run typecheck` to prove the branded/readonly constraints hold across real call sites.
 
-- [~] Task 6: Clean up strictness fallout and complete full verification
+- [ ] Task 6: Clean up strictness fallout and complete full verification
   Test to write:
   Use the existing failing tests/lint/typecheck output as the red signal for any fallout caused by Tasks 2 through 5.
   Do not weaken assertions; fix implementation and types instead.
@@ -99,21 +145,220 @@ This first slice will enforce the discipline in config and shared/public types, 
 - Do not modify files under a `tests/` directory.
 - If stricter TS flags create repo-wide churn beyond the planned slice, stop after the first failing proof, summarize the expansion, and re-plan before continuing.
 
+---
+
+# PR 145 CI Fix Plan
+
+## Failure Summary
+
+- PR: `https://github.com/mossipcams/ynab-mcp-bridge/pull/145`
+- Failing checks:
+  - `validate (22.x)` -> `https://github.com/mossipcams/ynab-mcp-bridge/actions/runs/23347102744/job/67915348397`
+  - `validate (24.x)` -> `https://github.com/mossipcams/ynab-mcp-bridge/actions/runs/23347102744/job/67915348487`
+- Shared failure:
+  - Tests and dependency rules pass.
+  - `npm run lint` aborts in GitHub Actions with `FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory`.
+- Local safety note:
+  - The current checkout is on `fix/cors-cf-utility-dedup` with unrelated uncommitted changes, while PR 145 head is `chore/type-discipline`.
+  - Implementation should happen in an isolated branch or worktree so current local work is not disturbed.
+
+## Tasks
+
+- [ ] Task 1: Isolate the PR branch and add a failing guardrail for the lint strategy
+  Test to write:
+  Extend `src/codeQuality.spec.ts` so it fails unless the repo encodes the chosen CI-safe lint strategy while preserving type-aware linting. The guardrail should verify the exact `lint` script and, if needed, the CI workflow lint step.
+  Code to implement:
+  Create an isolated worktree or branch for PR 145, then update the guardrail spec only. Do not change production config in this task.
+  How to verify it works:
+  Run the targeted spec and show it failing for the current PR state before any implementation changes.
+
+- [ ] Task 2: Implement the minimal lint-memory fix without weakening coverage
+  Test to write:
+  Use the failing guardrail from Task 1 as the red test.
+  Code to implement:
+  Update the lint configuration with the smallest change that avoids the GitHub Actions OOM while keeping type-aware linting in place. Prefer reducing lint workload or TS program overhead over simply masking the problem; only use a workflow-level memory bump if the cleaner fix is insufficient.
+  How to verify it works:
+  Re-run the targeted spec to green, then run `npm run lint`. When useful, also run a constrained-memory lint invocation locally to approximate the CI failure mode.
+
+- [ ] Task 3: Prove the CI path still validates the repo end to end
+  Test to write:
+  Reuse or extend `src/codeQuality.spec.ts` so the workflow still runs the intended validation order and invokes the updated lint command/path.
+  Code to implement:
+  Apply any small workflow or config follow-up needed for the CI path, keeping the change reviewable and focused on the lint failure.
+  How to verify it works:
+  Run `npm run test -- --run src/codeQuality.spec.ts`, `npm run lint`, and `npm run typecheck`. If those pass, re-check PR 145 status with `gh pr checks 145` and summarize whether the repo is ready for the next CI rerun.
+
+## Review Bar
+
+- Before closing the fix, sanity-check whether the final change meets a staff-engineer review bar:
+  - root cause addressed rather than hidden,
+  - current local worktree left untouched,
+  - CI guardrails updated so the same class of failure is less likely to recur.
+
+---
+
+# Correlation IDs And MCP Dispatch Visibility Plan
+
+## Goal
+
+Add end-to-end request correlation and bridge-side dispatch telemetry so we can distinguish:
+
+- request reached `/mcp`
+- MCP transport handoff occurred
+- a `tools/call` was requested for a specific tool
+- tool execution started, succeeded, or failed
+- OAuth refresh activity belongs to the same user-visible incident when applicable
+
+This is the bridge-scoped slice of the broader link-readiness and catalog-recovery design in `tasks/link-readiness-correlation-design.md`.
+
+## Scope
+
+- In scope:
+  - structured correlation IDs for bridge ingress, MCP handoff, tool execution, and OAuth logs
+  - targeted tests proving those fields are present and stable through a request
+  - safe propagation into existing log events without leaking secrets
+- Out of scope for this repo:
+  - platform-side link catalog caching
+  - forced catalog rehydrate and retry on `Resource not found`
+  - link readiness state machine outside the bridge boundary
+
+## Tasks
+
+- [x] Task 1: Add failing logging specs for correlation fields on `/mcp` and `/token`
+  Test to write:
+  Extend `src/httpServer.spec.ts` so it fails unless `request.received`, `transport.handoff`, and `token.refresh.succeeded` style logs include a generated or propagated `correlationId` and a per-request `requestId`.
+  Code to implement:
+  No production code in this task. Only the focused spec expectations and any small test helpers needed in `src/httpServer.spec.ts`.
+  How to verify it works:
+  Run `npm test -- --run src/httpServer.spec.ts` and show the failure proving the correlation fields are currently missing.
+
+- [x] Task 2: Implement bridge ingress correlation and request IDs
+  Test to write:
+  Reuse the failing assertions from Task 1 as the red test for ingress logging.
+  Code to implement:
+  Update `src/httpServer.ts` so every incoming request gets:
+  - a `requestId`
+  - a validated `correlationId` from an inbound header when present or a generated fallback when absent
+  Include both fields in the existing HTTP and profile log events and expose the effective correlation ID on the response when appropriate.
+  How to verify it works:
+  Re-run `npm test -- --run src/httpServer.spec.ts` and show the updated logging assertions passing for both `/mcp` and `/token` requests.
+
+- [x] Task 3: Add tool lifecycle logging with correlation context
+  Test to write:
+  Add or extend a focused spec, likely in `src/serverFactory.spec.ts` or `src/httpServer.spec.ts`, so it fails unless a `tools/call` request emits `tool.call.started` and `tool.call.succeeded` with `correlationId`, `requestId`, and `toolName`, and emits `tool.call.failed` on execution errors.
+  Code to implement:
+  Update the server registration wrapper in `src/server.ts` to log tool lifecycle events around each tool execution while preserving the existing result behavior and keeping secrets out of logs.
+  How to verify it works:
+  Run the smallest targeted spec covering the new lifecycle events, then run `npm test -- --run src/httpServer.spec.ts src/serverFactory.spec.ts` to confirm the bridge logs now distinguish dispatch from execution.
+
+- [x] Task 4: Correlate OAuth refresh logs to incident flows
+  Test to write:
+  Extend the existing refresh success and failure coverage in `src/httpServer.spec.ts` so it fails unless `token.refresh.succeeded` and `token.refresh.failed` include the active `correlationId` and `requestId`.
+  Code to implement:
+  Update the OAuth logging path in `src/oauthBroker.ts` and any request-context plumbing needed so refresh logs inherit the current correlation context when the refresh is request-driven.
+  How to verify it works:
+  Re-run the focused refresh-related specs in `src/httpServer.spec.ts` and show both success and failure assertions passing with correlation-aware fields.
+
+- [x] Task 5: Add a dispatch-gap signal for incidents that stop before tool execution
+  Test to write:
+  Add a focused spec proving the bridge logs enough information to tell whether a request stopped before tool execution, for example by asserting a distinct log event or explicit field when a request is handed to transport but no `tool.call.started` follows.
+  Code to implement:
+  Add the smallest bridge-side signal that closes the current observability gap without changing request behavior, likely in `src/httpServer.ts`.
+  How to verify it works:
+  Run the targeted spec and then `npm test -- --run src/httpServer.spec.ts` to confirm we can now separate transport receipt from tool execution absence.
+
+## Review Bar
+
+- Every `/mcp` and `/token` log path includes `correlationId` and `requestId`.
+- A single `tools/call` can be traced from ingress to tool completion in logs.
+- OAuth refresh logs can be tied back to the same incident flow when request-driven.
+- No secrets or tokens are added to logs.
+- The resulting telemetry is strong enough to tell whether a failure happened before MCP execution, during dispatch, or inside a tool.
+
+Plan ready. Approve to proceed.
+
 ## Results
 
-- Added guardrail coverage in `src/codeQuality.spec.ts` for TS 5.9, strict compiler flags, explicit `consistent-type-assertions`, and effective `no-unsafe-*` lint rules.
-- Tightened `tsconfig.json` with `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noPropertyAccessFromIndexSignature`, and `noImplicitOverride`.
-- Made ESLint explicitly forbid type assertions in main TS files while keeping spec-file overrides.
-- Added shared zero-runtime branded and readonly helper types in `src/typeUtils.ts`, branded YNAB IDs in `src/ynabTypes.ts`, and compile-time contracts in `src/typeUtils.contract.ts`.
-- Migrated high-value boundaries toward readonly/branded usage across config/runtime context, client profile types, plan resolution, and several finance/helper modules.
-- Reworked `src/server.ts` into an explicit registry that preserves source-level clarity without whole-module registry indirection.
-- Fixed `src/ynabApi.ts` to match the current YNAB SDK `_configuration` shape and keep runtime config normalization branded internally.
+- Implemented request-scoped correlation context in `src/requestContext.ts` and propagated `correlationId` plus `requestId` through HTTP ingress, profile detection, and OAuth request-driven logs.
+- Added `tool.call.started`, `tool.call.succeeded`, and `tool.call.failed` telemetry in `src/server.ts` with request correlation and `toolName`.
+- Added `tool.dispatch.absent` in `src/httpServer.ts` so incidents that reach MCP transport but never start a wrapped tool are visible in logs.
+- Kept log payloads free of secrets and token values while extending existing structured and raw diagnostic events.
 
 ## Verification
 
-- Passed: `npm run test -- --run src/codeQuality.spec.ts`
-- Passed: `npm run test -- --run src/ynabApi.spec.ts src/config.spec.ts src/serverFactory.spec.ts`
-- Passed: `npm run test -- --run src/planReadTools.spec.ts`
-- Passed: `npm run test -- --run src/httpServer.spec.ts`
-- Attempted: focused ESLint, `npm run build`, and broader TypeScript verification with increased heap.
-- Remaining caveat: full `eslint`/`tsc`/`build` runs in this environment remained extremely slow and previously hit Node heap limits before producing a final clean exit, so full static verification is not yet proven locally.
+- `npm test -- --run src/httpServer.spec.ts`
+- `npm test -- --run src/serverFactory.spec.ts`
+- `npm test -- --run src/httpServer.spec.ts src/serverFactory.spec.ts`
+- `npm run typecheck`
+
+---
+
+# CI Failure Remediation Plan For PR 150
+
+The current PR branch has four CI failures, but they come from three different causes:
+
+- missing ChatGPT/Codex user-agent pre-auth detection on OAuth routes
+- an OAuth logger spec that now sees request-scoped HTTP logs before the callback failure event
+- an outdated PR branch base (`0.10.4`) that is behind published release metadata, causing `releasePlease.spec.ts` to fail
+
+## Tasks
+
+- [ ] Task 1: Reproduce the failing CI tests on the PR branch and isolate the exact red cases
+  Test to write:
+  No new test in this task. Use the existing failing CI specs as the red signal:
+  - `src/httpServer.spec.ts` ChatGPT OAuth-route logging case
+  - `src/httpServer.spec.ts` Codex OAuth-route logging case
+  - `src/oauthBroker.spec.ts` callback failure logging case
+  - `src/releasePlease.spec.ts` release metadata invariant
+  Code to implement:
+  No production code. Capture the failure boundary and confirm whether the release metadata failure is branch ancestry rather than a telemetry regression.
+  How to verify it works:
+  Run the smallest targeted vitest commands for the four failing cases and confirm the failures match CI.
+
+- [ ] Task 2: Restore ChatGPT/Codex user-agent route detection on the PR branch
+  Test to write:
+  Use the existing failing `src/httpServer.spec.ts` OAuth-route logging cases as the failing tests, and add or reuse `src/clientProfiles.spec.ts` coverage for user-agent-based pre-auth detection if the branch lacks it.
+  Code to implement:
+  Port the user-agent-based pre-auth detection support into the PR branch:
+  - `src/clientProfiles/chatgptProfile.ts`
+  - `src/clientProfiles/codexProfile.ts`
+  - `src/clientProfiles/detectClient.ts`
+  - any supporting request-context/type updates needed in `src/clientProfiles/requestContext.ts` and `src/clientProfiles/types.ts`
+  How to verify it works:
+  Run targeted profile detection tests plus the two failing `httpServer.spec.ts` cases and show them passing.
+
+- [ ] Task 3: Make the OAuth logger spec resilient to the new request-scoped logging
+  Test to write:
+  Use the existing failing `src/oauthBroker.spec.ts` callback failure logging assertion as the red test.
+  Code to implement:
+  Update the spec or the logger capture path so the test asserts that `callback.failed` is present in the sink, without incorrectly assuming it is the first log entry now that `request.received` is also emitted.
+  How to verify it works:
+  Run `npm test -- --run src/oauthBroker.spec.ts -t "logs callback failures through the shared oauth logger"` and show it passing.
+
+- [ ] Task 4: Rebuild the telemetry PR on top of current `main` so release metadata matches published tags
+  Test to write:
+  Use the existing failing `src/releasePlease.spec.ts` release metadata invariant as the red test.
+  Code to implement:
+  Create a clean main-based branch or worktree, reapply the correlation/dispatch telemetry commit plus the profile-detection fix from Tasks 2-3, and update the PR branch so it inherits current release metadata instead of the older `0.10.4` base.
+  How to verify it works:
+  Run `npm test -- --run src/releasePlease.spec.ts` and confirm the version/tag invariant passes on the rebased branch.
+
+- [ ] Task 5: Run the full relevant verification set and refresh the PR
+  Test to write:
+  No new tests. Use the existing suite as the regression check.
+  Code to implement:
+  No production code unless another regression appears. Push the updated branch and refresh PR checks.
+  How to verify it works:
+  Run:
+  - `npm run typecheck`
+  - `npm test -- --run src/clientProfiles.spec.ts src/httpServer.spec.ts src/oauthBroker.spec.ts src/serverFactory.spec.ts src/releasePlease.spec.ts`
+  Then re-check `gh pr view 150 --json mergeable,statusCheckRollup`.
+
+## Review Bar
+
+- The ChatGPT/Codex OAuth route logging cases pass without weakening assertions.
+- The OAuth callback failure logging spec still proves `callback.failed` is emitted through the shared logger.
+- The release metadata invariant passes because the branch is based on current release history, not because the assertion was weakened.
+- PR 150 remains mergeable and CI shows no failing required checks.
+
+Plan ready. Approve to proceed.

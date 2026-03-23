@@ -1,9 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { PassThrough } from "node:stream";
+
+import { setLoggerDestinationForTests } from "./logger.js";
+import { runWithRequestContext } from "./requestContext.js";
 import { createServer, registerServerTools } from "./server.js";
 
 describe("createServer", () => {
   const originalEnv = process.env;
+
+  function createBufferedDestination() {
+    const destination = new PassThrough();
+    const chunks: string[] = [];
+
+    destination.on("data", (chunk) => {
+      chunks.push(chunk.toString("utf8"));
+    });
+
+    return {
+      destination,
+      readEntries() {
+        return chunks
+          .join("")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+      },
+    };
+  }
 
   beforeEach(() => {
     process.env = { ...originalEnv };
@@ -11,6 +36,7 @@ describe("createServer", () => {
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    setLoggerDestinationForTests();
   });
 
   it("registers the rebuilt read-only YNAB toolset", () => {
@@ -162,78 +188,70 @@ describe("createServer", () => {
     );
   });
 
-  it("keeps registered MCP tool schemas serializable and their handlers callable through the registrar", async () => {
-    const registerTool = vi.fn();
-    const api = {
-      months: {
-        getPlanMonth: vi.fn(async (planId: string, month: string) => ({
-          data: {
-            month: {
-              month,
-              income: 120_000,
-              budgeted: 100_000,
-              activity: -90_000,
-              to_be_budgeted: 30_000,
-              age_of_money: 42,
-              categories: [{ id: "category-1" }],
-            },
-          },
-        })),
-      },
-      plans: {
-        getPlans: vi.fn(async () => ({
-          data: {
-            plans: [{ id: "plan-1" }],
-            default_plan: { id: "plan-1" },
-          },
-        })),
-      },
-    };
+  it("logs tool lifecycle events with request correlation for success and failure", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
+
+    const registeredHandlers = new Map<string, (input: unknown) => Promise<unknown>>();
 
     registerServerTools(
       {
-        registerTool,
+        registerTool: ((name: string, _metadata: unknown, handler: (input: unknown) => Promise<unknown>) => {
+          registeredHandlers.set(name, handler as (input: unknown) => Promise<unknown>);
+          return {} as any;
+        }) as any,
       },
-      api as any,
+      {} as any,
     );
 
-    const planMonthRegistration = registerTool.mock.calls.find(
-      ([toolName]) => toolName === "ynab_get_plan_month",
-    );
-
-    expect(planMonthRegistration).toBeDefined();
-
-    const [, registration, handler] = planMonthRegistration!;
-    expect(() => JSON.stringify(registration.inputSchema)).not.toThrow();
-
-    const result = await handler({
-      month: "2024-01-01",
+    await runWithRequestContext({
+      correlationId: "corr-tool-success-123",
+      requestId: "req-tool-success-123",
+    }, async () => {
+      await registeredHandlers.get("ynab_get_mcp_version")?.({});
     });
 
-    expect(result).toEqual({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          month: {
-            month: "2024-01-01",
-            income: 120_000,
-            budgeted: 100_000,
-            activity: -90_000,
-            to_be_budgeted: 30_000,
-            age_of_money: 42,
-            category_count: 1,
-          },
-        }),
-      }],
+    const failedResult = await runWithRequestContext({
+      correlationId: "corr-tool-failure-123",
+      requestId: "req-tool-failure-123",
+    }, async () => {
+      return await registeredHandlers.get("ynab_get_user")?.({});
     });
-    expect(api.months.getPlanMonth).toHaveBeenCalledWith("plan-1", "2024-01-01");
+
+    expect(failedResult).toMatchObject({
+      isError: true,
+    });
+
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        correlationId: "corr-tool-success-123",
+        event: "tool.call.started",
+        requestId: "req-tool-success-123",
+        scope: "mcp",
+        toolName: "ynab_get_mcp_version",
+      }),
+      expect.objectContaining({
+        correlationId: "corr-tool-success-123",
+        event: "tool.call.succeeded",
+        requestId: "req-tool-success-123",
+        scope: "mcp",
+        toolName: "ynab_get_mcp_version",
+      }),
+      expect.objectContaining({
+        correlationId: "corr-tool-failure-123",
+        event: "tool.call.failed",
+        requestId: "req-tool-failure-123",
+        scope: "mcp",
+        toolName: "ynab_get_user",
+      }),
+    ]));
   });
 
   it("defines an explicit tool registry instead of passing whole tool modules around", () => {
     const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
 
     expect(source).toContain("name: GetMcpVersionTool.name");
-    expect(source).toContain("executeTool(GetAccountTool.execute, api)");
+    expect(source).toContain("GetAccountTool.execute(");
     expect(source).not.toContain("module: GetAccountTool");
     expect(source).not.toContain("module.execute");
   });
