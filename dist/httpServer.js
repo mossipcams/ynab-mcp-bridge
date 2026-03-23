@@ -12,6 +12,7 @@ import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProf
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
+import { createRequestContext, getCorrelationHeaderName, getRequestLogFields, hasToolCallStarted, runWithRequestContext, } from "./requestContext.js";
 import { createServer } from "./server.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
@@ -137,6 +138,7 @@ function hasHeaderValue(value) {
 function getRequestDebugDetails(req, options = {}) {
     const authSubject = req.auth?.extra?.subject;
     return {
+        ...getRequestLogFields(),
         authMode: options.authMode,
         authClientId: req.auth?.clientId,
         authRequired: options.authRequired,
@@ -174,6 +176,17 @@ function getInitializeParams(parsedBody) {
         return undefined;
     }
     return request.params;
+}
+function getToolCallName(parsedBody) {
+    if (!parsedBody || typeof parsedBody !== "object") {
+        return undefined;
+    }
+    const request = parsedBody;
+    if (request.method !== "tools/call" || !request.params || typeof request.params !== "object") {
+        return undefined;
+    }
+    const name = request.params.name;
+    return typeof name === "string" ? name : undefined;
 }
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
@@ -290,6 +303,13 @@ export async function startHttpServer(options) {
     }
     app.disable("x-powered-by");
     app.set("trust proxy", 1);
+    app.use((req, res, next) => {
+        const requestContext = createRequestContext(req.headers);
+        runWithRequestContext(requestContext, () => {
+            res.setHeader(getCorrelationHeaderName(), requestContext.correlationId);
+            next();
+        });
+    });
     app.use((req, _res, next) => {
         logHttpDebug("request.received", getRequestDebugDetails(req, getRequestAuthDebugOptions(req)));
         next();
@@ -468,6 +488,14 @@ export async function startHttpServer(options) {
                 profileReason: resolvedProfile?.reason,
             });
             await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
+            const toolName = getToolCallName(parsedBody);
+            if (toolName && !hasToolCallStarted()) {
+                logHttpDebug("tool.dispatch.absent", {
+                    ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                    ...getJsonRpcDebugDetails(parsedBody),
+                    toolName,
+                });
+            }
         }
         catch (error) {
             await cleanup();

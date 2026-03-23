@@ -1,9 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { PassThrough } from "node:stream";
+
+import { setLoggerDestinationForTests } from "./logger.js";
+import { runWithRequestContext } from "./requestContext.js";
 import { createServer, registerServerTools } from "./server.js";
 
 describe("createServer", () => {
   const originalEnv = process.env;
+
+  function createBufferedDestination() {
+    const destination = new PassThrough();
+    const chunks: string[] = [];
+
+    destination.on("data", (chunk) => {
+      chunks.push(chunk.toString("utf8"));
+    });
+
+    return {
+      destination,
+      readEntries() {
+        return chunks
+          .join("")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+      },
+    };
+  }
 
   beforeEach(() => {
     process.env = { ...originalEnv };
@@ -11,6 +36,7 @@ describe("createServer", () => {
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    setLoggerDestinationForTests();
   });
 
   it("registers the rebuilt read-only YNAB toolset", () => {
@@ -160,6 +186,65 @@ describe("createServer", () => {
       }),
       expect.any(Function),
     );
+  });
+
+  it("logs tool lifecycle events with request correlation for success and failure", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
+
+    const registeredHandlers = new Map<string, (input: unknown) => Promise<unknown>>();
+
+    registerServerTools(
+      {
+        registerTool: ((name: string, _metadata: unknown, handler: (input: unknown) => Promise<unknown>) => {
+          registeredHandlers.set(name, handler as (input: unknown) => Promise<unknown>);
+          return {} as any;
+        }) as any,
+      },
+      {} as any,
+    );
+
+    await runWithRequestContext({
+      correlationId: "corr-tool-success-123",
+      requestId: "req-tool-success-123",
+    }, async () => {
+      await registeredHandlers.get("ynab_get_mcp_version")?.({});
+    });
+
+    const failedResult = await runWithRequestContext({
+      correlationId: "corr-tool-failure-123",
+      requestId: "req-tool-failure-123",
+    }, async () => {
+      return await registeredHandlers.get("ynab_get_user")?.({});
+    });
+
+    expect(failedResult).toMatchObject({
+      isError: true,
+    });
+
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        correlationId: "corr-tool-success-123",
+        event: "tool.call.started",
+        requestId: "req-tool-success-123",
+        scope: "mcp",
+        toolName: "ynab_get_mcp_version",
+      }),
+      expect.objectContaining({
+        correlationId: "corr-tool-success-123",
+        event: "tool.call.succeeded",
+        requestId: "req-tool-success-123",
+        scope: "mcp",
+        toolName: "ynab_get_mcp_version",
+      }),
+      expect.objectContaining({
+        correlationId: "corr-tool-failure-123",
+        event: "tool.call.failed",
+        requestId: "req-tool-failure-123",
+        scope: "mcp",
+        toolName: "ynab_get_user",
+      }),
+    ]));
   });
 
   it("defines an explicit tool registry instead of passing whole tool modules around", () => {

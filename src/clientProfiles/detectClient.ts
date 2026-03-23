@@ -6,7 +6,9 @@ export function detectClientProfile(context: RequestContext): DetectedClientProf
     if (profile.matchesPreAuth(context)) {
       return {
         profileId: profile.id,
-        reason: profile.detection?.preAuthReason ?? `profile:${profile.id}`,
+        reason: profile.detection?.getPreAuthReason?.(context) ??
+          profile.detection?.preAuthReason ??
+          `profile:${profile.id}`,
       };
     }
   }

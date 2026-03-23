@@ -18,6 +18,7 @@ export type ClientProfile = {
   matchesPreAuth: (context: RequestContext) => boolean;
   matchesInitialize: (clientInfo: unknown, capabilities: unknown) => boolean;
   detection?: {
+    getPreAuthReason?: (context: RequestContext) => string | undefined;
     initializeReason?: string;
     preAuthReason?: string;
   };

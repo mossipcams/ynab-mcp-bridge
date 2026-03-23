@@ -12,6 +12,7 @@ import { logAppEvent } from "./logger.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
+import { getRequestLogFields } from "./requestContext.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
@@ -29,7 +30,10 @@ function getConsentPageHeaders(authorizationUrl: string) {
 }
 
 function logOAuthDebug(event: string, details: Record<string, unknown>) {
-  console.error("[oauth]", event, details);
+  logAppEvent("oauth", event, {
+    ...getRequestLogFields(),
+    ...details,
+  });
 }
 
 function getErrorDetails(error: unknown) {
@@ -370,7 +374,8 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       });
       res.redirect(302, result.location);
     } catch (error) {
-      logAppEvent("oauth", "callback.failed", {
+      logOAuthDebug("callback.failed", {
+        ...getRequestLogFields(),
         ...getErrorDetails(error),
         path: req.path,
       });

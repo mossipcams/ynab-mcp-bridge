@@ -22,8 +22,12 @@ function normalizeKey(key) {
         .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
         .toLowerCase();
 }
-function isSensitiveKey(key) {
+function isSensitiveKey(key, value) {
     const normalizedKey = normalizeKey(key);
+    if (typeof value === "boolean" &&
+        (normalizedKey.startsWith("has_") || normalizedKey.startsWith("issued_"))) {
+        return false;
+    }
     return SENSITIVE_KEYS.has(normalizedKey) ||
         normalizedKey.endsWith("_secret") ||
         normalizedKey.endsWith("_token");
@@ -41,7 +45,7 @@ function sanitizeLogValue(value) {
     if (!isRecord(value)) {
         return value;
     }
-    const sanitizedEntries = Object.entries(value).map(([key, entryValue]) => ([key, isSensitiveKey(key) ? REDACTED_VALUE : sanitizeLogValue(entryValue)]));
+    const sanitizedEntries = Object.entries(value).map(([key, entryValue]) => ([key, isSensitiveKey(key, entryValue) ? REDACTED_VALUE : sanitizeLogValue(entryValue)]));
     return Object.fromEntries(sanitizedEntries);
 }
 function getDefaultDestination() {

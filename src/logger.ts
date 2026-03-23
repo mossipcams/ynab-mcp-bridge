@@ -26,8 +26,15 @@ function normalizeKey(key: string) {
     .toLowerCase();
 }
 
-function isSensitiveKey(key: string) {
+function isSensitiveKey(key: string, value: unknown) {
   const normalizedKey = normalizeKey(key);
+
+  if (
+    typeof value === "boolean" &&
+    (normalizedKey.startsWith("has_") || normalizedKey.startsWith("issued_"))
+  ) {
+    return false;
+  }
 
   return SENSITIVE_KEYS.has(normalizedKey) ||
     normalizedKey.endsWith("_secret") ||
@@ -51,7 +58,7 @@ function sanitizeLogValue(value: unknown): unknown {
   }
 
   const sanitizedEntries = Object.entries(value).map(([key, entryValue]) => (
-    [key, isSensitiveKey(key) ? REDACTED_VALUE : sanitizeLogValue(entryValue)]
+    [key, isSensitiveKey(key, entryValue) ? REDACTED_VALUE : sanitizeLogValue(entryValue)]
   ));
 
   return Object.fromEntries(sanitizedEntries);
