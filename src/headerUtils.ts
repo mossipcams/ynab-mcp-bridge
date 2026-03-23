@@ -1,4 +1,4 @@
-export function getFirstHeaderValue(value: string | readonly string[] | undefined) {
+export function getFirstHeaderValue(value: string | string[] | undefined) {
   if (typeof value === "string") {
     return value.split(",")[0]?.trim();
   }
