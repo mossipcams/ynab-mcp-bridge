@@ -4,7 +4,6 @@ import { getPackageInfo } from "./packageInfo.js";
 import { attachYnabApiRuntimeContext, createYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
 import * as GetBudgetCleanupSummaryTool from "./tools/GetBudgetCleanupSummaryTool.js";
-import * as GetBudgetRatioSummaryTool from "./tools/GetBudgetRatioSummaryTool.js";
 import * as GetBudgetHealthSummaryTool from "./tools/GetBudgetHealthSummaryTool.js";
 import * as GetCashRunwayTool from "./tools/GetCashRunwayTool.js";
 import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
@@ -608,18 +607,6 @@ const toolRegistrations = [
                 inputSchema: GetCategoryTrendSummaryTool.inputSchema,
                 annotations: READ_ONLY_TOOL_ANNOTATIONS,
             }, executeTool(GetCategoryTrendSummaryTool.execute, api));
-        },
-    },
-    {
-        title: "Get 70/20/10 Summary",
-        name: GetBudgetRatioSummaryTool.name,
-        register: (registrar, api) => {
-            registrar.registerTool(GetBudgetRatioSummaryTool.name, {
-                title: "Get 70/20/10 Summary",
-                description: GetBudgetRatioSummaryTool.description,
-                inputSchema: GetBudgetRatioSummaryTool.inputSchema,
-                annotations: READ_ONLY_TOOL_ANNOTATIONS,
-            }, executeTool(GetBudgetRatioSummaryTool.execute, api));
         },
     },
 ];

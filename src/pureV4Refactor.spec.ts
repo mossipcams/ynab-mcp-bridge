@@ -11,7 +11,6 @@ describe("pure v4 refactor", () => {
       "GetAccountTool.ts",
       "GetBudgetCleanupSummaryTool.ts",
       "GetBudgetHealthSummaryTool.ts",
-      "GetBudgetRatioSummaryTool.ts",
       "GetCashFlowSummaryTool.ts",
       "GetCashRunwayTool.ts",
       "GetCategoryTool.ts",
