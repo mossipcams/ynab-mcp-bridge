@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import { getFirstHeaderValue } from "./headerUtils.js";
+
 type RequestContext = {
   correlationId: string;
   requestId: string;
@@ -13,6 +15,8 @@ const requestContextStorage = new AsyncLocalStorage<RequestContext>();
 const CORRELATION_HEADER = "x-correlation-id";
 const MAX_CORRELATION_ID_LENGTH = 128;
 const VALID_CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
+
+type RequestHeaders = Record<string, string | readonly string[] | undefined>;
 
 function createId() {
   return crypto.randomUUID();
@@ -40,9 +44,8 @@ export function getCorrelationHeaderName() {
   return CORRELATION_HEADER;
 }
 
-export function createRequestContext(headers: Record<string, string | string[] | undefined>): RequestContext {
-  const headerValue = headers[CORRELATION_HEADER];
-  const firstValue = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+export function createRequestContext(headers: RequestHeaders): RequestContext {
+  const firstValue = getFirstHeaderValue(headers[CORRELATION_HEADER]);
 
   return {
     correlationId: normalizeCorrelationId(firstValue) ?? createId(),

@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import type { ShapeOutput, ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import * as ynab from "ynab";
 
 import { assertYnabConfig, type YnabConfig } from "./config.js";
@@ -121,55 +121,71 @@ function registerTool<Input>(
   return tool.name;
 }
 
+function registerSchemaTool<Schema extends ZodRawShapeCompat>(
+  registrar: ToolRegistrar,
+  title: string,
+  tool: {
+    name: string;
+    description: string;
+    inputSchema: Schema;
+    execute: (input: ShapeOutput<Schema>, api: ynab.API) => Promise<CallToolResult>;
+  },
+  api: ynab.API,
+): string {
+  return registerTool(registrar, title, tool, api);
+}
+
 export function registerServerTools(registrar: ToolRegistrar, api: ynab.API): string[] {
-  return [
-    registerTool(registrar, "Get MCP Version", GetMcpVersionTool, api),
-    registerTool(registrar, "Get User", GetUserTool, api),
-    registerTool(registrar, "List Plans", ListPlansTool, api),
-    registerTool(registrar, "Get Plan", GetPlanDetailsTool, api),
-    registerTool(registrar, "Get Plan Settings", GetPlanSettingsTool, api),
-    registerTool(registrar, "Get Plan Month", GetPlanMonthTool, api),
-    registerTool(registrar, "List Plan Months", ListPlanMonthsTool, api),
-    registerTool(registrar, "List Categories", ListPlanCategoriesTool, api),
-    registerTool(registrar, "Get Category", GetCategoryTool, api),
-    registerTool(registrar, "Get Month Category", GetMonthCategoryTool, api),
-    registerTool(registrar, "List Transactions", ListTransactionsTool, api),
-    registerTool(registrar, "Search Transactions", SearchTransactionsTool, api),
-    registerTool(registrar, "Get Transactions By Month", GetTransactionsByMonthTool, api),
-    registerTool(registrar, "Get Transaction", GetTransactionTool, api),
-    registerTool(registrar, "Get Transactions By Account", GetTransactionsByAccountTool, api),
-    registerTool(registrar, "Get Transactions By Category", GetTransactionsByCategoryTool, api),
-    registerTool(registrar, "Get Transactions By Payee", GetTransactionsByPayeeTool, api),
-    registerTool(registrar, "List Scheduled Transactions", ListScheduledTransactionsTool, api),
-    registerTool(registrar, "Get Scheduled Transaction", GetScheduledTransactionTool, api),
-    registerTool(registrar, "List Accounts", ListAccountsTool, api),
-    registerTool(registrar, "Get Account", GetAccountTool, api),
-    registerTool(registrar, "List Payees", ListPayeesTool, api),
-    registerTool(registrar, "Get Payee", GetPayeeTool, api),
-    registerTool(registrar, "List Payee Locations", ListPayeeLocationsTool, api),
-    registerTool(registrar, "Get Payee Location", GetPayeeLocationTool, api),
-    registerTool(registrar, "Get Payee Locations By Payee", GetPayeeLocationsByPayeeTool, api),
-    registerTool(registrar, "Get Money Movements", GetMoneyMovementsTool, api),
-    registerTool(registrar, "Get Money Movements By Month", GetMoneyMovementsByMonthTool, api),
-    registerTool(registrar, "Get Money Movement Groups", GetMoneyMovementGroupsTool, api),
-    registerTool(registrar, "Get Money Movement Groups By Month", GetMoneyMovementGroupsByMonthTool, api),
-    registerTool(registrar, "Get Financial Snapshot", GetFinancialSnapshotTool, api),
-    registerTool(registrar, "Get Financial Health Check", GetFinancialHealthCheckTool, api),
-    registerTool(registrar, "Get Spending Summary", GetSpendingSummaryTool, api),
-    registerTool(registrar, "Get Spending Anomalies", GetSpendingAnomaliesTool, api),
-    registerTool(registrar, "Get Cash Flow Summary", GetCashFlowSummaryTool, api),
-    registerTool(registrar, "Get Cash Runway", GetCashRunwayTool, api),
-    registerTool(registrar, "Get Budget Health Summary", GetBudgetHealthSummaryTool, api),
-    registerTool(registrar, "Get Upcoming Obligations", GetUpcomingObligationsTool, api),
-    registerTool(registrar, "Get Goal Progress Summary", GetGoalProgressSummaryTool, api),
-    registerTool(registrar, "Get Budget Cleanup Summary", GetBudgetCleanupSummaryTool, api),
-    registerTool(registrar, "Get Income Summary", GetIncomeSummaryTool, api),
-    registerTool(registrar, "Get Emergency Fund Coverage", GetEmergencyFundCoverageTool, api),
-    registerTool(registrar, "Get Debt Summary", GetDebtSummaryTool, api),
-    registerTool(registrar, "Get Recurring Expense Summary", GetRecurringExpenseSummaryTool, api),
-    registerTool(registrar, "Get Category Trend Summary", GetCategoryTrendSummaryTool, api),
-    registerTool(registrar, "Get 70/20/10 Summary", GetBudgetRatioSummaryTool, api),
-  ];
+  const registeredToolNames: string[] = [];
+
+  registeredToolNames.push(registerSchemaTool(registrar, "Get MCP Version", GetMcpVersionTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get User", GetUserTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "List Plans", ListPlansTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Plan", GetPlanDetailsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Plan Settings", GetPlanSettingsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Plan Month", GetPlanMonthTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "List Plan Months", ListPlanMonthsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "List Categories", ListPlanCategoriesTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Category", GetCategoryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Month Category", GetMonthCategoryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "List Transactions", ListTransactionsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Search Transactions", SearchTransactionsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Transactions By Month", GetTransactionsByMonthTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Transaction", GetTransactionTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Transactions By Account", GetTransactionsByAccountTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Transactions By Category", GetTransactionsByCategoryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Transactions By Payee", GetTransactionsByPayeeTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "List Scheduled Transactions", ListScheduledTransactionsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Scheduled Transaction", GetScheduledTransactionTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "List Accounts", ListAccountsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Account", GetAccountTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "List Payees", ListPayeesTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Payee", GetPayeeTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "List Payee Locations", ListPayeeLocationsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Payee Location", GetPayeeLocationTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Payee Locations By Payee", GetPayeeLocationsByPayeeTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Money Movements", GetMoneyMovementsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Money Movements By Month", GetMoneyMovementsByMonthTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Money Movement Groups", GetMoneyMovementGroupsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Money Movement Groups By Month", GetMoneyMovementGroupsByMonthTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Financial Snapshot", GetFinancialSnapshotTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Financial Health Check", GetFinancialHealthCheckTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Spending Summary", GetSpendingSummaryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Spending Anomalies", GetSpendingAnomaliesTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Cash Flow Summary", GetCashFlowSummaryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Cash Runway", GetCashRunwayTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Budget Health Summary", GetBudgetHealthSummaryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Upcoming Obligations", GetUpcomingObligationsTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Goal Progress Summary", GetGoalProgressSummaryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Budget Cleanup Summary", GetBudgetCleanupSummaryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Income Summary", GetIncomeSummaryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Emergency Fund Coverage", GetEmergencyFundCoverageTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Debt Summary", GetDebtSummaryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Recurring Expense Summary", GetRecurringExpenseSummaryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get Category Trend Summary", GetCategoryTrendSummaryTool, api));
+  registeredToolNames.push(registerSchemaTool(registrar, "Get 70/20/10 Summary", GetBudgetRatioSummaryTool, api));
+
+  return registeredToolNames;
 }
 
 export function createServer(config: YnabConfig, api = createYnabApi(config)): McpServer {
