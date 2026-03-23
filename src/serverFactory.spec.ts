@@ -19,7 +19,7 @@ describe("createServer", () => {
     });
     const registeredTools = Object.keys((server as any)._registeredTools);
 
-    expect(registeredTools).toHaveLength(46);
+    expect(registeredTools).toHaveLength(45);
     expect(registeredTools).toEqual(
       expect.arrayContaining([
         "ynab_get_mcp_version",
@@ -67,9 +67,9 @@ describe("createServer", () => {
         "ynab_get_debt_summary",
         "ynab_get_recurring_expense_summary",
         "ynab_get_category_trend_summary",
-        "ynab_get_70_20_10_summary",
       ]),
     );
+    expect(registeredTools).not.toContain("ynab_get_70_20_10_summary");
   });
 
   it("registers the toolset through a reusable SDK-native registrar", () => {
@@ -82,7 +82,7 @@ describe("createServer", () => {
       {} as any,
     );
 
-    expect(registeredToolNames).toHaveLength(46);
+    expect(registeredToolNames).toHaveLength(45);
     expect(registeredToolNames).toEqual([
       "ynab_get_mcp_version",
       "ynab_get_user",
@@ -129,9 +129,8 @@ describe("createServer", () => {
       "ynab_get_debt_summary",
       "ynab_get_recurring_expense_summary",
       "ynab_get_category_trend_summary",
-      "ynab_get_70_20_10_summary",
     ]);
-    expect(registerTool).toHaveBeenCalledTimes(46);
+    expect(registerTool).toHaveBeenCalledTimes(45);
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_mcp_version",
       expect.objectContaining({
@@ -147,17 +146,9 @@ describe("createServer", () => {
       }),
       expect.any(Function),
     );
-    expect(registerTool).toHaveBeenCalledWith(
+    expect(registerTool).not.toHaveBeenCalledWith(
       "ynab_get_70_20_10_summary",
-      expect.objectContaining({
-        title: "Get 70/20/10 Summary",
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-          openWorldHint: true,
-        },
-      }),
+      expect.anything(),
       expect.any(Function),
     );
   });

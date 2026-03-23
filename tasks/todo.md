@@ -1,3 +1,56 @@
+# Remove 70/20/10 Tool Plan
+
+## Goal
+
+Remove the `ynab_get_70_20_10_summary` tool from the server registry so it is no longer exposed, and clean up the implementation and coverage that only exist for that tool.
+
+## Constraints And Notes
+
+- Work is isolated in `/Users/matt/Desktop/Projects/ynab-mcp-bridge-remove-70-20-10` on branch `fix/remove-70-20-10-tool` from `origin/main`.
+- The original checkout remains untouched because it had unrelated local changes on a non-`main` branch.
+
+## Tasks
+
+- [x] Task 1: Add a failing registry test that proves the tool is still exposed today
+  Test to write:
+  Update `src/serverFactory.spec.ts` so it fails unless the registered tool count and tool name lists exclude `ynab_get_70_20_10_summary`, and so the explicit registration assertion no longer expects the `Get 70/20/10 Summary` tool metadata.
+  Code to implement:
+  No production code in this task. Only the spec changes needed to make removal expectations explicit.
+  How to verify it works:
+  Run `npm test -- --run src/serverFactory.spec.ts` and show the failure caused by the tool still being registered.
+
+- [x] Task 2: Remove the tool from the server registry and implementation surface
+  Test to write:
+  Reuse the failing expectations from Task 1 as the red test.
+  Code to implement:
+  Remove the `GetBudgetRatioSummaryTool` import and registration from `src/server.ts`, then remove the now-unused implementation file `src/tools/GetBudgetRatioSummaryTool.ts`.
+  How to verify it works:
+  Re-run `npm test -- --run src/serverFactory.spec.ts` and show it passing. Then run `npm run typecheck` to confirm there are no dangling imports or type errors from the removal.
+
+- [x] Task 3: Remove direct tool coverage that no longer applies and verify behavior stays clean
+  Test to write:
+  Update `src/financeAdvancedTools.spec.ts` and `src/pureV4Refactor.spec.ts` by removing expectations that require the `70/20/10` tool.
+  Code to implement:
+  Delete the obsolete spec block and file-list entry, plus any now-unused imports.
+  How to verify it works:
+  Run `npm test -- --run src/financeAdvancedTools.spec.ts src/pureV4Refactor.spec.ts` and then `npm run build` if the targeted tests and typecheck pass, to confirm the repo still compiles without the removed tool.
+
+## Review Bar
+
+- The tool name is absent from the runtime registry.
+- No source file imports or references the removed tool in `src/`.
+- Targeted tests, typecheck, and build provide proof that the removal is complete.
+
+## Results
+
+- Removed the `ynab_get_70_20_10_summary` registry entry and deleted the corresponding source tool module.
+- Removed obsolete spec coverage and tool-file inventory expectations that referenced the deleted tool.
+- Verified with:
+  `npm test -- --run src/serverFactory.spec.ts`
+  `npm run typecheck`
+  `npm test -- --run src/financeAdvancedTools.spec.ts src/pureV4Refactor.spec.ts`
+  `npm run build`
+
 # Type Discipline Implementation Plan
 
 ## Goal
