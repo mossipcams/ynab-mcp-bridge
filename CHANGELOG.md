@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.12.1...ynab-mcp-bridge-v0.13.0) (2026-03-24)
+
+
+### Features
+
+* add finance trajectory and monthly review tools ([#154](https://github.com/mossipcams/ynab-mcp-bridge/issues/154)) ([8965fee](https://github.com/mossipcams/ynab-mcp-bridge/commit/8965fee7c4237baa49a08e76cd30bc1593d22c52))
+
+
+### Bug Fixes
+
+* correct finance tool calculation semantics ([#156](https://github.com/mossipcams/ynab-mcp-bridge/issues/156)) ([dd7d681](https://github.com/mossipcams/ynab-mcp-bridge/commit/dd7d6810897b98a5b6183ddbe09f88213a9d04f3))
+* normalize tool month and projection behavior ([#153](https://github.com/mossipcams/ynab-mcp-bridge/issues/153)) ([07275a7](https://github.com/mossipcams/ynab-mcp-bridge/commit/07275a7c406a7fe606eb5090bbf08f8f799ed42b))
+* require PR cleanup for local worktrees ([#157](https://github.com/mossipcams/ynab-mcp-bridge/issues/157)) ([855d204](https://github.com/mossipcams/ynab-mcp-bridge/commit/855d20450ddf0bb514ca457d2c9cb59503e6916c))
+
 ## [0.12.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.12.0...ynab-mcp-bridge-v0.12.1) (2026-03-23)
 
 
