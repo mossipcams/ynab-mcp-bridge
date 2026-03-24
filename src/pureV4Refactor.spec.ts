@@ -27,6 +27,8 @@ describe("pure v4 refactor", () => {
       "GetMoneyMovementsByMonthTool.ts",
       "GetMoneyMovementsTool.ts",
       "GetMonthCategoryTool.ts",
+      "GetMonthlyReviewTool.ts",
+      "GetNetWorthTrajectoryTool.ts",
       "GetPayeeLocationTool.ts",
       "GetPayeeLocationsByPayeeTool.ts",
       "GetPayeeTool.ts",
