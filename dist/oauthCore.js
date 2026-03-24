@@ -1,6 +1,33 @@
 import { InvalidGrantError, InvalidRequestError, InvalidScopeError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { getEffectiveOAuthScopes } from "./config.js";
 import { parseAuthorizationRequest, parseClientMetadata } from "./oauthSchemas.js";
+function inferCompatibilityProfileFromClientMetadata(client) {
+    const redirectUriHosts = (client.redirect_uris ?? [])
+        .map((redirectUri) => {
+        try {
+            return new URL(redirectUri).hostname.toLowerCase();
+        }
+        catch {
+            return undefined;
+        }
+    })
+        .filter((host) => typeof host === "string");
+    const clientName = client.client_name?.toLowerCase();
+    if (redirectUriHosts.some((host) => host === "claude.ai" || host.endsWith(".claude.ai")) ||
+        clientName?.includes("claude")) {
+        return "claude";
+    }
+    if (redirectUriHosts.some((host) => host === "codex.openai.com" || host.includes("codex")) ||
+        clientName?.includes("codex")) {
+        return "codex";
+    }
+    if (redirectUriHosts.some((host) => host === "chatgpt.com" || host.endsWith(".chatgpt.com")) ||
+        clientName?.includes("chatgpt") ||
+        clientName?.includes("openai-mcp")) {
+        return "chatgpt";
+    }
+    return "generic";
+}
 function clampExpiresIn(expiresIn) {
     return Math.max(60, Math.min(expiresIn ?? 3600, 3600));
 }
@@ -45,6 +72,7 @@ export function createOAuthCore({ config, dependencies, store }) {
             client_id_issued_at: Math.floor(dependencies.now() / 1000),
         };
         store.saveClient(registeredClient);
+        store.saveClientCompatibilityProfile(registeredClient.client_id, inferCompatibilityProfileFromClientMetadata(client));
         return registeredClient;
     }
     async function startAuthorization(client, params) {
@@ -52,6 +80,7 @@ export function createOAuthCore({ config, dependencies, store }) {
         assertRegisteredRedirectUri(client, parsedParams.redirectUri);
         const scopes = getEffectiveOAuthScopes(parsedParams.scopes && parsedParams.scopes.length > 0 ? parsedParams.scopes : config.defaultScopes);
         const resource = parsedParams.resource?.href ?? config.defaultResource;
+        const compatibilityProfileId = store.getClientCompatibilityProfile(client.client_id);
         if (store.isClientApproved({
             clientId: client.client_id,
             resource,
@@ -60,6 +89,7 @@ export function createOAuthCore({ config, dependencies, store }) {
             const upstreamState = dependencies.createId();
             store.saveGrant({
                 clientId: client.client_id,
+                compatibilityProfileId,
                 codeChallenge: parsedParams.codeChallenge,
                 grantId: upstreamState,
                 pendingAuthorization: {
@@ -84,6 +114,7 @@ export function createOAuthCore({ config, dependencies, store }) {
         const grant = {
             clientId: client.client_id,
             clientName: client.client_name,
+            compatibilityProfileId,
             codeChallenge: parsedParams.codeChallenge,
             consent: {
                 challenge: consentChallenge,
@@ -301,6 +332,7 @@ export function createOAuthCore({ config, dependencies, store }) {
         exchangeRefreshToken,
         getAuthorizationCodeChallenge,
         getClient: store.getClient,
+        getClientCompatibilityProfile: store.getClientCompatibilityProfile,
         handleCallback,
         registerClient,
         startAuthorization,

@@ -2891,6 +2891,122 @@ describe("startHttpServer", () => {
     ))).toBeTruthy();
   });
 
+  it("reuses a persisted oauth client profile on token and authenticated mcp requests when later hints are weak", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        client_name: "ChatGPT Web",
+        grant_types: ["authorization_code", "refresh_token"],
+        redirect_uris: ["https://chatgpt.com/oauth/callback"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+
+    expect(registrationResponse.status).toBe(201);
+    const registration = await registrationResponse.json() as {
+      client_id: string;
+    };
+    const codeVerifier = "chatgpt-profile-persist-123456789";
+    const codeChallenge = createCodeChallenge(codeVerifier);
+
+    const authorizeResponse = await fetch(new URL(
+      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://chatgpt.com/oauth/callback")}&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+    });
+
+    expect(authorizeResponse.status).toBe(200);
+    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
+      origin: "null",
+    });
+    expect(consentResponse.status).toBe(302);
+    const upstreamState = new URL(consentResponse.headers.get("location")!, httpServer.url).searchParams.get("state");
+
+    const callbackResponse = await fetch(new URL(
+      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+    });
+    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
+
+    const tokenResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        code: localAuthorizationCode!,
+        code_verifier: codeVerifier,
+        grant_type: "authorization_code",
+        redirect_uri: "https://chatgpt.com/oauth/callback",
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(tokenResponse.status).toBe(200);
+    const tokens = await tokenResponse.json() as {
+      access_token: string;
+    };
+
+    const mcpResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${tokens.access_token}`,
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(mcpResponse.status).toBe(200);
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/token" &&
+      details.method === "POST" &&
+      details.profileId === "chatgpt" &&
+      details.reason === "oauth-client-profile:chatgpt"
+    ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.jsonRpcMethod === "tools/list" &&
+      details.authClientId === registration.client_id &&
+      details.profileId === "chatgpt" &&
+      details.profileReason === "oauth-client-profile:chatgpt"
+    ))).toBeTruthy();
+  });
+
   it("logs ChatGPT for OpenAI-style OAuth discovery and broker routes when chatgpt user agents drive the flow", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const metadataUserAgent = "chatgpt-web/1.0";

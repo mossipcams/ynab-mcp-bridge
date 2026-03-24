@@ -320,6 +320,7 @@ export function createOAuthBroker(config) {
     return {
         callbackPath: config.callbackPath,
         callbackUrl,
+        getClientCompatibilityProfile: core.getClientCompatibilityProfile,
         getIssuerUrl: () => new URL(issuerUrl.href),
         handleConsent,
         provider,

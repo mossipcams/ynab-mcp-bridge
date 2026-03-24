@@ -103,6 +103,7 @@ function getTokenResponseDebugDetails(tokens: OAuthTokens) {
 export function createOAuthBroker(config: OAuthAuthConfig): {
   callbackPath: string;
   callbackUrl: string;
+  getClientCompatibilityProfile: (clientId: string) => ReturnType<typeof core.getClientCompatibilityProfile>;
   getIssuerUrl: () => URL;
   handleConsent: RequestHandler;
   provider: OAuthServerProvider;
@@ -369,6 +370,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
   return {
     callbackPath: config.callbackPath,
     callbackUrl,
+    getClientCompatibilityProfile: core.getClientCompatibilityProfile,
     getIssuerUrl: () => new URL(issuerUrl.href),
     handleConsent,
     provider,
