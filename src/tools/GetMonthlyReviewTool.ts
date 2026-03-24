@@ -58,16 +58,11 @@ export async function execute(
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const baselineMonthIds = previousMonths(month, baselineMonths);
-      const responses = await Promise.all([
+      const [transactionsResponse, baselineResponses, currentMonthResponse] = await Promise.all([
         api.transactions.getTransactions(planId, month, undefined, undefined),
-        ...baselineMonthIds.map((baselineMonth) => api.months.getPlanMonth(planId, baselineMonth)),
+        Promise.all(baselineMonthIds.map((baselineMonth) => api.months.getPlanMonth(planId, baselineMonth))),
         api.months.getPlanMonth(planId, month),
       ]);
-
-      const transactionsResponse = responses[0] as Awaited<ReturnType<typeof api.transactions.getTransactions>>;
-      const monthResponses = responses.slice(1) as Array<Awaited<ReturnType<typeof api.months.getPlanMonth>>>;
-      const baselineResponses = monthResponses.slice(0, baselineMonthIds.length);
-      const currentMonthResponse = monthResponses[monthResponses.length - 1];
 
       if (!currentMonthResponse) {
         throw new Error("Month review requires a current month response.");
