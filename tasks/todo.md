@@ -604,3 +604,419 @@ This first slice will enforce the discipline in config and shared/public types, 
 - Passed: `npm run test -- --run src/httpServer.spec.ts`
 - Attempted: focused ESLint, `npm run build`, and broader TypeScript verification with increased heap.
 - Remaining caveat: full `eslint`/`tsc`/`build` runs in this environment remained extremely slow and previously hit Node heap limits before producing a final clean exit, so full static verification is not yet proven locally.
+## Reliability Suite Expansion Plan
+
+### Goal
+
+Upgrade the new reliability testing work from a small local smoke probe into a more thorough reliability suite that can:
+
+- validate a quick smoke run locally
+- establish repeatable baseline performance
+- exercise higher load and short spikes
+- run longer soak-style checks for degradation over time
+- enforce pass/fail thresholds using latency percentiles and error-rate budgets
+- emit machine-readable results for regression comparisons
+
+### Research Notes
+
+- Google SRE says load tests are invaluable for both reliability and capacity planning and are required for most launches because overload behavior is hard to predict from first principles.
+  Source: https://sre.google/sre-book/reliable-product-launches/
+- Grafana k6 recommends always creating smoke tests first, then average-load tests for baseline comparisons, and separately running stress, spike, and soak tests according to goal.
+  Sources:
+  https://grafana.com/docs/k6/latest/testing-guides/automated-performance-testing/
+  https://grafana.com/load-testing/types-of-load-testing/
+- Grafana k6 thresholds are the pass/fail criteria, should codify SLO-style goals, and can drive non-zero exits and early aborts.
+  Source: https://grafana.com/docs/k6/latest/using-k6/thresholds/
+- Microsoft guidance recommends defining measurable thresholds, using percentiles such as P95 and P99 instead of averages alone, creating realistic baseline traffic, and repeating baseline validation after changes.
+  Sources:
+  https://learn.microsoft.com/en-us/azure/well-architected/performance-efficiency/performance-targets
+  https://learn.microsoft.com/en-us/azure/architecture/guide/testing/mission-critical-deployment-testing
+- Microsoft load-testing guidance also calls out warmup periods, multiple concurrency levels, and realistic traffic/query mixes.
+  Source: https://learn.microsoft.com/en-us/azure/databricks/vector-search/vector-search-endpoint-load-test
+
+### Constraints And Notes
+
+- Work is isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-reliability-script` on branch `feat/reliability-script` from `origin/main`.
+- The current worktree already contains the new lightweight reliability probe implementation and its tests. The expansion should build on that work rather than replace it blindly.
+- Repo rules require TDD for code changes, one task at a time, with a stop after each task.
+- The existing `npm run reliability:http` command is a good smoke-level probe, but it is not sufficient for stress, spike, or soak workloads by itself.
+- A homegrown Node loop is acceptable for smoke checks and local regression probes, but “test a lot” is better served by a dedicated load-testing engine and explicit thresholds.
+- The safest architecture is:
+  - keep the current Node-based command as a fast smoke probe
+  - add a dedicated load-test suite for heavier profiles instead of trying to stretch the smoke runner into a full load generator
+
+### Assumptions
+
+- The best next step is to add a k6-based HTTP reliability suite alongside the existing smoke probe, not to replace the smoke probe.
+- The suite should support at least these profiles:
+  - `smoke`
+  - `baseline`
+  - `stress`
+  - `spike`
+  - `soak`
+- The first implementation can target authless local HTTP or a provided local/staging URL.
+- Thresholds should be explicit and profile-specific, including:
+  - max error rate
+  - p95 latency
+  - p99 latency
+  - optional abort-on-fail for heavier profiles
+- The scenario mix should exercise at least:
+  - `initialize`
+  - `tools/list`
+  - a lightweight tool call such as `ynab_get_mcp_version`
+- The suite should emit both a concise console summary and a machine-readable artifact for regression tracking.
+
+### Tasks
+
+- [ ] Task 1: Add failing coverage for reliability profile definitions and threshold contracts
+  Test to write:
+  Add focused red tests under `src/` proving a new reliability profile module defines distinct `smoke`, `baseline`, `stress`, `spike`, and `soak` profiles with:
+  explicit duration or iteration settings,
+  explicit concurrency/load settings,
+  and explicit pass/fail threshold targets for error rate and percentile latency.
+  The tests should fail unless the profile metadata is concrete and machine-readable rather than implied by prose.
+  Code to implement:
+  No production code in this task. Only failing tests that pin the profile and threshold contract.
+  How to verify it works:
+  Run a targeted Vitest command for the new profile spec and show the failures proving the richer profile model does not exist yet.
+
+- [ ] Task 2: Implement reliability profile and threshold configuration
+  Test to write:
+  Reuse the red tests from Task 1.
+  Code to implement:
+  Add a TypeScript module that defines the reliability profiles, threshold schema, and parsing helpers for selecting a profile from CLI inputs.
+  Keep the current smoke runner compatible by mapping it to the new `smoke` profile.
+  How to verify it works:
+  Re-run the targeted Vitest command and show the tests turning green.
+
+- [ ] Task 3: Add failing coverage for machine-readable summaries and regression-friendly output
+  Test to write:
+  Extend the reliability specs so they fail unless the suite can emit:
+  per-profile summary metadata,
+  attempts/successes/failures,
+  p50/p95/p99 latency,
+  threshold pass/fail states,
+  and structured failure samples grouped by operation.
+  Include assertions for a JSON artifact format suitable for CI storage and later baseline comparison.
+  Code to implement:
+  No production code in this task. Only failing tests for the output contract.
+  How to verify it works:
+  Run the targeted Vitest command and show the failures proving the richer reporting contract does not exist yet.
+
+- [ ] Task 4: Implement structured reporting and artifact output
+  Test to write:
+  Reuse the red tests from Task 3.
+  Code to implement:
+  Extend the current summary code so it can emit:
+  human-readable console output for local runs,
+  JSON result files for CI or manual diffing,
+  and explicit threshold evaluation results per profile.
+  Keep the local smoke path concise while making deeper results machine-readable.
+  How to verify it works:
+  Re-run the targeted Vitest command and show the tests passing.
+  Then run the local smoke command and confirm both console and JSON outputs work.
+
+- [ ] Task 5: Add failing coverage for a dedicated load-test suite entrypoint
+  Test to write:
+  Add a red spec that fails unless the repo exposes a dedicated load-test suite interface with:
+  profile selection,
+  target URL selection,
+  optional warmup,
+  and explicit exit behavior based on thresholds.
+  The tests should pin the config handoff and command naming, not the internals of the external load generator.
+  Code to implement:
+  No production code in this task. Only failing tests that define the load-suite entrypoint contract.
+  How to verify it works:
+  Run the targeted Vitest command and show the failure proving the dedicated load-test suite does not exist yet.
+
+- [ ] Task 6: Implement a dedicated heavier-weight load suite
+  Test to write:
+  Reuse the failing specs from Task 5.
+  Code to implement:
+  Add a dedicated load-testing suite using a standard engine such as k6 for the heavier `baseline`, `stress`, `spike`, and `soak` profiles.
+  The suite should:
+  reuse the same operation mix,
+  encode thresholds as pass/fail criteria,
+  support warmup where appropriate,
+  and target either a started local server or a provided URL.
+  Keep the existing Node command as the fast smoke test and add separate npm commands or profile flags for the heavier suite.
+  How to verify it works:
+  Re-run the targeted tests and show them passing.
+  Then run the smoke profile and one heavier profile with intentionally small local settings as the smallest meaningful proof.
+
+- [ ] Task 7: Add failing coverage for baseline and comparison workflows
+  Test to write:
+  Extend the reliability specs so they fail unless a baseline comparison flow can:
+  load a prior JSON artifact,
+  compare key metrics such as error rate, p95, and p99,
+  and fail when regression exceeds configured tolerances.
+  Code to implement:
+  No production code in this task. Only failing tests for baseline comparison semantics.
+  How to verify it works:
+  Run the targeted Vitest command and show the failure proving regression comparison is not implemented yet.
+
+- [ ] Task 8: Implement baseline comparison and document best-practice workflows
+  Test to write:
+  Reuse the failing specs from Task 7.
+  Code to implement:
+  Add support for comparing a new run with a stored baseline artifact and surfacing regressions clearly in console and JSON outputs.
+  Document recommended usage in the README, including:
+  smoke on local changes,
+  baseline on a stable environment,
+  stress/spike before high-risk releases,
+  and soak on a scheduled cadence.
+  How to verify it works:
+  Re-run the targeted tests and show them passing.
+  Then run typecheck and the relevant local reliability commands.
+
+### Review Bar
+
+- The quick smoke command remains simple and local-friendly.
+- Heavier profiles use explicit, named workloads instead of ad hoc “run more requests” knobs.
+- Pass/fail logic is based on error rate and percentile thresholds, not averages alone.
+- The suite produces machine-readable artifacts that enable later baseline comparison.
+- The docs make it clear when to use smoke, baseline, stress, spike, and soak profiles.
+
+## Reliability Edge-Case Plan
+
+### Goal
+
+Add focused edge-case coverage to the new reliability suite so it is resilient around degenerate inputs, threshold boundaries, artifact compatibility, and dry-run/CLI failure handling.
+
+### Constraints And Notes
+
+- Work is isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-reliability-script` on branch `feat/reliability-script` from `origin/main`.
+- Repo rules require TDD for code changes, one task at a time, with a stop after the plan and approval before implementation.
+- The existing reliability specs cover the main happy paths and a few failing paths, but not many boundary conditions.
+- The repo rules say not to modify files in a `tests/` directory unless explicitly asked to. The relevant specs live under `src/`, so targeted spec additions there are allowed.
+
+### Assumptions
+
+- The highest-value edge cases are:
+  - zero-result summary behavior
+  - threshold equality boundaries
+  - repeated failure grouping and default error messages
+  - invalid or partially missing artifact/baseline inputs
+  - unsupported profile and missing argument handling
+  - dry-run/load-suite behavior when output paths or external runner responses are unusual
+- We can add these without broadening the feature set further.
+
+### Tasks
+
+- [ ] Task 1: Add failing coverage for runner and artifact edge cases
+  Test to write:
+  Extend `src/reliabilityRunner.spec.ts` and `src/reliabilityArtifact.spec.ts` with red cases that prove:
+  an empty run produces zeroed metrics without throwing,
+  threshold equality counts as pass rather than fail,
+  repeated failures on one operation are grouped with unique sample messages,
+  missing `errorMessage` values fall back to the default text,
+  and baseline comparison ignores non-regressing metrics even when other metrics regress.
+  Code to implement:
+  No production code in this task. Only failing specs that pin the edge-case contract for summaries and artifacts.
+  How to verify it works:
+  Run `npx vitest run src/reliabilityRunner.spec.ts src/reliabilityArtifact.spec.ts` and show the failures proving these edge behaviors are not fully pinned yet.
+
+- [ ] Task 2: Implement runner and artifact edge-case handling
+  Test to write:
+  Reuse the failing specs from Task 1.
+  Code to implement:
+  Tighten the summary and artifact code only where needed so the new edge cases pass without weakening any existing assertions.
+  Keep the changes minimal and avoid changing the public shape unless a spec explicitly requires it.
+  How to verify it works:
+  Re-run `npx vitest run src/reliabilityRunner.spec.ts src/reliabilityArtifact.spec.ts` and show the tests turning green.
+
+- [ ] Task 3: Add failing coverage for HTTP CLI and load-suite edge cases
+  Test to write:
+  Extend `src/reliabilityHttp.spec.ts`, `src/reliabilityProfiles.spec.ts`, and `src/reliabilityLoadSuite.spec.ts` with red cases that prove:
+  unsupported profile names fail clearly,
+  invalid numeric flags are rejected,
+  baseline artifact reads fail with actionable errors,
+  smoke JSON artifact writing behaves correctly when there are no failures,
+  load-suite dry run rejects unsupported `smoke` profile usage,
+  and non-zero external runner exits still preserve deterministic CLI behavior.
+  Code to implement:
+  No production code in this task. Only failing specs that define the CLI and entrypoint edge cases.
+  How to verify it works:
+  Run `npx vitest run src/reliabilityHttp.spec.ts src/reliabilityProfiles.spec.ts src/reliabilityLoadSuite.spec.ts` and show the failures proving the edge cases are not fully covered yet.
+
+- [ ] Task 4: Implement HTTP CLI and load-suite edge-case handling
+  Test to write:
+  Reuse the failing specs from Task 3.
+  Code to implement:
+  Tighten argument parsing, baseline artifact handling, and load-suite guardrails so the red cases pass.
+  Keep the smoke path concise and preserve the current command behavior unless the new spec requires a clearer error path.
+  How to verify it works:
+  Re-run `npx vitest run src/reliabilityHttp.spec.ts src/reliabilityProfiles.spec.ts src/reliabilityLoadSuite.spec.ts` and show the tests passing.
+
+- [ ] Task 5: Final verification of the expanded reliability edge-case coverage
+  Test to write:
+  No new tests in this task. Use the approved red/green specs as proof.
+  Code to implement:
+  No new production behavior unless verification exposes a tightly related issue. If it does, stop and re-plan before expanding scope.
+  How to verify it works:
+  Run:
+  `npx vitest run src/reliabilityRunner.spec.ts src/reliabilityHttp.spec.ts src/reliabilityProfiles.spec.ts src/reliabilityArtifact.spec.ts src/reliabilityLoadSuite.spec.ts`
+  and
+  `npm run typecheck:all`
+  Then run the local smoke command plus the load-suite dry run again as the smallest meaningful end-to-end proof.
+
+### Review Bar
+
+- Degenerate and boundary-case inputs do not crash the reliability suite.
+- CLI errors are explicit and deterministic.
+- Failure grouping and artifact output remain stable under repeated or partially missing failure data.
+- Baseline comparison remains strict about regressions without inventing false positives.
+
+## K6 Runtime Compatibility Fix Plan
+
+- [ ] Task 1: Add failing coverage for real k6 scenario compatibility
+  Test to write:
+  Extend `src/reliabilityLoadSuite.spec.ts` with a red assertion that fails unless the generated `ramping-vus` script excludes arrival-rate-only fields such as `preAllocatedVUs` and `maxVUs`.
+  Code to implement:
+  No production code in this task. Only the failing spec that captures the real runtime incompatibility exposed by `k6 v1.6.1`.
+  How to verify it works:
+  Run `npx vitest run src/reliabilityLoadSuite.spec.ts` and show the failure.
+
+- [ ] Task 2: Implement the k6 scenario fix
+  Test to write:
+  Reuse the red spec from Task 1.
+  Code to implement:
+  Update `src/reliabilityLoadSuite.ts` so the generated `ramping-vus` scenario uses only fields supported by that executor while preserving the warmup and steady-state stages.
+  How to verify it works:
+  Re-run `npx vitest run src/reliabilityLoadSuite.spec.ts` and show it passing.
+
+- [ ] Task 3: Re-run the real baseline load profile
+  Test to write:
+  No new automated tests in this task. Use the real `k6` execution as the proof.
+  Code to implement:
+  No new code unless the live run exposes another scoped compatibility bug. If it does, stop and re-plan before broadening the change.
+  How to verify it works:
+  Start the local HTTP bridge, run:
+  `npm run reliability:load -- --profile baseline --url http://127.0.0.1:3000/mcp --json-out artifacts/reliability/baseline-live.json`
+  and capture the pass/fail result plus the exported artifact path.
+
+## MCP Session Reuse Plan
+
+### Goal
+
+Stop rebuilding the MCP server and transport on every `/mcp` request so ChatGPT can reuse a server-side session instead of showing a full reconnect-style "Connecting to app" experience for each tool call.
+
+### Constraints And Notes
+
+- The current HTTP path in `src/httpServer.ts` always creates a fresh `createServer(config)` plus `StreamableHTTPServerTransport` for every request and only validates `Mcp-Session-Id`; it does not reuse it.
+- OAuth should remain token-based and request-authenticated. The goal is not to skip bearer verification, but to reuse the MCP transport/session after auth succeeds.
+- The MCP SDK already has streamable HTTP transport support, so the cleanest change is likely to add a small session registry around the existing transport rather than inventing a parallel protocol path.
+- ChatGPT and other clients may omit or vary session headers in discovery/auth flows, so the session-reuse behavior should be scoped to `/mcp` POST handling only.
+
+### Updated Design Note
+
+- The original plan assumed we needed to build session reuse entirely ourselves.
+- During implementation prep, I verified the MCP SDK's `StreamableHTTPServerTransport` already supports stateful sessions when `sessionIdGenerator` is set.
+- That means the cleaner first pass is to let the SDK issue and validate `Mcp-Session-Id` values, then add bounded lifecycle management around those managed transports on our side.
+
+### Assumptions
+
+- The server should switch from stateless transport creation to SDK-backed stateful sessions by providing a `sessionIdGenerator`.
+- Clients like ChatGPT should then receive `Mcp-Session-Id` on initialize and reuse it on later `/mcp` requests.
+- A bounded in-memory registry is still useful for idle expiry and shutdown cleanup, but it should wrap the SDK session behavior instead of replacing it.
+- Malformed multi-value session headers should still be rejected, and bearer auth must still run before the MCP request is handed off.
+
+### Tasks
+
+- [x] Task 1: Add failing coverage for SDK-backed stateful MCP sessions
+  Test to write:
+  Extend `src/httpServer.spec.ts` with red cases proving that:
+  initialize returns an `Mcp-Session-Id`,
+  a follow-up `/mcp` request with that session id succeeds without creating a fresh transport,
+  and requests with unknown session ids are rejected according to the SDK stateful transport contract.
+  Code to implement:
+  No production code in this task. Only the failing specs that pin the intended reuse and fallback contract.
+  How to verify it works:
+  Run `npx vitest run src/httpServer.spec.ts` with a focused filter or targeted assertions and show the failures proving session reuse is not implemented yet.
+  Result:
+  Added red coverage in `src/httpServer.spec.ts` proving initialize had no session id and unknown session ids were incorrectly accepted before implementation.
+  Verified red with:
+  `npx vitest run src/httpServer.spec.ts -t "issues an MCP session id on initialize and accepts follow-up requests with that session id|rejects unknown MCP session ids for non-initialize requests"`
+
+- [x] Task 2: Implement SDK-backed stateful session reuse
+  Test to write:
+  Reuse the failing specs from Task 1.
+  Code to implement:
+  Update `src/httpServer.ts` so managed MCP requests are created in stateful mode with SDK-issued session ids and reused across later requests.
+  Preserve the current invalid multi-value session-header rejection and keep the change local to the HTTP transport layer.
+  How to verify it works:
+  Re-run the targeted `src/httpServer.spec.ts` coverage and show the reuse tests passing.
+  Result:
+  Updated `src/httpServer.ts` to create stateful SDK transports for initialize requests, reuse managed sessions by `Mcp-Session-Id`, and reject unknown session ids with the SDK-compatible `404/-32001` contract while preserving one-shot stateless POST handling when no session header is present.
+  Verified green with:
+  `npx vitest run src/httpServer.spec.ts -t "issues an MCP session id on initialize and accepts follow-up requests with that session id|rejects unknown MCP session ids for non-initialize requests"`
+
+- [x] Task 3: Add failing coverage for session cleanup and expiry
+  Test to write:
+  Extend `src/httpServer.spec.ts` with red cases proving that:
+  expired idle sessions are cleaned up,
+  reused sessions survive normal request completion,
+  and server shutdown closes all tracked managed sessions.
+  Code to implement:
+  No production code in this task. Only failing specs that define cleanup expectations.
+  How to verify it works:
+  Run the targeted `src/httpServer.spec.ts` coverage and show the cleanup tests failing before implementation.
+  Result:
+  Added red tests for idle session expiry and explicit `DELETE /mcp` session termination in `src/httpServer.spec.ts`.
+  Verified red with:
+  `npx vitest run src/httpServer.spec.ts -t "expires idle MCP sessions and rejects follow-up requests after the timeout|terminates an issued MCP session with DELETE and rejects later requests for that session"`
+
+- [x] Task 4: Implement cleanup, expiry, and close-all behavior
+  Test to write:
+  Reuse the failing specs from Task 3.
+  Code to implement:
+  Extend the session registry in `src/httpServer.ts` with:
+  idle timeout tracking,
+  eviction of expired sessions,
+  and full cleanup during `startHttpServer(...).close()`.
+  Use a small, testable abstraction rather than scattering timers across the request path.
+  How to verify it works:
+  Re-run the targeted `src/httpServer.spec.ts` cases and show them passing.
+  Result:
+  Added a bounded in-memory session registry with idle timers, explicit `DELETE` session termination, transport-close cleanup, and full tracked-session shutdown cleanup in `src/httpServer.ts`.
+  Verified green with:
+  `npx vitest run src/httpServer.spec.ts -t "expires idle MCP sessions and rejects follow-up requests after the timeout|terminates an issued MCP session with DELETE and rejects later requests for that session"`
+
+- [x] Task 5: Add a focused ChatGPT-oriented regression test
+  Test to write:
+  Add a red or focused spec in `src/httpServer.spec.ts` proving that repeated authenticated ChatGPT-style `/mcp` requests can reuse the issued session id instead of staying permanently sessionless.
+  Code to implement:
+  Reuse the Task 2/4 implementation; only add code if the new test reveals a specific gap.
+  How to verify it works:
+  Run the targeted `src/httpServer.spec.ts` case and show it passing.
+  Result:
+  Added `reuses one issued session across repeated ChatGPT-style tool calls` in `src/httpServer.spec.ts` and updated older sessionless assumptions to the new SDK-backed session contract.
+  Verified green as part of:
+  `npx vitest run src/httpServer.spec.ts`
+
+- [x] Task 6: Final verification of session reuse behavior
+  Test to write:
+  No new tests in this task. Use the approved red/green specs as proof.
+  Code to implement:
+  No new production behavior unless verification reveals a tightly related issue. If it does, stop and re-plan before broadening scope.
+  How to verify it works:
+  Run at minimum:
+  `npx vitest run src/httpServer.spec.ts`
+  and
+  `npm run typecheck:all`
+  Then do one small manual proof by exercising repeated `/mcp` requests and confirming session reuse in logs or instrumentation.
+  Result:
+  Final verification passed with:
+  `npx vitest run src/httpServer.spec.ts`
+  `npm run typecheck:all`
+  `npm run build`
+  plus a built-server manual proof that returned one issued `Mcp-Session-Id` and reused it successfully for both `tools/list` and `tools/call`, with `cleanup: false` handoff logs on both follow-up requests.
+
+### Review Bar
+
+- Initialize responses issue `Mcp-Session-Id` in stateful mode.
+- Repeated `/mcp` requests with the same session id reuse one managed MCP session.
+- Unknown or malformed session ids follow the SDK contract cleanly.
+- Session cleanup is bounded and deterministic.
+- OAuth and bearer verification remain request-scoped and are not bypassed.
+- The implementation reduces reconnect/setup churn without introducing cross-session leakage.

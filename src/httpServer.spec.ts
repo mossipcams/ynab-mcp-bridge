@@ -325,7 +325,7 @@ describe("startHttpServer", () => {
       details.jsonRpcMethod === "initialize" &&
       details.userAgent === "chatgpt" &&
       details.sessionId === undefined &&
-      details.cleanup === true
+      details.cleanup === false
     ))).toBeTruthy();
     expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
       details.path === "/mcp" &&
@@ -835,7 +835,7 @@ describe("startHttpServer", () => {
     });
 
     expect(initializeResponse.status).toBe(200);
-    expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
+    expect(initializeResponse.headers.get("mcp-session-id")).toBeTruthy();
 
     const streamResponse = await fetch(httpServer.url, {
       headers: {
@@ -846,10 +846,10 @@ describe("startHttpServer", () => {
     });
 
     expect(streamResponse.status).toBe(405);
-    expect(streamResponse.headers.get("allow")).toBe("POST");
+    expect(streamResponse.headers.get("allow")).toBe("POST, DELETE");
   });
 
-  it("returns a JSON initialize response without creating an MCP session", async () => {
+  it("returns a JSON initialize response with an MCP session id", async () => {
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
@@ -884,7 +884,7 @@ describe("startHttpServer", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
-    expect(response.headers.get("mcp-session-id")).toBeNull();
+    expect(response.headers.get("mcp-session-id")).toBeTruthy();
     await expect(response.json()).resolves.toMatchObject({
       jsonrpc: "2.0",
       id: 1,
@@ -927,6 +927,247 @@ describe("startHttpServer", () => {
     await expect(response.text()).resolves.toContain("\"content\"");
   });
 
+  it("issues an MCP session id on initialize and accepts follow-up requests with that session id", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "stateful-session-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(initializeResponse.status).toBe(200);
+    const sessionId = initializeResponse.headers.get("mcp-session-id");
+    expect(sessionId).toBeTruthy();
+
+    const followUpResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(followUpResponse.status).toBe(200);
+    expect(followUpResponse.headers.get("mcp-session-id")).toBe(sessionId);
+    await expect(followUpResponse.text()).resolves.toContain("\"ynab_get_mcp_version\"");
+  });
+
+  it("rejects unknown MCP session ids for non-initialize requests", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "Mcp-Session-Id": "unknown-session-id",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32001,
+        message: "Session not found",
+      },
+      id: null,
+    });
+  });
+
+  it("expires idle MCP sessions and rejects follow-up requests after the timeout", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+      sessionIdleTimeoutMs: 25,
+    } as Parameters<typeof startHttpServer>[0]);
+    cleanups.push(() => httpServer.close());
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "idle-expiry-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    const sessionId = initializeResponse.headers.get("mcp-session-id");
+    expect(sessionId).toBeTruthy();
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 60);
+    });
+
+    const followUpResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(followUpResponse.status).toBe(404);
+    await expect(followUpResponse.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32001,
+        message: "Session not found",
+      },
+      id: null,
+    });
+  });
+
+  it("terminates an issued MCP session with DELETE and rejects later requests for that session", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "delete-session-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    const sessionId = initializeResponse.headers.get("mcp-session-id");
+    expect(sessionId).toBeTruthy();
+
+    const deleteResponse = await fetch(httpServer.url, {
+      method: "DELETE",
+      headers: {
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
+      },
+    });
+
+    expect(deleteResponse.status).toBe(200);
+
+    const followUpResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(followUpResponse.status).toBe(404);
+    await expect(followUpResponse.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32001,
+        message: "Session not found",
+      },
+      id: null,
+    });
+  });
+
   it("keeps authless probing and MCP transport signals consistent for remote clients", async () => {
     const httpServer = await startHttpServer({
       ynab,
@@ -956,7 +1197,7 @@ describe("startHttpServer", () => {
     });
 
     expect(getResponse.status).toBe(405);
-    expect(getResponse.headers.get("allow")).toBe("POST");
+    expect(getResponse.headers.get("allow")).toBe("POST, DELETE");
     await expect(getResponse.json()).resolves.toEqual({
       jsonrpc: "2.0",
       error: {
@@ -990,7 +1231,7 @@ describe("startHttpServer", () => {
     });
 
     expect(initializeResponse.status).toBe(200);
-    expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
+    expect(initializeResponse.headers.get("mcp-session-id")).toBeTruthy();
     expect(initializeResponse.headers.get("content-type")).toContain("application/json");
   });
 
@@ -1016,7 +1257,7 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(405);
-    expect(response.headers.get("allow")).toBe("POST");
+    expect(response.headers.get("allow")).toBe("POST, DELETE");
     await expect(response.json()).resolves.toEqual({
       jsonrpc: "2.0",
       error: {
@@ -1141,7 +1382,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("ignores stale session headers on initialize and later requests", async () => {
+  it("issues a fresh session on initialize even when stale session headers are supplied", async () => {
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
@@ -1176,7 +1417,9 @@ describe("startHttpServer", () => {
     });
 
     expect(initializeResponse.status).toBe(200);
-    expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
+    const issuedSessionId = initializeResponse.headers.get("mcp-session-id");
+    expect(issuedSessionId).toBeTruthy();
+    expect(issuedSessionId).not.toBe("stale-session-id");
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -1195,9 +1438,15 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("mcp-session-id")).toBeNull();
-    await expect(response.text()).resolves.toContain("\"name\":\"ynab_get_mcp_version\"");
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32001,
+        message: "Session not found",
+      },
+      id: null,
+    });
   });
 
   it("returns 404 for non-MCP paths", async () => {
@@ -1240,7 +1489,7 @@ describe("startHttpServer", () => {
     const firstTransport = new StreamableHTTPClientTransport(new URL(httpServer.url));
 
     await firstClient.connect(firstTransport);
-    expect(firstTransport.sessionId).toBeUndefined();
+    expect(firstTransport.sessionId).toBeTruthy();
 
     const secondClient = new Client({
       name: "ynab-mcp-bridge-test-2",
@@ -1250,10 +1499,113 @@ describe("startHttpServer", () => {
 
     await secondClient.connect(secondTransport);
 
-    expect(secondTransport.sessionId).toBeUndefined();
+    expect(secondTransport.sessionId).toBeTruthy();
+    expect(secondTransport.sessionId).not.toBe(firstTransport.sessionId);
 
     await firstClient.close();
     await secondClient.close();
+  });
+
+  it("reuses one issued session across repeated ChatGPT-style tool calls", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "User-Agent": "openai-mcp/1.0.0",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "chatgpt-reuse-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    const sessionId = initializeResponse.headers.get("mcp-session-id");
+    expect(sessionId).toBeTruthy();
+
+    const listResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "Mcp-Session-Id": sessionId!,
+        "User-Agent": "openai-mcp/1.0.0",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(listResponse.status).toBe(200);
+
+    const callResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "Mcp-Session-Id": sessionId!,
+        "User-Agent": "openai-mcp/1.0.0",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(callResponse.status).toBe(200);
+
+    const chatgptSessionHandshakes = consoleErrorSpy.mock.calls.filter((call) => {
+      const structuredEntry = getStructuredLogEntry(call);
+
+      if (!structuredEntry) {
+        return false;
+      }
+
+      return structuredEntry.scope === "http" &&
+        structuredEntry.event === "transport.handoff" &&
+        structuredEntry.userAgent === "chatgpt" &&
+        structuredEntry.sessionId === sessionId &&
+        structuredEntry.cleanup === false &&
+        (structuredEntry.jsonRpcMethod === "tools/list" || structuredEntry.jsonRpcMethod === "tools/call");
+    });
+
+    expect(chatgptSessionHandshakes).toHaveLength(2);
   });
 
   it("logs the JSON-RPC method for a sessionless tools/call request", async () => {

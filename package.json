@@ -36,6 +36,8 @@
     "start": "node dist/index.js",
     "start:http": "node dist/index.js --transport http",
     "start:stdio": "node dist/index.js --transport stdio",
+    "reliability:http": "npm run build && node dist/reliabilityHttpCli.js",
+    "reliability:load": "npm run build && node dist/reliabilityLoadCli.js",
     "debug": "npm run build && npx @modelcontextprotocol/inspector dist/index.js",
     "test": "vitest",
     "test:ci": "mkdir -p artifacts/test-results && vitest run --reporter=default --reporter=junit --outputFile.junit=./artifacts/test-results/vitest-junit.xml",

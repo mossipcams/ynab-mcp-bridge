@@ -200,6 +200,64 @@ Start over HTTP explicitly:
 node dist/index.js --transport http --host 127.0.0.1 --port 3000 --path /mcp
 ```
 
+Run the local HTTP reliability probe:
+
+```bash
+npm run reliability:http -- --requests 10 --concurrency 2
+```
+
+The reliability command uses a bounded authless HTTP scenario that:
+
+- starts a local bridge unless you pass `--url`
+- runs `initialize`, `tools/list`, and `ynab_get_mcp_version`
+- prints attempts, failures, error rate, and latency percentiles
+- exits non-zero when the error rate is above `--max-error-rate`
+
+Useful flags:
+
+- `--requests <n>`: number of reliability sequences to run. Each sequence performs three MCP operations.
+- `--concurrency <n>`: number of sequences to run in parallel.
+- `--max-error-rate <0..1>`: fail the run if the observed error rate exceeds this threshold.
+- `--url <http-url>`: target an already running bridge instead of starting a local one.
+- `--host`, `--port`, `--path`: override the local server bind address when `--url` is not used.
+
+Write a machine-readable smoke artifact and compare against a prior run:
+
+```bash
+npm run reliability:http -- \
+  --requests 10 \
+  --concurrency 2 \
+  --json-out artifacts/reliability/smoke.json \
+  --baseline-artifact artifacts/reliability/baseline-smoke.json
+```
+
+Run the heavier reliability suite in dry-run mode:
+
+```bash
+npm run reliability:load -- \
+  --profile baseline \
+  --url http://127.0.0.1:3000/mcp \
+  --json-out artifacts/reliability/baseline.json \
+  --dry-run
+```
+
+The dedicated load suite is designed for named profiles instead of ad hoc request counts:
+
+- `smoke`: fast local regression check using the built-in Node probe
+- `baseline`: repeatable average-load run for comparisons
+- `stress`: higher sustained load to expose overload behavior
+- `spike`: sudden burst behavior
+- `soak`: longer steady-state run to catch degradation over time
+
+Recommended workflow:
+
+- run `smoke` on local changes
+- record `baseline` artifacts on a stable environment
+- run `stress` and `spike` before higher-risk releases
+- run `soak` on a scheduled cadence or before major rollout events
+
+Thresholds should be evaluated with error rate and latency percentiles such as `p95` and `p99`, not averages alone. The smoke command and artifact comparison flow already follow that model, and the load-suite dry run prints the exact thresholds that would be enforced by the heavier external runner.
+
 Allow specific browser origins:
 
 ```bash

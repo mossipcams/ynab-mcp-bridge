@@ -1,5 +1,6 @@
 import type { Server as NodeHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { randomUUID } from "node:crypto";
 
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
 import { decodeJwt } from "jose";
@@ -39,6 +40,7 @@ type HttpServerOptions = {
   host?: string | undefined;
   path?: string | undefined;
   port?: number | undefined;
+  sessionIdleTimeoutMs?: number | undefined;
   ynab: YnabConfig;
 };
 
@@ -50,10 +52,15 @@ type StartedHttpServer = {
   url: string;
 };
 
-const HTTP_ALLOWED_METHODS = ["POST"] as const;
+const HTTP_ALLOWED_METHODS = ["POST", "DELETE"] as const;
 type ManagedRequest = {
   close: () => Promise<void>;
   transport: StreamableHTTPServerTransport;
+};
+
+type StatefulSessionEntry = {
+  idleTimeout: NodeJS.Timeout | undefined;
+  managedRequest: ManagedRequest;
 };
 
 type RequestResolution =
@@ -61,6 +68,12 @@ type RequestResolution =
       cleanup?: (() => Promise<void>) | undefined;
       managedRequest: ManagedRequest;
       status: "ready";
+    }
+  | {
+      status: "session-required";
+    }
+  | {
+      status: "session-not-found";
     }
   | {
       status: "invalid-session-header";
@@ -393,28 +406,72 @@ function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return isRecord(error) && typeof error["code"] === "string";
 }
 
-async function createManagedRequest(config: YnabConfig) {
+async function createManagedRequest(
+  config: YnabConfig,
+  options: {
+    onSessionClosed?: ((sessionId: string) => void | Promise<void>) | undefined;
+    onSessionInitialized?: ((sessionId: string, managedRequest: ManagedRequest) => void | Promise<void>) | undefined;
+    onTransportClosed?: ((managedRequest: ManagedRequest) => void | Promise<void>) | undefined;
+    stateful?: boolean | undefined;
+  } = {},
+) {
   const mcpServer = createServer(config);
-  const nodeTransport = new StreamableHTTPServerTransport({
+  const transportOptions: ConstructorParameters<typeof StreamableHTTPServerTransport>[0] = {
     enableJsonResponse: true,
-  });
+  };
+
+  if (options.stateful) {
+    transportOptions.onsessioninitialized = async (sessionId) => {
+      await options.onSessionInitialized?.(sessionId, managedRequest);
+    };
+    transportOptions.sessionIdGenerator = () => randomUUID();
+
+    if (options.onSessionClosed) {
+      transportOptions.onsessionclosed = options.onSessionClosed;
+    }
+  }
+
+  const nodeTransport = new StreamableHTTPServerTransport(transportOptions);
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore The MCP SDK transport implementation matches the runtime contract,
   // but exactOptionalPropertyTypes rejects its optional callback fields.
   await mcpServer.connect(nodeTransport);
 
-  return {
+  let closed = false;
+  const managedRequest = {
     transport: nodeTransport,
     close: async () => {
+      if (closed) {
+        return;
+      }
+
+      closed = true;
       await nodeTransport.close();
       await mcpServer.close();
     },
   } satisfies ManagedRequest;
+
+  nodeTransport.onclose = () => {
+    void options.onTransportClosed?.(managedRequest);
+
+    if (!closed) {
+      closed = true;
+      void mcpServer.close();
+    }
+  };
+
+  return managedRequest;
 }
 
 async function resolveRequest(
   req: Request,
-  createRequest: () => Promise<ManagedRequest>,
+  options: {
+    createStatefulRequest: () => Promise<ManagedRequest>;
+    createStatelessRequest: () => Promise<ManagedRequest>;
+    sessions: Map<string, StatefulSessionEntry>;
+    touchSession: (sessionId: string) => void;
+  },
+  parsedBody: unknown,
 ): Promise<RequestResolution> {
   if (hasMultipleSessionHeaderValues(req)) {
     return {
@@ -422,10 +479,39 @@ async function resolveRequest(
     };
   }
 
-  const managedRequest = await createRequest();
+  const sessionId = getSessionId(req);
+  const isInitializeRequest = getInitializeParams(parsedBody) !== undefined;
+
+  if (sessionId) {
+    const existingSession = options.sessions.get(sessionId);
+
+    if (existingSession) {
+      options.touchSession(sessionId);
+      return {
+        managedRequest: existingSession.managedRequest,
+        status: "ready",
+      };
+    }
+
+    if (!isInitializeRequest) {
+      return {
+        status: "session-not-found",
+      };
+    }
+  }
+
+  if (req.method === "DELETE") {
+    return {
+      status: "session-required",
+    };
+  }
+
+  const managedRequest = isInitializeRequest
+    ? await options.createStatefulRequest()
+    : await options.createStatelessRequest();
 
   return {
-    cleanup: managedRequest.close,
+    cleanup: isInitializeRequest ? undefined : managedRequest.close,
     managedRequest,
     status: "ready",
   };
@@ -437,6 +523,12 @@ function writeRequestResolution(res: Response, resolution: Exclude<RequestResolu
   status: "ready";
 }>) {
   switch (resolution.status) {
+    case "session-required":
+      writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header is required");
+      return;
+    case "session-not-found":
+      writeJsonRpcError(res, 404, -32001, "Session not found");
+      return;
     case "invalid-session-header":
       writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single value");
       return;
@@ -474,6 +566,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const host = options.host ?? "127.0.0.1";
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
+  const sessionIdleTimeoutMs = options.sessionIdleTimeoutMs ?? 5 * 60_000;
   const ynab = assertYnabConfig(options.ynab);
 
   if (auth.mode === "oauth") {
@@ -496,6 +589,55 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   const app = express();
   const jsonParser = express.json();
+  const managedSessions = new Map<string, StatefulSessionEntry>();
+
+  function clearSessionIdleTimeout(entry: StatefulSessionEntry) {
+    if (entry.idleTimeout) {
+      clearTimeout(entry.idleTimeout);
+      entry.idleTimeout = undefined;
+    }
+  }
+
+  function removeManagedSession(sessionId: string) {
+    const entry = managedSessions.get(sessionId);
+
+    if (!entry) {
+      return undefined;
+    }
+
+    clearSessionIdleTimeout(entry);
+    managedSessions.delete(sessionId);
+    return entry;
+  }
+
+  async function closeManagedSession(sessionId: string) {
+    const entry = removeManagedSession(sessionId);
+
+    if (!entry) {
+      return;
+    }
+
+    await entry.managedRequest.close();
+  }
+
+  function touchManagedSession(sessionId: string) {
+    const entry = managedSessions.get(sessionId);
+
+    if (!entry) {
+      return;
+    }
+
+    clearSessionIdleTimeout(entry);
+
+    if (sessionIdleTimeoutMs <= 0) {
+      return;
+    }
+
+    entry.idleTimeout = setTimeout(() => {
+      void closeManagedSession(sessionId);
+    }, sessionIdleTimeoutMs);
+    entry.idleTimeout.unref?.();
+  }
 
   function getRequestAuthDebugOptions(req: Pick<Request, "path" | "url">) {
     const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
@@ -620,7 +762,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   if (auth.mode === "oauth") {
     app.use((req, res, next) => {
-      if (getRequestPath(req) !== path || req.method !== "POST") {
+      if (getRequestPath(req) !== path || (req.method !== "POST" && req.method !== "DELETE")) {
         next();
         return;
       }
@@ -650,7 +792,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       return;
     }
 
-    if (req.method !== "POST") {
+    if (req.method !== "POST" && req.method !== "DELETE") {
       logHttpDebug("request.rejected", {
         ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         reason: "method-not-allowed",
@@ -662,7 +804,34 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     const parsedBody: unknown = req.body;
     const resolution = await resolveRequest(
       req,
-      () => createManagedRequest(ynab),
+      {
+        createStatefulRequest: () => createManagedRequest(ynab, {
+          onSessionClosed: async (sessionId) => {
+            removeManagedSession(sessionId);
+          },
+          onSessionInitialized: async (sessionId, managedRequest) => {
+            managedSessions.set(sessionId, {
+              idleTimeout: undefined,
+              managedRequest,
+            });
+            touchManagedSession(sessionId);
+          },
+          onTransportClosed: (managedRequest) => {
+            const sessionId = managedRequest.transport.sessionId;
+
+            if (!sessionId) {
+              return;
+            }
+
+            removeManagedSession(sessionId);
+          },
+          stateful: true,
+        }),
+        createStatelessRequest: () => createManagedRequest(ynab),
+        sessions: managedSessions,
+        touchSession: touchManagedSession,
+      },
+      parsedBody,
     );
 
     if (resolution.status !== "ready") {
@@ -777,6 +946,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       }
 
       closed = true;
+      await Promise.all(Array.from(managedSessions.keys(), async (sessionId) => {
+        await closeManagedSession(sessionId);
+      }));
       await closeNodeServer(server);
     },
   };

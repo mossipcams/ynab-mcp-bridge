@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { compactObject } from "./financeToolUtils.js";
+import { compactObject, formatMilliunits } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_account";
 export const description = "Gets a single account by ID. Returns a compact projection by default, with an explicit full-view opt-in.";
@@ -24,7 +24,7 @@ export async function execute(input, api) {
                 type: account.type,
                 on_budget: account.on_budget,
                 closed: account.closed,
-                balance: account.balance,
+                balance: account.balance == null ? undefined : formatMilliunits(account.balance),
             }),
         });
     }

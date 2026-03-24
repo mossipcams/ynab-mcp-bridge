@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { compactRisk, daysUntil, formatAmount, formatPercent, getTodayIsoDate, liquidCashMilliunits, netWorthMilliunits, recentMonths, totalDebtMilliunits, spreadPercent, } from "./financialDiagnosticsUtils.js";
+import { compactRisk, formatAmount, formatPercent, getTodayIsoDate, liquidCashMilliunits, netWorthMilliunits, recentMonths, totalDebtMilliunits, spreadPercent, } from "./financialDiagnosticsUtils.js";
+import { isTransferTransaction, isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
+import { expandScheduledOccurrences } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_financial_health_check";
 export const description = "Builds a compact first-pass health check across cash, debt, budget stress, cleanup backlog, and near-term obligations.";
@@ -14,7 +16,7 @@ function risk(code, severity, penalty) {
 }
 export async function execute(input, api) {
     try {
-        const month = input.month ?? "current";
+        const month = normalizeMonthInput(input.month);
         const asOfDate = input.asOfDate ?? getTodayIsoDate();
         const topN = input.topN ?? 5;
         return await withResolvedPlan(input.planId, api, async (planId) => {
@@ -33,19 +35,15 @@ export async function execute(input, api) {
             const netWorth = netWorthMilliunits(accounts);
             const overspentCategories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden && category.balance < 0);
             const underfundedCategories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden && (category.goal_under_funded ?? 0) > 0);
-            const transactions = transactionsResponse.data.transactions.filter((transaction) => !transaction.deleted);
+            const transactions = transactionsResponse.data.transactions.filter((transaction) => !transaction.deleted
+                && !isTransferTransaction(transaction)
+                && (typeof transaction.date !== "string" || isWithinMonthRange(transaction.date, monthKey, monthKey)));
             const uncategorizedTransactionCount = transactions.filter((transaction) => !transaction.category_id).length;
             const unapprovedTransactionCount = transactions.filter((transaction) => !transaction.approved).length;
             const unclearedTransactionCount = transactions.filter((transaction) => transaction.cleared === "uncleared").length;
             const recentIncomeMonths = recentMonths(monthsResponse.data.months, monthKey, 3);
             const incomeVolatility = spreadPercent(recentIncomeMonths.map((entry) => entry.income ?? 0));
-            const upcoming30dNet = scheduledResponse.data.scheduled_transactions
-                .filter((transaction) => !transaction.deleted)
-                .filter((transaction) => {
-                const dueInDays = daysUntil(asOfDate, transaction.date_next);
-                return dueInDays >= 0 && dueInDays <= 30;
-            })
-                .reduce((sum, transaction) => sum + transaction.amount, 0);
+            const upcoming30dNet = expandScheduledOccurrences(scheduledResponse.data.scheduled_transactions.filter((transaction) => !transaction.deleted), asOfDate, 30).reduce((sum, transaction) => sum + transaction.amount, 0);
             const risks = [];
             if (upcoming30dNet < -liquidCash) {
                 risks.push(risk("cash_shortfall", "high", 20));
