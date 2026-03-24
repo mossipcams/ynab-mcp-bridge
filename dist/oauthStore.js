@@ -57,6 +57,7 @@ function createEmptyState() {
     return {
         approvals: [],
         clients: {},
+        clientProfiles: {},
         grants: {},
         version: 2,
     };
@@ -74,6 +75,15 @@ function parseClients(value) {
         return {};
     }
     return fromRecordEntries(Object.entries(value).filter((entry) => isOAuthClientInformationFull(entry[1])));
+}
+function parseClientProfiles(value) {
+    if (!isRecord(value)) {
+        return {};
+    }
+    return fromRecordEntries(Object.entries(value).filter((entry) => (entry[1] === "chatgpt" ||
+        entry[1] === "claude" ||
+        entry[1] === "codex" ||
+        entry[1] === "generic")));
 }
 // This legacy persistence parser intentionally validates several optional grant steps in one place.
 // eslint-disable-next-line sonarjs/cognitive-complexity
@@ -99,6 +109,12 @@ function parseGrantRecord(value) {
         ...(isAuthorizationCodeStep(value["authorizationCode"]) ? { authorizationCode: value["authorizationCode"] } : {}),
         clientId,
         ...(typeof value["clientName"] === "string" ? { clientName: value["clientName"] } : {}),
+        ...(value["compatibilityProfileId"] === "chatgpt" ||
+            value["compatibilityProfileId"] === "claude" ||
+            value["compatibilityProfileId"] === "codex" ||
+            value["compatibilityProfileId"] === "generic"
+            ? { compatibilityProfileId: value["compatibilityProfileId"] }
+            : {}),
         codeChallenge,
         ...(isConsentStep(value["consent"]) ? { consent: value["consent"] } : {}),
         grantId,
@@ -297,6 +313,7 @@ function migrateLegacyState(parsed) {
     return {
         approvals: parseApprovals(parsed.approvals),
         clients: parseClients(parsed.clients),
+        clientProfiles: {},
         grants,
         version: 2,
     };
@@ -329,6 +346,7 @@ function loadState(storePath) {
             return {
                 approvals: parseApprovals(parsed["approvals"]),
                 clients: parseClients(parsed["clients"]),
+                clientProfiles: parseClientProfiles(parsed["clientProfiles"]),
                 grants: parseGrants(parsed["grants"]),
                 version: 2,
             };
@@ -496,6 +514,9 @@ export function createOAuthStore(storePath) {
         getClient(clientId) {
             return state.clients[clientId];
         },
+        getClientCompatibilityProfile(clientId) {
+            return state.clientProfiles[clientId];
+        },
         getGrant(grantId) {
             const grant = state.grants[grantId];
             if (!grant) {
@@ -565,6 +586,16 @@ export function createOAuthStore(storePath) {
                 clients: {
                     ...state.clients,
                     [client.client_id]: client,
+                },
+            };
+            persist();
+        },
+        saveClientCompatibilityProfile(clientId, profileId) {
+            state = {
+                ...state,
+                clientProfiles: {
+                    ...state.clientProfiles,
+                    [clientId]: profileId,
                 },
             };
             persist();

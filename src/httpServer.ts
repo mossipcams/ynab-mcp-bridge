@@ -325,6 +325,19 @@ function getInitializeParams(parsedBody: unknown) {
   } satisfies InitializeParamsLike;
 }
 
+function getBodyStringValue(body: unknown, key: string) {
+  if (!isRecord(body)) {
+    return undefined;
+  }
+
+  const value = body[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function getPersistedOAuthProfileReason(profileId: ClientProfileId) {
+  return `oauth-client-profile:${profileId}`;
+}
+
 function reconcileResolvedProfile(
   req: Pick<Request, "method" | "path" | "url">,
   locals: Record<string, unknown>,
@@ -589,6 +602,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
   const app = express();
   const jsonParser = express.json();
+  const urlencodedParser = express.urlencoded({ extended: false });
   const managedSessions = new Map<string, StatefulSessionEntry>();
 
   function clearSessionIdleTimeout(entry: StatefulSessionEntry) {
@@ -655,8 +669,33 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     next();
   });
 
+  if (auth.mode === "oauth") {
+    app.use((req, res, next) => {
+      if (getRequestPath(req) !== "/token" || req.method !== "POST") {
+        next();
+        return;
+      }
+
+      urlencodedParser(req, res, next);
+    });
+  }
+
   app.use((req, res, next) => {
-    const detectedProfile = detectClientProfile(toClientProfileRequestContext(req));
+    const requestProfile = detectClientProfile(toClientProfileRequestContext(req));
+    const tokenClientId = auth.mode === "oauth" &&
+      getRequestPath(req) === "/token" &&
+      req.method === "POST"
+      ? getBodyStringValue(req.body, "client_id")
+      : undefined;
+    const persistedProfileId = auth.mode === "oauth" && tokenClientId
+      ? mcpAuthModule?.getClientCompatibilityProfile(tokenClientId)
+      : undefined;
+    const detectedProfile = persistedProfileId && requestProfile.profileId === "generic"
+      ? {
+          profileId: persistedProfileId,
+          reason: getPersistedOAuthProfileReason(persistedProfileId),
+        }
+      : requestProfile;
 
     setResolvedClientProfile(res.locals, detectedProfile);
     logClientProfileEvent("profile.detected", {
@@ -783,6 +822,41 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       });
 
       mcpAuthModule!.authMiddleware(req, res, next);
+    });
+
+    app.use((req, res, next) => {
+      if (getRequestPath(req) !== path || req.method !== "POST" || !req.auth?.clientId) {
+        next();
+        return;
+      }
+
+      const persistedProfileId = mcpAuthModule!.getClientCompatibilityProfile(req.auth.clientId);
+
+      if (!persistedProfileId) {
+        next();
+        return;
+      }
+
+      const persistedProfile = {
+        profileId: persistedProfileId,
+        reason: getPersistedOAuthProfileReason(persistedProfileId),
+      };
+      const resolvedProfile = getResolvedClientProfile(res.locals);
+
+      if (
+        resolvedProfile?.profileId !== persistedProfile.profileId ||
+        resolvedProfile.reason !== persistedProfile.reason
+      ) {
+        setResolvedClientProfile(res.locals, persistedProfile);
+        logClientProfileEvent("profile.detected", {
+          method: req.method ?? "GET",
+          path: getRequestPath(req),
+          profileId: persistedProfile.profileId,
+          reason: persistedProfile.reason,
+        });
+      }
+
+      next();
     });
   }
 

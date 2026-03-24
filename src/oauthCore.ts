@@ -5,6 +5,7 @@ import {
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
+import type { ClientProfileId } from "./clientProfiles/types.js";
 import { getEffectiveOAuthScopes } from "./config.js";
 import type { OAuthGrant } from "./oauthGrant.js";
 import { parseAuthorizationRequest, parseClientMetadata } from "./oauthSchemas.js";
@@ -28,11 +29,13 @@ type OAuthCoreStore = {
   deleteGrant: (grantId: string) => void;
   getAuthorizationCodeGrant: (code: string) => OAuthGrant | undefined;
   getClient: (clientId: string) => OAuthClientInformationFull | undefined;
+  getClientCompatibilityProfile: (clientId: string) => ClientProfileId | undefined;
   getPendingAuthorizationGrant: (stateId: string) => OAuthGrant | undefined;
   getPendingConsentGrant: (consentId: string) => OAuthGrant | undefined;
   getRefreshTokenGrant: (refreshToken: string) => OAuthGrant | undefined;
   isClientApproved: (record: { clientId: string; resource: string; scopes: string[] }) => boolean;
   saveClient: (client: OAuthClientInformationFull) => void;
+  saveClientCompatibilityProfile: (clientId: string, profileId: ClientProfileId) => void;
   saveGrant: (grant: OAuthGrant) => void;
 };
 
@@ -82,6 +85,39 @@ type CallbackInput = {
   errorDescription?: string | undefined;
   upstreamState: string;
 };
+
+function inferCompatibilityProfileFromClientMetadata(
+  client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">,
+): ClientProfileId {
+  const redirectUriHosts = (client.redirect_uris ?? [])
+    .map((redirectUri) => {
+      try {
+        return new URL(redirectUri).hostname.toLowerCase();
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((host): host is string => typeof host === "string");
+  const clientName = client.client_name?.toLowerCase();
+
+  if (redirectUriHosts.some((host) => host === "claude.ai" || host.endsWith(".claude.ai")) ||
+      clientName?.includes("claude")) {
+    return "claude";
+  }
+
+  if (redirectUriHosts.some((host) => host === "codex.openai.com" || host.includes("codex")) ||
+      clientName?.includes("codex")) {
+    return "codex";
+  }
+
+  if (redirectUriHosts.some((host) => host === "chatgpt.com" || host.endsWith(".chatgpt.com")) ||
+      clientName?.includes("chatgpt") ||
+      clientName?.includes("openai-mcp")) {
+    return "chatgpt";
+  }
+
+  return "generic";
+}
 
 function clampExpiresIn(expiresIn: number | undefined) {
   return Math.max(60, Math.min(expiresIn ?? 3600, 3600));
@@ -139,6 +175,10 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     };
 
     store.saveClient(registeredClient);
+    store.saveClientCompatibilityProfile(
+      registeredClient.client_id,
+      inferCompatibilityProfileFromClientMetadata(client),
+    );
     return registeredClient;
   }
 
@@ -150,6 +190,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       parsedParams.scopes && parsedParams.scopes.length > 0 ? parsedParams.scopes : config.defaultScopes,
     );
     const resource = parsedParams.resource?.href ?? config.defaultResource;
+    const compatibilityProfileId = store.getClientCompatibilityProfile(client.client_id);
 
     if (store.isClientApproved({
       clientId: client.client_id,
@@ -159,6 +200,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       const upstreamState = dependencies.createId();
       store.saveGrant({
         clientId: client.client_id,
+        compatibilityProfileId,
         codeChallenge: parsedParams.codeChallenge,
         grantId: upstreamState,
         pendingAuthorization: {
@@ -185,6 +227,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     const grant: OAuthGrant = {
       clientId: client.client_id,
       clientName: client.client_name,
+      compatibilityProfileId,
       codeChallenge: parsedParams.codeChallenge,
       consent: {
         challenge: consentChallenge,
@@ -457,6 +500,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     exchangeRefreshToken,
     getAuthorizationCodeChallenge,
     getClient: store.getClient,
+    getClientCompatibilityProfile: store.getClientCompatibilityProfile,
     handleCallback,
     registerClient,
     startAuthorization,

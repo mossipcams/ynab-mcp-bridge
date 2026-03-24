@@ -2,12 +2,14 @@ import { InvalidGrantError, InvalidRequestError } from "@modelcontextprotocol/sd
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { describe, expect, it } from "vitest";
 
+import type { ClientProfileId } from "./clientProfiles/types.js";
 import { createOAuthCore } from "./oauthCore.js";
 import type { OAuthGrant } from "./oauthGrant.js";
 
 describe("createOAuthCore", () => {
   function createStore() {
     const clients = new Map<string, OAuthClientInformationFull>();
+    const clientProfiles = new Map<string, ClientProfileId>();
     const approvals: Array<{ clientId: string; resource: string; scopes: string[] }> = [];
     const grants = new Map<string, OAuthGrant>();
 
@@ -31,6 +33,9 @@ describe("createOAuthCore", () => {
       getClient(clientId: string) {
         return clients.get(clientId);
       },
+      getClientCompatibilityProfile(clientId: string) {
+        return clientProfiles.get(clientId);
+      },
       getPendingAuthorizationGrant(stateId: string) {
         return findGrant((grant) => grant.pendingAuthorization?.stateId === stateId);
       },
@@ -50,12 +55,16 @@ describe("createOAuthCore", () => {
       saveClient(client: OAuthClientInformationFull) {
         clients.set(client.client_id, client);
       },
+      saveClientCompatibilityProfile(clientId: string, profileId: ClientProfileId) {
+        clientProfiles.set(clientId, profileId);
+      },
       saveGrant(grant: OAuthGrant) {
         grants.set(grant.grantId, grant);
       },
       state: {
         approvals,
         clients,
+        clientProfiles,
         grants,
       },
     };
@@ -438,5 +447,81 @@ describe("createOAuthCore", () => {
       resource: new URL("https://mcp.example.com/mcp"),
       scopes: ["openid", "profile"],
     })).rejects.toThrow("redirect_uri is required.");
+  });
+
+  it("carries a stored compatibility profile across grant rotation and refresh lookup", async () => {
+    const { core, store } = createCore();
+    const client = await core.registerClient({
+      client_name: "ChatGPT Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://chatgpt.com/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+
+    store.saveClientCompatibilityProfile(client.client_id, "chatgpt");
+
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://chatgpt.com/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    expect(store.state.grants.get(consentResult.consentChallenge)).toMatchObject({
+      compatibilityProfileId: "chatgpt",
+    });
+
+    const approvalResult = await core.approveConsent(consentResult.consentChallenge, "approve");
+
+    if (approvalResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const upstreamState = new URL(approvalResult.location).searchParams.get("state");
+    expect(store.getPendingAuthorizationGrant(upstreamState!)).toMatchObject({
+      compatibilityProfileId: "chatgpt",
+    });
+
+    const callbackResult = await core.handleCallback({
+      code: "upstream-code-123",
+      upstreamState: upstreamState!,
+    });
+
+    if (callbackResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const authorizationCode = new URL(callbackResult.location).searchParams.get("code");
+    expect(store.getAuthorizationCodeGrant(authorizationCode!)).toMatchObject({
+      compatibilityProfileId: "chatgpt",
+    });
+
+    const initialTokens = await core.exchangeAuthorizationCode(
+      client,
+      authorizationCode!,
+      "https://chatgpt.com/oauth/callback",
+      new URL("https://mcp.example.com/mcp"),
+    );
+
+    expect(store.getRefreshTokenGrant(initialTokens.refresh_token!)).toMatchObject({
+      compatibilityProfileId: "chatgpt",
+    });
+
+    const refreshedTokens = await core.exchangeRefreshToken(
+      client,
+      initialTokens.refresh_token!,
+      ["openid", "profile"],
+      new URL("https://mcp.example.com/mcp"),
+    );
+
+    expect(store.getRefreshTokenGrant(refreshedTokens.refresh_token!)).toMatchObject({
+      compatibilityProfileId: "chatgpt",
+    });
   });
 });

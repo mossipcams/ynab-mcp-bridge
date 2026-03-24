@@ -4,6 +4,7 @@ import path from "node:path";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
+import type { ClientProfileId } from "./clientProfiles/types.js";
 import {
   getGrantExpiry,
   hasActiveGrantStep,
@@ -59,6 +60,7 @@ type LegacyPersistedOAuthState = {
 type PersistedOAuthState = {
   approvals: ApprovalRecord[];
   clients: Record<string, OAuthClientInformationFull>;
+  clientProfiles: Record<string, ClientProfileId>;
   grants: Record<string, OAuthGrant>;
   version: 2;
 };
@@ -132,6 +134,7 @@ function createEmptyState(): PersistedOAuthState {
   return {
     approvals: [],
     clients: {},
+    clientProfiles: {},
     grants: {},
     version: 2,
   };
@@ -156,6 +159,21 @@ function parseClients(value: unknown): Record<string, OAuthClientInformationFull
     Object.entries(value).filter(
       (entry): entry is [string, OAuthClientInformationFull] => isOAuthClientInformationFull(entry[1]),
     ),
+  );
+}
+
+function parseClientProfiles(value: unknown): Record<string, ClientProfileId> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return fromRecordEntries(
+    Object.entries(value).filter((entry): entry is [string, ClientProfileId] => (
+      entry[1] === "chatgpt" ||
+      entry[1] === "claude" ||
+      entry[1] === "codex" ||
+      entry[1] === "generic"
+    )),
   );
 }
 
@@ -188,6 +206,12 @@ function parseGrantRecord(value: unknown): OAuthGrant | undefined {
     ...(isAuthorizationCodeStep(value["authorizationCode"]) ? { authorizationCode: value["authorizationCode"] } : {}),
     clientId,
     ...(typeof value["clientName"] === "string" ? { clientName: value["clientName"] } : {}),
+    ...(value["compatibilityProfileId"] === "chatgpt" ||
+        value["compatibilityProfileId"] === "claude" ||
+        value["compatibilityProfileId"] === "codex" ||
+        value["compatibilityProfileId"] === "generic"
+      ? { compatibilityProfileId: value["compatibilityProfileId"] }
+      : {}),
     codeChallenge,
     ...(isConsentStep(value["consent"]) ? { consent: value["consent"] } : {}),
     grantId,
@@ -439,6 +463,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
   return {
     approvals: parseApprovals(parsed.approvals),
     clients: parseClients(parsed.clients),
+    clientProfiles: {},
     grants,
     version: 2,
   };
@@ -480,6 +505,7 @@ function loadState(storePath: string | undefined): PersistedOAuthState {
       return {
         approvals: parseApprovals(parsed["approvals"]),
         clients: parseClients(parsed["clients"]),
+        clientProfiles: parseClientProfiles(parsed["clientProfiles"]),
         grants: parseGrants(parsed["grants"]),
         version: 2,
       };
@@ -675,6 +701,9 @@ export function createOAuthStore(storePath: string | undefined) {
     getClient(clientId: string) {
       return state.clients[clientId];
     },
+    getClientCompatibilityProfile(clientId: string) {
+      return state.clientProfiles[clientId];
+    },
     getGrant(grantId: string) {
       const grant = state.grants[grantId];
 
@@ -751,6 +780,16 @@ export function createOAuthStore(storePath: string | undefined) {
         clients: {
           ...state.clients,
           [client.client_id]: client,
+        },
+      };
+      persist();
+    },
+    saveClientCompatibilityProfile(clientId: string, profileId: ClientProfileId) {
+      state = {
+        ...state,
+        clientProfiles: {
+          ...state.clientProfiles,
+          [clientId]: profileId,
         },
       };
       persist();

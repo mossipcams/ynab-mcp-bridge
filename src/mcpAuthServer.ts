@@ -59,6 +59,7 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
       resourceMetadataUrl,
       verifier: oauthBroker.provider,
     }),
+    getClientCompatibilityProfile: oauthBroker.getClientCompatibilityProfile,
     protectedResourceMetadata: {
       authorization_servers: [oauthBroker.getIssuerUrl().href],
       resource: publicServerUrl.href,
