@@ -1,3 +1,193 @@
+# Finance Summary Priorities Plan
+
+## Goal
+
+Implement the three highest-leverage improvements in this order:
+
+- add a range-based net worth trajectory tool so monthly progress does not require repeated snapshot calls
+- add a one-call monthly review tool that bundles the key "how did I do this month?" metrics
+- tighten tool descriptions so LLMs stop misreading `assigned_vs_spent` as a discipline score instead of a buffering signal
+
+## Constraints And Notes
+
+- Work is isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-finance-summary` on branch `feat/finance-summary-priorities` from `origin/main`.
+- The original checkout remains untouched because it had unrelated local changes on a non-`main` branch.
+- The repo instructions say not to modify files in a `tests/` directory unless explicitly asked to. The existing Vitest files are under `src/`, so targeted spec updates there are allowed.
+- The installed YNAB SDK types show `getPlanMonth` returns month/category data, not month-by-month account balances. The net worth trajectory tool therefore needs to derive historical month-end balances from current account balances plus transaction history, rather than reading a native historical balances endpoint.
+
+## Assumptions
+
+- Proposed tool names:
+  - `ynab_get_net_worth_trajectory`
+  - `ynab_get_monthly_review`
+- Net worth trajectory should return month-by-month `net_worth`, `liquid_cash`, and `debt` for an inclusive month range, plus a compact trend summary.
+- Historical balances should be reconstructed by walking backward from current account balances using account-linked transaction deltas, including closed but not deleted accounts so prior months are not silently undercounted.
+- Monthly review should optimize for one coherent LLM-facing payload, not for reproducing every field from the existing summary tools.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for monthly net worth trajectory reconstruction and registration
+  Test to write:
+  Extend `src/financeSummaryTools.spec.ts` with a red test for `ynab_get_net_worth_trajectory` that uses current account balances plus dated transactions to prove the tool reconstructs month-end `net_worth`, `liquid_cash`, and `debt` across a range.
+  Extend `src/serverFactory.spec.ts` so it fails unless the tool registry includes the new tool name and metadata.
+  The fixture should cover:
+  current positive and negative account balances,
+  transfers between accounts that should not change net worth,
+  debt paydown that changes debt and net worth,
+  and a closed account whose prior-month balance still matters.
+  Code to implement:
+  No production code in this task. Only the failing specs that pin the intended historical-balance behavior and registry surface.
+  How to verify it works:
+  Run `npx vitest run src/financeSummaryTools.spec.ts src/serverFactory.spec.ts` and show the failure proving the tool is missing and the month-by-month balance expectations are not yet implemented.
+  Result:
+  Added a red registry expectation in `src/serverFactory.spec.ts` and a red trajectory fixture in `src/financeSummaryTools.spec.ts`.
+  Verified red with:
+  `npx vitest run src/financeSummaryTools.spec.ts src/serverFactory.spec.ts`
+  which failed because the registry still exposes 45 tools and `ynab_get_net_worth_trajectory` is not registered yet.
+
+- [x] Task 2: Implement `ynab_get_net_worth_trajectory`
+  Test to write:
+  Reuse the red tests from Task 1.
+  Code to implement:
+  Add `src/tools/GetNetWorthTrajectoryTool.ts`.
+  Add shared helpers in `src/tools/financeToolUtils.ts` only if needed for:
+  inclusive month iteration,
+  month-end grouping,
+  historical balance reconstruction from current balances plus transaction deltas,
+  and aggregate rollups for `net_worth`, `liquid_cash`, and `debt`.
+  Register the tool in `src/server.ts`.
+  Keep the output compact, likely with:
+  `from_month`,
+  `to_month`,
+  `start_net_worth`,
+  `end_net_worth`,
+  `change_net_worth`,
+  and `months`.
+  How to verify it works:
+  Re-run `npx vitest run src/financeSummaryTools.spec.ts src/serverFactory.spec.ts` and show the new tests passing.
+  Then run `npx vitest run src/financeToolUtils.spec.ts src/financialDiagnostics.spec.ts` to prove the new helpers do not regress existing finance behavior.
+  Result:
+  Added `src/tools/GetNetWorthTrajectoryTool.ts`, registered it in `src/server.ts`, and introduced focused month/balance helpers in `src/tools/financeToolUtils.ts` for month normalization, month-end checks, and historical balance reconstruction.
+  Verified green with:
+  `npx vitest run src/financeSummaryTools.spec.ts src/serverFactory.spec.ts`
+  and
+  `npx vitest run src/financeToolUtils.spec.ts src/financialDiagnostics.spec.ts`
+
+- [x] Task 3: Add failing coverage for a bundled monthly review payload
+  Test to write:
+  Extend `src/financeAdvancedTools.spec.ts` with a red test for `ynab_get_monthly_review` that fails unless a single tool call returns the core month answer set:
+  month identity,
+  income,
+  inflow/outflow/net flow,
+  assigned/spent/assigned_vs_spent,
+  ready_to_assign,
+  overspending and underfunding counts/totals,
+  top spending rollups,
+  and optional anomalies when a trailing baseline exists.
+  Extend `src/serverFactory.spec.ts` so the registry expectations fail unless the new tool is exposed.
+  Code to implement:
+  No production code in this task. Only the failing specs that define the minimal high-value monthly review contract.
+  How to verify it works:
+  Run `npx vitest run src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts` and show the failure caused by the missing tool and missing bundled payload.
+  Result:
+  Added a red monthly-review contract in `src/financeAdvancedTools.spec.ts` and expanded the registry expectations in `src/serverFactory.spec.ts`.
+  Verified red with:
+  `npx vitest run src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts`
+  which failed because the registry still exposed 46 tools and `ynab_get_monthly_review` was not registered yet.
+
+- [x] Task 4: Implement `ynab_get_monthly_review`
+  Test to write:
+  Reuse the red tests from Task 3.
+  Code to implement:
+  Add `src/tools/GetMonthlyReviewTool.ts`.
+  Reuse existing fetch patterns and shared helpers where practical, but avoid a thin wrapper that only reparses five existing MCP tool outputs.
+  Fetch the smallest coherent dataset needed for one-pass assembly, likely:
+  current month detail,
+  month-range transactions,
+  category metadata if grouping is needed,
+  and prior month detail only when anomaly comparison is requested by the tool contract.
+  Keep the payload coherent and compact so it materially reduces prompt assembly overhead versus separate summary tool calls.
+  Register the tool in `src/server.ts`.
+  How to verify it works:
+  Re-run `npx vitest run src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts` and show the new tests passing.
+  Then run `npx vitest run src/financeSummaryTools.spec.ts src/aiToolOptimization.spec.ts` to confirm the new bundling work does not break existing finance-summary expectations.
+  Result:
+  Added `src/tools/GetMonthlyReviewTool.ts` and registered it in `src/server.ts`.
+  The tool now assembles one compact payload from current month detail, in-month transactions, and a short trailing month baseline for anomalies.
+  Verified green with:
+  `npx vitest run src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts`
+  and
+  `npx vitest run src/financeSummaryTools.spec.ts src/aiToolOptimization.spec.ts`
+
+- [x] Task 5: Add failing coverage for YNAB semantics wording around `assigned_vs_spent`
+  Test to write:
+  Add or extend a focused quality/spec assertion in `src/serverFactory.spec.ts` or `src/codeQuality.spec.ts` so it fails unless the descriptions for the relevant finance tools explain that `assigned_vs_spent` reflects buffering or timing behavior and is not a budget-discipline score.
+  At minimum, pin the descriptions for:
+  `ynab_get_financial_snapshot`,
+  `ynab_get_budget_health_summary`,
+  `ynab_get_cash_flow_summary`,
+  and `ynab_get_monthly_review` if Task 4 adds it.
+  Code to implement:
+  No production code in this task. Only the red documentation/metadata assertions.
+  How to verify it works:
+  Run `npx vitest run src/serverFactory.spec.ts src/codeQuality.spec.ts` and show the failure proving the current descriptions do not give LLMs the needed semantic guidance.
+  Result:
+  Added a focused registry-level wording assertion in `src/serverFactory.spec.ts` for the finance tools that expose `assigned_vs_spent`.
+  Verified red with:
+  `npx vitest run src/serverFactory.spec.ts`
+  which failed because the existing finance-tool descriptions did not mention buffering or timing semantics.
+
+- [x] Task 6: Implement the tool-description and README guidance pass
+  Test to write:
+  Reuse the red assertions from Task 5.
+  Code to implement:
+  Update the relevant tool descriptions in `src/tools/*.ts` so the registry surface consistently explains the YNAB semantics.
+  Add a short README note in the finance-summary/tool coverage area clarifying that `assigned_vs_spent` often reflects paycheck timing and budget buffering rather than "discipline".
+  Keep this scoped to descriptive guidance, not logic changes.
+  How to verify it works:
+  Re-run `npx vitest run src/serverFactory.spec.ts src/codeQuality.spec.ts` and show the wording assertions passing.
+  Then inspect the registered tool metadata through the existing registrar coverage to confirm the clarified descriptions are actually exposed at runtime.
+  Result:
+  Updated the descriptions in `GetFinancialSnapshotTool`, `GetBudgetHealthSummaryTool`, `GetCashFlowSummaryTool`, and `GetMonthlyReviewTool`, and added a short README note under tool coverage.
+  Verified green with:
+  `npx vitest run src/serverFactory.spec.ts`
+  and the registry assertions confirm the clarified descriptions are exposed through the runtime tool metadata.
+
+- [x] Task 7: Do final verification on the expanded finance-summary surface
+  Test to write:
+  No new tests in this task. Use the approved red/green specs as the proof.
+  Code to implement:
+  No new production behavior unless verification exposes an issue tightly coupled to the approved scope. If that happens, stop and re-plan before expanding scope.
+  How to verify it works:
+  Run at minimum:
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts src/financeToolUtils.spec.ts src/financialDiagnostics.spec.ts src/aiToolOptimization.spec.ts src/codeQuality.spec.ts`
+  and
+  `npm run typecheck`
+  Add a short results section to this file before closing out.
+  Result:
+  Final verification passed with:
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts src/financeToolUtils.spec.ts src/financialDiagnostics.spec.ts src/aiToolOptimization.spec.ts src/codeQuality.spec.ts`
+  and
+  `npm run typecheck`
+
+## Review Bar
+
+- A single MCP tool call can answer month-by-month progress over a date range with `net_worth`, `liquid_cash`, and `debt`.
+- Historical monthly balances are reconstructed in a way that handles transfers correctly and does not erase closed-account history.
+- A single MCP tool call can answer "how did I do this month?" with a coherent payload rather than requiring the LLM to stitch together multiple fragments.
+- Tool descriptions explicitly steer the model away from misreading `assigned_vs_spent` as a behavior score.
+- Focused specs and runtime-registry verification provide proof for the new tool surface and the documentation changes.
+
+Plan ready. Approve to proceed.
+
+## Results
+
+- Added `ynab_get_net_worth_trajectory` for one-call month-by-month `net_worth`, `liquid_cash`, and `debt` across an inclusive range.
+- Added `ynab_get_monthly_review` for a one-call month summary that bundles income, cash flow, budget health, top spending, and notable spending changes.
+- Added shared month and historical-balance helpers in `src/tools/financeToolUtils.ts` to support the new finance summary surface.
+- Updated registry coverage in `src/serverFactory.spec.ts` and red/green tool coverage in `src/financeSummaryTools.spec.ts` and `src/financeAdvancedTools.spec.ts`.
+- Clarified `assigned_vs_spent` semantics in the tool descriptions and `README.md` so MCP clients and LLMs get the right interpretation by default.
+
 # Remove 70/20/10 Tool Plan
 
 ## Goal

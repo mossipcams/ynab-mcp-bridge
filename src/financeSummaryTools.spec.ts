@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { registerServerTools } from "./server.js";
 import * as GetBudgetHealthSummaryTool from "./tools/GetBudgetHealthSummaryTool.js";
 import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
 import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";
@@ -7,6 +8,22 @@ import * as GetSpendingSummaryTool from "./tools/GetSpendingSummaryTool.js";
 
 function parseText(result: Awaited<ReturnType<typeof GetFinancialSnapshotTool.execute>>) {
   return JSON.parse(result.content[0].text);
+}
+
+function registerHandlers(api: unknown) {
+  const handlers = new Map<string, (input: Record<string, unknown>) => Promise<unknown>>();
+
+  registerServerTools(
+    {
+      registerTool: ((name: string, _metadata: unknown, handler: (input: Record<string, unknown>) => Promise<unknown>) => {
+        handlers.set(name, handler);
+        return {} as any;
+      }) as any,
+    },
+    api as any,
+  );
+
+  return handlers;
 }
 
 describe("finance summary tools", () => {
@@ -516,6 +533,254 @@ describe("finance summary tools", () => {
           name: "Travel",
           category_group_name: "Savings",
           amount: "60.00",
+        },
+      ],
+    });
+  });
+
+  it("builds a month-by-month net worth trajectory across a range", async () => {
+    const api = {
+      accounts: {
+        getAccounts: vi.fn().mockResolvedValue({
+          data: {
+            accounts: [
+              {
+                id: "acct-checking",
+                name: "Checking",
+                type: "checking",
+                on_budget: true,
+                closed: false,
+                deleted: false,
+                balance: 400000,
+              },
+              {
+                id: "acct-savings",
+                name: "Savings",
+                type: "savings",
+                on_budget: true,
+                closed: false,
+                deleted: false,
+                balance: 150000,
+              },
+              {
+                id: "acct-visa",
+                name: "Visa",
+                type: "creditCard",
+                on_budget: true,
+                closed: false,
+                deleted: false,
+                balance: -50000,
+              },
+              {
+                id: "acct-mortgage",
+                name: "Mortgage",
+                type: "mortgage",
+                on_budget: false,
+                closed: false,
+                deleted: false,
+                balance: -200000,
+              },
+              {
+                id: "acct-old-checking",
+                name: "Old Checking",
+                type: "checking",
+                on_budget: true,
+                closed: true,
+                deleted: false,
+                balance: 0,
+              },
+            ],
+          },
+        }),
+      },
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-old-out",
+                date: "2026-02-05",
+                amount: -40000,
+                deleted: false,
+                approved: true,
+                cleared: "cleared",
+                account_id: "acct-old-checking",
+                account_name: "Old Checking",
+                transfer_account_id: "acct-checking",
+                transfer_transaction_id: "tx-old-in",
+                subtransactions: [],
+              },
+              {
+                id: "tx-old-in",
+                date: "2026-02-05",
+                amount: 40000,
+                deleted: false,
+                approved: true,
+                cleared: "cleared",
+                account_id: "acct-checking",
+                account_name: "Checking",
+                transfer_account_id: "acct-old-checking",
+                transfer_transaction_id: "tx-old-out",
+                subtransactions: [],
+              },
+              {
+                id: "tx-feb-spend",
+                date: "2026-02-14",
+                amount: -20000,
+                deleted: false,
+                approved: true,
+                cleared: "cleared",
+                account_id: "acct-checking",
+                account_name: "Checking",
+                transfer_account_id: null,
+                transfer_transaction_id: null,
+                subtransactions: [],
+              },
+              {
+                id: "tx-feb-card-charge",
+                date: "2026-02-22",
+                amount: -10000,
+                deleted: false,
+                approved: true,
+                cleared: "cleared",
+                account_id: "acct-visa",
+                account_name: "Visa",
+                transfer_account_id: null,
+                transfer_transaction_id: null,
+                subtransactions: [],
+              },
+              {
+                id: "tx-paycheck",
+                date: "2026-03-02",
+                amount: 300000,
+                deleted: false,
+                approved: true,
+                cleared: "cleared",
+                account_id: "acct-checking",
+                account_name: "Checking",
+                transfer_account_id: null,
+                transfer_transaction_id: null,
+                subtransactions: [],
+              },
+              {
+                id: "tx-march-spend",
+                date: "2026-03-08",
+                amount: -100000,
+                deleted: false,
+                approved: true,
+                cleared: "cleared",
+                account_id: "acct-checking",
+                account_name: "Checking",
+                transfer_account_id: null,
+                transfer_transaction_id: null,
+                subtransactions: [],
+              },
+              {
+                id: "tx-savings-out",
+                date: "2026-03-15",
+                amount: -50000,
+                deleted: false,
+                approved: true,
+                cleared: "cleared",
+                account_id: "acct-checking",
+                account_name: "Checking",
+                transfer_account_id: "acct-savings",
+                transfer_transaction_id: "tx-savings-in",
+                subtransactions: [],
+              },
+              {
+                id: "tx-savings-in",
+                date: "2026-03-15",
+                amount: 50000,
+                deleted: false,
+                approved: true,
+                cleared: "cleared",
+                account_id: "acct-savings",
+                account_name: "Savings",
+                transfer_account_id: "acct-checking",
+                transfer_transaction_id: "tx-savings-out",
+                subtransactions: [],
+              },
+              {
+                id: "tx-card-payment-out",
+                date: "2026-03-20",
+                amount: -20000,
+                deleted: false,
+                approved: true,
+                cleared: "cleared",
+                account_id: "acct-checking",
+                account_name: "Checking",
+                transfer_account_id: "acct-visa",
+                transfer_transaction_id: "tx-card-payment-in",
+                subtransactions: [],
+              },
+              {
+                id: "tx-card-payment-in",
+                date: "2026-03-20",
+                amount: 20000,
+                deleted: false,
+                approved: true,
+                cleared: "cleared",
+                account_id: "acct-visa",
+                account_name: "Visa",
+                transfer_account_id: "acct-checking",
+                transfer_transaction_id: "tx-card-payment-out",
+                subtransactions: [],
+              },
+            ],
+          },
+        }),
+      },
+      plans: {
+        getPlans: vi.fn().mockResolvedValue({
+          data: {
+            plans: [{ id: "plan-1" }],
+            default_plan: { id: "plan-1" },
+          },
+        }),
+      },
+    };
+
+    const handlers = registerHandlers(api);
+    const handler = handlers.get("ynab_get_net_worth_trajectory");
+
+    expect(handler).toBeDefined();
+    if (!handler) {
+      return;
+    }
+
+    const result = await handler({
+      planId: "plan-1",
+      fromMonth: "2026-01-01",
+      toMonth: "2026-03-01",
+    });
+
+    expect(api.accounts.getAccounts).toHaveBeenCalledWith("plan-1");
+    expect(api.transactions.getTransactions).toHaveBeenCalledWith("plan-1", "2026-01-01", undefined, undefined);
+    expect(parseText(result as any)).toEqual({
+      from_month: "2026-01-01",
+      to_month: "2026-03-01",
+      start_net_worth: "130.00",
+      end_net_worth: "300.00",
+      change_net_worth: "170.00",
+      months: [
+        {
+          month: "2026-01-01",
+          net_worth: "130.00",
+          liquid_cash: "390.00",
+          debt: "260.00",
+        },
+        {
+          month: "2026-02-01",
+          net_worth: "100.00",
+          liquid_cash: "370.00",
+          debt: "270.00",
+        },
+        {
+          month: "2026-03-01",
+          net_worth: "300.00",
+          liquid_cash: "550.00",
+          debt: "250.00",
         },
       ],
     });

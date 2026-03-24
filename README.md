@@ -178,6 +178,8 @@ The server exposes a read-only YNAB toolset across:
 - money movement and transfer summaries
 - higher-level financial summaries such as spending, cash flow, income, goal progress, obligations, and budget health
 
+For YNAB-style summaries, treat `assigned_vs_spent` as a timing and buffering signal, not a score for budget discipline. In buffered budgets it often reflects paycheck timing, category staging, or money reserved for future months rather than overspending or underspending by itself.
+
 ## CLI Examples
 
 Start with the default HTTP settings:

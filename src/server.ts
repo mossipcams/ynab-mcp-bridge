@@ -14,6 +14,7 @@ import * as GetCategoryTrendSummaryTool from "./tools/GetCategoryTrendSummaryToo
 import * as GetDebtSummaryTool from "./tools/GetDebtSummaryTool.js";
 import * as GetEmergencyFundCoverageTool from "./tools/GetEmergencyFundCoverageTool.js";
 import * as GetFinancialHealthCheckTool from "./tools/GetFinancialHealthCheckTool.js";
+import * as GetNetWorthTrajectoryTool from "./tools/GetNetWorthTrajectoryTool.js";
 import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";
 import * as GetGoalProgressSummaryTool from "./tools/GetGoalProgressSummaryTool.js";
 import * as GetIncomeSummaryTool from "./tools/GetIncomeSummaryTool.js";
@@ -23,6 +24,7 @@ import * as GetMoneyMovementGroupsByMonthTool from "./tools/GetMoneyMovementGrou
 import * as GetMoneyMovementsTool from "./tools/GetMoneyMovementsTool.js";
 import * as GetMoneyMovementsByMonthTool from "./tools/GetMoneyMovementsByMonthTool.js";
 import * as GetMonthCategoryTool from "./tools/GetMonthCategoryTool.js";
+import * as GetMonthlyReviewTool from "./tools/GetMonthlyReviewTool.js";
 import * as GetPayeeLocationTool from "./tools/GetPayeeLocationTool.js";
 import * as GetPayeeLocationsByPayeeTool from "./tools/GetPayeeLocationsByPayeeTool.js";
 import * as GetPayeeTool from "./tools/GetPayeeTool.js";
@@ -471,6 +473,30 @@ const toolRegistrations: ToolRegistration[] = [
         inputSchema: GetFinancialSnapshotTool.inputSchema,
         annotations: READ_ONLY_TOOL_ANNOTATIONS,
       }, executeTool(GetFinancialSnapshotTool.execute, api));
+    },
+  },
+  {
+    title: "Get Net Worth Trajectory",
+    name: GetNetWorthTrajectoryTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetNetWorthTrajectoryTool.name, {
+        title: "Get Net Worth Trajectory",
+        description: GetNetWorthTrajectoryTool.description,
+        inputSchema: GetNetWorthTrajectoryTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetNetWorthTrajectoryTool.execute, api));
+    },
+  },
+  {
+    title: "Get Monthly Review",
+    name: GetMonthlyReviewTool.name,
+    register: (registrar, api) => {
+      registrar.registerTool(GetMonthlyReviewTool.name, {
+        title: "Get Monthly Review",
+        description: GetMonthlyReviewTool.description,
+        inputSchema: GetMonthlyReviewTool.inputSchema,
+        annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      }, executeTool(GetMonthlyReviewTool.execute, api));
     },
   },
   {
