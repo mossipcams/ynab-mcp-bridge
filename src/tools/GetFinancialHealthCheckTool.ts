@@ -13,6 +13,7 @@ import {
   totalDebtMilliunits,
   spreadPercent,
 } from "./financialDiagnosticsUtils.js";
+import { isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 type Risk = {
@@ -40,7 +41,7 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
-    const month = input.month ?? "current";
+    const month = normalizeMonthInput(input.month);
     const asOfDate = input.asOfDate ?? getTodayIsoDate();
     const topN = input.topN ?? 5;
 
@@ -61,7 +62,10 @@ export async function execute(
       const netWorth = netWorthMilliunits(accounts);
       const overspentCategories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden && category.balance < 0);
       const underfundedCategories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden && (category.goal_under_funded ?? 0) > 0);
-      const transactions = transactionsResponse.data.transactions.filter((transaction) => !transaction.deleted);
+      const transactions = transactionsResponse.data.transactions.filter(
+        (transaction) => !transaction.deleted
+          && (typeof transaction.date !== "string" || isWithinMonthRange(transaction.date, monthKey, monthKey)),
+      );
       const uncategorizedTransactionCount = transactions.filter((transaction) => !transaction.category_id).length;
       const unapprovedTransactionCount = transactions.filter((transaction) => !transaction.approved).length;
       const unclearedTransactionCount = transactions.filter((transaction) => transaction.cleared === "uncleared").length;

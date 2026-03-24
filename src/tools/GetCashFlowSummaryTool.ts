@@ -1,7 +1,13 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { buildAssignedSpentSummary, formatMilliunits, toSpentMilliunits } from "./financeToolUtils.js";
+import {
+  buildAssignedSpentSummary,
+  formatMilliunits,
+  isWithinMonthRange,
+  normalizeMonthRange,
+  toSpentMilliunits,
+} from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_cash_flow_summary";
@@ -16,23 +22,6 @@ export const inputSchema = {
     "The last month in ISO format. Defaults to fromMonth.",
   ),
 };
-
-function toMonthEnd(month: string) {
-  const [yearValue, monthValue] = month.split("-");
-  const year = Number.parseInt(yearValue ?? "", 10);
-  const monthNumber = Number.parseInt(monthValue ?? "", 10);
-
-  if (!Number.isInteger(year) || !Number.isInteger(monthNumber)) {
-    throw new Error(`Invalid month value: ${month}`);
-  }
-
-  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
-}
-
-function isWithinRange(date: string, fromMonth: string, toMonth: string) {
-  return date >= fromMonth && date <= toMonthEnd(toMonth);
-}
-
 function toMonthKey(date: string) {
   return `${date.slice(0, 7)}-01`;
 }
@@ -42,8 +31,7 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
-    const fromMonth = input.fromMonth || "current";
-    const toMonth = input.toMonth || fromMonth;
+    const { fromMonth, toMonth } = normalizeMonthRange(input.fromMonth, input.toMonth);
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const [transactionsResponse, monthsResponse] = await Promise.all([
@@ -60,7 +48,7 @@ export async function execute(
       );
 
       for (const transaction of transactionsResponse.data.transactions) {
-        if (transaction.deleted || transaction.transfer_account_id || !isWithinRange(transaction.date, fromMonth, toMonth)) {
+        if (transaction.deleted || transaction.transfer_account_id || !isWithinMonthRange(transaction.date, fromMonth, toMonth)) {
           continue;
         }
 

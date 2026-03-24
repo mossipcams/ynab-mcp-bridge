@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { compactObject } from "./financeToolUtils.js";
+import { compactObject, formatMilliunits } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_account";
@@ -34,7 +34,7 @@ export async function execute(
         type: account.type,
         on_budget: account.on_budget,
         closed: account.closed,
-        balance: account.balance,
+        balance: account.balance == null ? undefined : formatMilliunits(account.balance),
       }),
     });
   } catch (error) {

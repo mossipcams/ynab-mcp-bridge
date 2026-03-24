@@ -119,6 +119,110 @@ describe("financial diagnostics tools", () => {
     });
   });
 
+  it("limits financial health cleanup counts to transactions inside the requested month", async () => {
+    const api = {
+      accounts: {
+        getAccounts: vi.fn().mockResolvedValue({
+          data: {
+            accounts: [
+              { id: "acct-1", name: "Checking", on_budget: true, deleted: false, closed: false, balance: 600000 },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              to_be_budgeted: 50000,
+              age_of_money: 30,
+              income: 200000,
+              budgeted: 150000,
+              activity: -100000,
+              categories: [],
+            },
+          },
+        }),
+        getPlanMonths: vi.fn().mockResolvedValue({
+          data: {
+            months: [
+              { month: "2026-01-01", income: 200000, deleted: false },
+              { month: "2026-02-01", income: 200000, deleted: false },
+              { month: "2026-03-01", income: 200000, deleted: false },
+            ],
+          },
+        }),
+      },
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-03-03",
+                deleted: false,
+                approved: false,
+                cleared: "uncleared",
+                category_id: null,
+              },
+              {
+                id: "tx-2",
+                date: "2026-04-03",
+                deleted: false,
+                approved: false,
+                cleared: "uncleared",
+                category_id: null,
+              },
+            ],
+          },
+        }),
+      },
+      scheduledTransactions: {
+        getScheduledTransactions: vi.fn().mockResolvedValue({
+          data: {
+            scheduled_transactions: [],
+          },
+        }),
+      },
+    };
+
+    const result = await GetFinancialHealthCheckTool.execute(
+      { planId: "plan-1", month: "2026-03-01", asOfDate: "2026-03-10" },
+      api as any,
+    );
+
+    expect(parseText(result as any)).toEqual({
+      as_of_month: "2026-03-01",
+      status: "healthy",
+      score: 90,
+      metrics: {
+        net_worth: "600.00",
+        liquid_cash: "600.00",
+        debt: "0.00",
+        ready_to_assign: "50.00",
+        age_of_money: 30,
+        overspent_category_count: 0,
+        underfunded_category_count: 0,
+        uncategorized_transaction_count: 1,
+        unapproved_transaction_count: 1,
+        uncleared_transaction_count: 1,
+        upcoming_30d_net: "0.00",
+        income_volatility_percent: "0.00",
+      },
+      top_risks: [
+        { code: "cleanup_backlog", severity: "medium" },
+      ],
+      recommended_tools: [
+        "ynab_get_budget_health_summary",
+        "ynab_get_budget_cleanup_summary",
+        "ynab_search_transactions",
+        "ynab_get_upcoming_obligations",
+        "ynab_get_income_summary",
+      ],
+    });
+  });
+
   it("calculates emergency fund coverage", async () => {
     const api = {
       accounts: {

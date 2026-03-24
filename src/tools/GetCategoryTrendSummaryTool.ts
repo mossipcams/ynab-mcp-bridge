@@ -1,7 +1,12 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { formatMilliunits, listMonthsInRange, toSpentMilliunits } from "./financeToolUtils.js";
+import {
+  formatMilliunits,
+  listMonthsInRange,
+  normalizeMonthRange,
+  toSpentMilliunits,
+} from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_category_trend_summary";
@@ -24,8 +29,7 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
-    const fromMonth = input.fromMonth || "current";
-    const toMonth = input.toMonth || fromMonth;
+    const { fromMonth, toMonth } = normalizeMonthRange(input.fromMonth, input.toMonth);
 
     if (!input.categoryId && !input.categoryGroupName) {
       throw new Error("Provide either categoryId or categoryGroupName.");

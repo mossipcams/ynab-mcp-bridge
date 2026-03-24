@@ -407,6 +407,95 @@ describe("finance summary tools", () => {
     });
   });
 
+  it("defaults cash flow month ranges to the current month before applying date math", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-24T12:00:00.000Z"));
+
+    try {
+      const api = {
+        transactions: {
+          getTransactions: vi.fn().mockResolvedValue({
+            data: {
+              transactions: [
+                {
+                  id: "tx-1",
+                  date: "2026-03-03",
+                  amount: 350000,
+                  deleted: false,
+                  transfer_account_id: null,
+                },
+                {
+                  id: "tx-2",
+                  date: "2026-03-05",
+                  amount: -125000,
+                  deleted: false,
+                  transfer_account_id: null,
+                },
+                {
+                  id: "tx-3",
+                  date: "2026-04-02",
+                  amount: 999999,
+                  deleted: false,
+                  transfer_account_id: null,
+                },
+              ],
+            },
+          }),
+        },
+        months: {
+          getPlanMonths: vi.fn().mockResolvedValue({
+            data: {
+              months: [
+                {
+                  month: "2026-03-01",
+                  budgeted: 150000,
+                  activity: -125000,
+                  deleted: false,
+                },
+                {
+                  month: "2026-04-01",
+                  budgeted: 175000,
+                  activity: -100000,
+                  deleted: false,
+                },
+              ],
+            },
+          }),
+        },
+      };
+
+      const result = await GetCashFlowSummaryTool.execute(
+        { planId: "plan-1" },
+        api as any,
+      );
+
+      expect(api.transactions.getTransactions).toHaveBeenCalledWith("plan-1", "2026-03-01", undefined, undefined);
+      expect(parseText(result as any)).toEqual({
+        from_month: "2026-03-01",
+        to_month: "2026-03-01",
+        inflow: "350.00",
+        outflow: "125.00",
+        net_flow: "225.00",
+        assigned: "150.00",
+        spent: "125.00",
+        assigned_vs_spent: "25.00",
+        periods: [
+          {
+            month: "2026-03-01",
+            inflow: "350.00",
+            outflow: "125.00",
+            net_flow: "225.00",
+            assigned: "150.00",
+            spent: "125.00",
+            assigned_vs_spent: "25.00",
+          },
+        ],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("builds a compact budget health summary for a month", async () => {
     const api = {
       months: {
