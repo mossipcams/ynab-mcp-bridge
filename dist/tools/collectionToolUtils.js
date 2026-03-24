@@ -29,9 +29,11 @@ export function paginateEntries(entries, options = {}) {
         }),
     };
 }
-export function hasCollectionControls(input) {
+export function hasPaginationControls(input) {
     return input.limit !== undefined
-        || input.offset !== undefined
-        || input.includeIds !== undefined
+        || input.offset !== undefined;
+}
+export function hasProjectionControls(input) {
+    return input.includeIds !== undefined
         || input.fields !== undefined;
 }

@@ -1,32 +1,19 @@
 import { z } from "zod";
-import { buildAssignedSpentSummary, formatMilliunits, toSpentMilliunits } from "./financeToolUtils.js";
+import { buildAssignedSpentSummary, formatMilliunits, isWithinMonthRange, normalizeMonthRange, toSpentMilliunits, } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_cash_flow_summary";
-export const description = "Returns a compact cash flow summary with inflow, outflow, net flow, and monthly assigned versus spent trends.";
+export const description = "Returns a compact cash flow summary with inflow, outflow, and net cash flow. `net_flow` is cash movement, not savings, and `assigned_vs_spent` reflects budget timing and buffering, not a discipline score.";
 export const inputSchema = {
     planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
     fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("The first month in ISO format or the string 'current'."),
     toMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).optional().describe("The last month in ISO format. Defaults to fromMonth."),
 };
-function toMonthEnd(month) {
-    const [yearValue, monthValue] = month.split("-");
-    const year = Number.parseInt(yearValue ?? "", 10);
-    const monthNumber = Number.parseInt(monthValue ?? "", 10);
-    if (!Number.isInteger(year) || !Number.isInteger(monthNumber)) {
-        throw new Error(`Invalid month value: ${month}`);
-    }
-    return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
-}
-function isWithinRange(date, fromMonth, toMonth) {
-    return date >= fromMonth && date <= toMonthEnd(toMonth);
-}
 function toMonthKey(date) {
     return `${date.slice(0, 7)}-01`;
 }
 export async function execute(input, api) {
     try {
-        const fromMonth = input.fromMonth || "current";
-        const toMonth = input.toMonth || fromMonth;
+        const { fromMonth, toMonth } = normalizeMonthRange(input.fromMonth, input.toMonth);
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const [transactionsResponse, monthsResponse] = await Promise.all([
                 api.transactions.getTransactions(planId, fromMonth, undefined, undefined),
@@ -37,7 +24,7 @@ export async function execute(input, api) {
                 .sort((left, right) => left.month.localeCompare(right.month));
             const periodFlow = new Map(months.map((month) => [month.month, { inflow: 0, outflow: 0 }]));
             for (const transaction of transactionsResponse.data.transactions) {
-                if (transaction.deleted || transaction.transfer_account_id || !isWithinRange(transaction.date, fromMonth, toMonth)) {
+                if (transaction.deleted || transaction.transfer_account_id || !isWithinMonthRange(transaction.date, fromMonth, toMonth)) {
                     continue;
                 }
                 const monthKey = toMonthKey(transaction.date);

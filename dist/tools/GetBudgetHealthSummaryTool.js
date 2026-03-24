@@ -2,7 +2,7 @@ import { z } from "zod";
 import { buildAssignedSpentSummary, compactObject, formatMilliunits, toSpentMilliunits } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_budget_health_summary";
-export const description = "Returns a compact budget health summary with available funds, overspending, underfunding, and assigned versus spent.";
+export const description = "Returns a compact budget health summary with available funds, overspending, underfunding, and assigned versus spent. `assigned_vs_spent` reflects budget timing and buffering, not a discipline score.";
 export const inputSchema = {
     planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
     month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("The month in ISO format or the string 'current'."),

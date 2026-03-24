@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { compactObject } from "./financeToolUtils.js";
+import { compactObject, formatMilliunits } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_category";
 export const description = "Gets a single category by ID. Returns a compact projection by default, with an explicit full-view opt-in.";
@@ -23,9 +23,9 @@ export async function execute(input, api) {
                 name: category.name,
                 hidden: category.hidden,
                 category_group_name: category.category_group_name,
-                balance: category.balance,
+                balance: category.balance == null ? undefined : formatMilliunits(category.balance),
                 goal_type: category.goal_type,
-                goal_target: category.goal_target,
+                goal_target: category.goal_target == null ? undefined : formatMilliunits(category.goal_target),
             }),
         });
     }
