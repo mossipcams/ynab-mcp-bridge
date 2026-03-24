@@ -4,7 +4,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 import { compareReliabilityArtifacts, createReliabilityArtifact, type ReliabilityArtifact } from "./reliabilityArtifact.js";
-import { startHttpServer } from "./httpServer.js";
 import { getReliabilityProfile, type ReliabilityProfile } from "./reliabilityProfiles.js";
 import {
   runReliabilityProbes,
@@ -310,51 +309,29 @@ export function formatReliabilitySummary(summary: ReliabilityRunSummary) {
 }
 
 export async function runHttpReliabilityScenario(options: ReliabilityHttpScenarioOptions): Promise<ReliabilityHttpScenarioResult> {
-  const executeScenario = async () => {
-    const startedServer = options.url
-      ? undefined
-      : await startHttpServer({
-          host: options.host ?? DEFAULT_OPTIONS.host,
-          path: options.path ?? DEFAULT_OPTIONS.path,
-          port: options.port ?? DEFAULT_OPTIONS.port,
-          ynab: options.ynab,
-        });
-    const baseUrl = options.url ?? startedServer?.url;
-
-    if (!baseUrl) {
-      throw new Error("Expected an HTTP URL for the reliability scenario.");
-    }
-
-    try {
-      const results = await runReliabilityProbes({
-        concurrency: options.concurrency,
-        count: options.requestCount,
-        probe: async (index) => await runSequence(baseUrl, index),
-      });
-
-      return {
-        results,
-        target: {
-          mode: options.url ? "url" as const : "local" as const,
-          url: baseUrl,
-        },
-        summary: summarizeReliabilityRun({
-          maxErrorRate: options.maxErrorRate,
-          maxP95LatencyMs: Number.POSITIVE_INFINITY,
-          maxP99LatencyMs: Number.POSITIVE_INFINITY,
-          results,
-        }),
-      };
-    } finally {
-      await startedServer?.close();
-    }
-  };
-
-  if (options.url) {
-    return await executeScenario();
+  if (!options.url) {
+    throw new Error("Expected an HTTP URL for the reliability scenario.");
   }
 
-  return await withSilencedConsoleError(executeScenario);
+  const results = await runReliabilityProbes({
+    concurrency: options.concurrency,
+    count: options.requestCount,
+    probe: async (index) => await runSequence(options.url!, index),
+  });
+
+  return {
+    results,
+    target: {
+      mode: "url",
+      url: options.url,
+    },
+    summary: summarizeReliabilityRun({
+      maxErrorRate: options.maxErrorRate,
+      maxP95LatencyMs: Number.POSITIVE_INFINITY,
+      maxP99LatencyMs: Number.POSITIVE_INFINITY,
+      results,
+    }),
+  };
 }
 
 function createSmokeProfile(options: ReliabilityHttpOptions): ReliabilityProfile {

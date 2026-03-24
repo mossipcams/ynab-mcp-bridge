@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { startHttpServer } from "./httpServer.js";
 import type { ReliabilityRunSummary } from "./reliabilityRunner.js";
 import {
   executeReliabilityHttpCli,
@@ -121,10 +122,23 @@ describe("reliability http", () => {
   });
 
   it("runs initialize, tools/list, and ynab_get_mcp_version against a local authless HTTP server", async () => {
+    const httpServer = await startHttpServer({
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+      ynab: {
+        apiToken: "test-token",
+      },
+    });
+    cleanups.push(async () => {
+      await httpServer.close();
+    });
+
     const result = await runHttpReliabilityScenario({
       concurrency: 1,
       maxErrorRate: 0,
       requestCount: 2,
+      url: httpServer.url,
       ynab: {
         apiToken: "test-token",
       },
