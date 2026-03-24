@@ -3,6 +3,7 @@ import * as ynab from "ynab";
 
 import {
   formatMilliunits,
+  isReadyToAssignInflowCategory,
   isWithinMonthRange,
   listMonthsInRange,
   normalizeMonthRange,
@@ -12,7 +13,7 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 
 export const name = "ynab_get_income_summary";
 export const description =
-  "Returns a compact monthly income summary with totals, stability metrics, and top income sources.";
+  "Returns a compact monthly income summary using positive transactions categorized to `Inflow: Ready to Assign`, with totals, stability metrics, and top income sources.";
 export const inputSchema = {
   planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
   fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe(
@@ -41,6 +42,7 @@ export async function execute(
         (transaction) => !transaction.deleted
           && !transaction.transfer_account_id
           && transaction.amount > 0
+          && isReadyToAssignInflowCategory(transaction.category_name)
           && isWithinMonthRange(transaction.date, fromMonth, toMonth),
       );
 

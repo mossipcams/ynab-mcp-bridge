@@ -4,6 +4,7 @@ import * as ynab from "ynab";
 import {
   compactObject,
   formatMilliunits,
+  isTransferTransaction,
   isWithinMonthRange,
   normalizeMonthInput,
 } from "./financeToolUtils.js";
@@ -35,7 +36,9 @@ export async function execute(
       ]);
 
       const transactions = transactionsResponse.data.transactions.filter(
-        (transaction) => !transaction.deleted && isWithinMonthRange(transaction.date, month, month),
+        (transaction) => !transaction.deleted
+          && !isTransferTransaction(transaction)
+          && isWithinMonthRange(transaction.date, month, month),
       );
       const uncategorizedTransactions = transactions.filter((transaction) => !transaction.category_id);
       const unapprovedTransactions = transactions.filter((transaction) => !transaction.approved);
