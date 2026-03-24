@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 
 import { compareReliabilityArtifacts, createReliabilityArtifact, type ReliabilityArtifact } from "./reliabilityArtifact.js";
 import { getReliabilityProfile, type ReliabilityProfile } from "./reliabilityProfiles.js";
@@ -56,6 +57,54 @@ type TextContentItem = {
   text: string;
   type: "text";
 };
+
+type CallToolResponseWithContent = {
+  content: unknown[];
+};
+
+type SmokeReliabilityProfile = Extract<ReliabilityProfile, { runner: "smoke" }>;
+
+class ConnectTransportAdapter {
+  onclose?: () => void;
+  onerror?: (error: Error) => void;
+  onmessage?: (message: JSONRPCMessage) => void;
+
+  constructor(private readonly transport: StreamableHTTPClientTransport) {}
+
+  async close() {
+    await this.transport.close();
+  }
+
+  async send(message: JSONRPCMessage | JSONRPCMessage[], options?: Parameters<StreamableHTTPClientTransport["send"]>[1]) {
+    await this.transport.send(message, options);
+  }
+
+  setProtocolVersion(version: string) {
+    this.transport.setProtocolVersion(version);
+  }
+
+  async start() {
+    if (this.onclose) {
+      this.transport.onclose = this.onclose;
+    } else {
+      delete this.transport.onclose;
+    }
+
+    if (this.onerror) {
+      this.transport.onerror = this.onerror;
+    } else {
+      delete this.transport.onerror;
+    }
+
+    if (this.onmessage) {
+      this.transport.onmessage = this.onmessage;
+    } else {
+      delete this.transport.onmessage;
+    }
+
+    await this.transport.start();
+  }
+}
 
 const DEFAULT_OPTIONS: ReliabilityHttpOptions = {
   baselineArtifact: undefined,
@@ -129,15 +178,147 @@ async function measureOperation(operation: string, work: () => Promise<void>): P
   }
 }
 
-async function withSilencedConsoleError<T>(work: () => Promise<T>) {
-  const originalConsoleError = console.error;
-  console.error = () => {};
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
-  try {
-    return await work();
-  } finally {
-    console.error = originalConsoleError;
+function isTextContentItem(value: unknown): value is TextContentItem {
+  if (!isObjectRecord(value)) {
+    return false;
   }
+
+  return value["type"] === "text" && typeof value["text"] === "string";
+}
+
+function hasContentArray(value: unknown): value is CallToolResponseWithContent {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  return Array.isArray(value["content"]);
+}
+
+function extractVersionText(response: unknown) {
+  const content = hasContentArray(response) ? response.content : [];
+
+  return content
+    .filter(isTextContentItem)
+    .map((item) => item.text)
+    .join("\n");
+}
+
+function requireScenarioUrl(options: ReliabilityHttpScenarioOptions) {
+  if (!options.url) {
+    throw new Error("Expected an HTTP URL for the reliability scenario.");
+  }
+
+  return options.url;
+}
+
+function requireSmokeProfile(): SmokeReliabilityProfile {
+  const baseProfile = getReliabilityProfile("smoke");
+
+  if (baseProfile.runner !== "smoke") {
+    throw new Error("Expected the smoke reliability profile.");
+  }
+
+  return baseProfile;
+}
+
+function createConnectTransport(baseUrl: string): Parameters<Client["connect"]>[0] {
+  return new ConnectTransportAdapter(new StreamableHTTPClientTransport(new URL(baseUrl)));
+}
+
+function parseReliabilityHttpValueFlag(
+  parsed: ReliabilityHttpOptions,
+  argument: string,
+  value: string | undefined,
+) {
+  if (!value) {
+    throw new Error(`Expected ${argument} to be followed by a value.`);
+  }
+
+  if (argument === "--profile") {
+    if (value !== "smoke") {
+      throw new Error("The HTTP reliability command currently supports only the smoke profile.");
+    }
+    parsed.profileName = "smoke";
+    return;
+  }
+
+  if (argument === "--json-out") {
+    parsed.jsonOut = value;
+    return;
+  }
+
+  if (argument === "--baseline-artifact") {
+    parsed.baselineArtifact = value;
+    return;
+  }
+
+  if (argument === "--url") {
+    parsed.url = value;
+    return;
+  }
+
+  if (argument === "--host") {
+    parsed.host = value;
+    return;
+  }
+
+  if (argument === "--path") {
+    parsed.path = value;
+    return;
+  }
+
+  throw new Error(`Unknown reliability argument: ${argument}`);
+}
+
+function applyReliabilityHttpFlag(
+  parsed: ReliabilityHttpOptions,
+  argument: string,
+  value: string | undefined,
+) {
+  if (argument === "--requests") {
+    parsed.requestCount = parseIntegerFlag("--requests", value);
+    return true;
+  }
+
+  if (argument === "--concurrency") {
+    parsed.concurrency = parseIntegerFlag("--concurrency", value);
+    return true;
+  }
+
+  if (argument === "--max-error-rate") {
+    parsed.maxErrorRate = parseNumberFlag("--max-error-rate", value);
+    return true;
+  }
+
+  if (argument === "--port") {
+    parsed.port = parsePortFlag(value);
+    return true;
+  }
+
+  parseReliabilityHttpValueFlag(parsed, argument, value);
+  return true;
+}
+
+function isReliabilityArtifact(value: unknown): value is ReliabilityArtifact {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  return isObjectRecord(value["profile"]) && isObjectRecord(value["summary"]);
+}
+
+async function readBaselineArtifact(path: string) {
+  const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+
+  if (!isReliabilityArtifact(parsed)) {
+    throw new Error(`Failed to parse baseline artifact: ${path}.`);
+  }
+
+  return parsed;
 }
 
 async function runSequence(baseUrl: string, index: number) {
@@ -145,13 +326,13 @@ async function runSequence(baseUrl: string, index: number) {
     name: `ynab-mcp-bridge-reliability-${index + 1}`,
     version: "1.0.0",
   });
-  const transport = new StreamableHTTPClientTransport(new URL(baseUrl));
+  const transport = createConnectTransport(baseUrl);
   const results: ReliabilityProbeResult[] = [];
   let connected = false;
 
   try {
     const initializeResult = await measureOperation("initialize", async () => {
-      await client.connect(transport as Parameters<typeof client.connect>[0]);
+      await client.connect(transport);
       connected = true;
     });
     results.push(initializeResult);
@@ -173,25 +354,7 @@ async function runSequence(baseUrl: string, index: number) {
         name: "ynab_get_mcp_version",
         arguments: {},
       });
-      const content = (
-        typeof response === "object" &&
-        response !== null &&
-        "content" in response &&
-        Array.isArray(response.content)
-      )
-        ? response.content
-        : [];
-      const versionText = content
-        .filter((item): item is TextContentItem => (
-          typeof item === "object" &&
-          item !== null &&
-          "type" in item &&
-          item.type === "text" &&
-          "text" in item &&
-          typeof item.text === "string"
-        ))
-        .map((item) => item.text)
-        .join("\n");
+      const versionText = extractVersionText(response);
 
       if (!versionText.includes("\"version\"")) {
         throw new Error("Expected ynab_get_mcp_version to return version text.");
@@ -213,70 +376,12 @@ export function parseReliabilityHttpArgs(argv: string[]): ReliabilityHttpOptions
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    const value = argv[index + 1];
-
-    switch (argument) {
-      case "--requests":
-        parsed.requestCount = parseIntegerFlag("--requests", value);
-        index += 1;
-        break;
-      case "--concurrency":
-        parsed.concurrency = parseIntegerFlag("--concurrency", value);
-        index += 1;
-        break;
-      case "--max-error-rate":
-        parsed.maxErrorRate = parseNumberFlag("--max-error-rate", value);
-        index += 1;
-        break;
-      case "--profile":
-        if (value !== "smoke") {
-          throw new Error("The HTTP reliability command currently supports only the smoke profile.");
-        }
-        parsed.profileName = "smoke";
-        index += 1;
-        break;
-      case "--json-out":
-        if (!value) {
-          throw new Error("Expected --json-out to be followed by a value.");
-        }
-        parsed.jsonOut = value;
-        index += 1;
-        break;
-      case "--baseline-artifact":
-        if (!value) {
-          throw new Error("Expected --baseline-artifact to be followed by a value.");
-        }
-        parsed.baselineArtifact = value;
-        index += 1;
-        break;
-      case "--url":
-        if (!value) {
-          throw new Error("Expected --url to be followed by a value.");
-        }
-        parsed.url = value;
-        index += 1;
-        break;
-      case "--host":
-        if (!value) {
-          throw new Error("Expected --host to be followed by a value.");
-        }
-        parsed.host = value;
-        index += 1;
-        break;
-      case "--port":
-        parsed.port = parsePortFlag(value);
-        index += 1;
-        break;
-      case "--path":
-        if (!value) {
-          throw new Error("Expected --path to be followed by a value.");
-        }
-        parsed.path = value;
-        index += 1;
-        break;
-      default:
-        throw new Error(`Unknown reliability argument: ${argument}`);
+    if (!argument) {
+      continue;
     }
+    const value = argv[index + 1];
+    applyReliabilityHttpFlag(parsed, argument, value);
+    index += 1;
   }
 
   return parsed;
@@ -309,21 +414,19 @@ export function formatReliabilitySummary(summary: ReliabilityRunSummary) {
 }
 
 export async function runHttpReliabilityScenario(options: ReliabilityHttpScenarioOptions): Promise<ReliabilityHttpScenarioResult> {
-  if (!options.url) {
-    throw new Error("Expected an HTTP URL for the reliability scenario.");
-  }
+  const url = requireScenarioUrl(options);
 
   const results = await runReliabilityProbes({
     concurrency: options.concurrency,
     count: options.requestCount,
-    probe: async (index) => await runSequence(options.url!, index),
+    probe: async (index) => await runSequence(url, index),
   });
 
   return {
     results,
     target: {
       mode: "url",
-      url: options.url,
+      url,
     },
     summary: summarizeReliabilityRun({
       maxErrorRate: options.maxErrorRate,
@@ -334,11 +437,8 @@ export async function runHttpReliabilityScenario(options: ReliabilityHttpScenari
   };
 }
 
-function createSmokeProfile(options: ReliabilityHttpOptions): ReliabilityProfile {
-  const baseProfile = getReliabilityProfile("smoke");
-  if (baseProfile.runner !== "smoke") {
-    throw new Error("Expected the smoke reliability profile.");
-  }
+function createSmokeProfile(options: ReliabilityHttpOptions): SmokeReliabilityProfile {
+  const baseProfile = requireSmokeProfile();
   return {
     ...baseProfile,
     smoke: {
@@ -397,7 +497,7 @@ export async function executeReliabilityHttpCli(
       let baseline: ReliabilityArtifact;
 
       try {
-        baseline = JSON.parse(await readFile(options.baselineArtifact, "utf8")) as ReliabilityArtifact;
+        baseline = await readBaselineArtifact(options.baselineArtifact);
       } catch (error) {
         throw new Error(`Failed to read baseline artifact: ${options.baselineArtifact}. ${getErrorMessage(error)}`);
       }

@@ -124,13 +124,17 @@ const RELIABILITY_PROFILES: Record<ReliabilityProfileName, ReliabilityProfile> =
   },
 };
 
+function isReliabilityProfileName(value: string): value is ReliabilityProfileName {
+  return Object.hasOwn(RELIABILITY_PROFILES, value);
+}
+
 export function listReliabilityProfiles() {
   return Object.values(RELIABILITY_PROFILES);
 }
 
 export function parseReliabilityProfileName(value: string): ReliabilityProfileName {
-  if (value in RELIABILITY_PROFILES) {
-    return value as ReliabilityProfileName;
+  if (isReliabilityProfileName(value)) {
+    return value;
   }
 
   throw new Error(`Unknown reliability profile: ${value}`);
