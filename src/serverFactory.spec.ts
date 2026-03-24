@@ -212,6 +212,31 @@ describe("createServer", () => {
     expect(descriptions.get("ynab_get_monthly_review")).toContain("timing");
   });
 
+  it("registers finance tool descriptions that clarify timing and classification semantics", () => {
+    const registerTool = vi.fn();
+
+    registerServerTools(
+      {
+        registerTool,
+      },
+      {} as any,
+    );
+
+    const registrations = new Map(
+      registerTool.mock.calls.map(([toolName, registration]) => [toolName, registration]),
+    );
+
+    expect((registrations.get("ynab_get_financial_snapshot") as any).description).toContain("timing");
+    expect((registrations.get("ynab_get_financial_snapshot") as any).description).toContain("assigned_vs_spent");
+    expect((registrations.get("ynab_get_budget_health_summary") as any).description).toContain("timing");
+    expect((registrations.get("ynab_get_cash_flow_summary") as any).description).toContain("net cash flow");
+    expect((registrations.get("ynab_get_cash_flow_summary") as any).description).toContain("not savings");
+    expect((registrations.get("ynab_get_income_summary") as any).description).toContain("Inflow: Ready to Assign");
+    expect((registrations.get("ynab_get_upcoming_obligations") as any).description).toContain("due outflows");
+    expect((registrations.get("ynab_get_upcoming_obligations") as any).description).toContain("expected inflows");
+    expect((registrations.get("ynab_get_upcoming_obligations") as any).description).toContain("excluding transfers");
+  });
+
   it("keeps registered MCP tool schemas serializable and their handlers callable through the registrar", async () => {
     const registerTool = vi.fn();
     const api = {

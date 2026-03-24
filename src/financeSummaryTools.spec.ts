@@ -139,6 +139,72 @@ describe("finance summary tools", () => {
     });
   });
 
+  it("does not treat net-positive month activity as spending in the snapshot summary", async () => {
+    const api = {
+      accounts: {
+        getAccounts: vi.fn().mockResolvedValue({
+          data: {
+            accounts: [
+              {
+                id: "acct-1",
+                name: "Checking",
+                type: "checking",
+                on_budget: true,
+                closed: false,
+                deleted: false,
+                balance: 250000,
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              income: 100000,
+              budgeted: 40000,
+              activity: 15000,
+              to_be_budgeted: 60000,
+              age_of_money: 25,
+              deleted: false,
+              categories: [],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetFinancialSnapshotTool.execute(
+      { planId: "plan-1", month: "2026-03-01" },
+      api as any,
+    );
+
+    expect(parseText(result)).toEqual({
+      month: "2026-03-01",
+      net_worth: "250.00",
+      liquid_cash: "250.00",
+      debt: "0.00",
+      ready_to_assign: "60.00",
+      income: "100.00",
+      assigned: "40.00",
+      spent: "0.00",
+      assigned_vs_spent: "40.00",
+      age_of_money: 25,
+      account_count: 1,
+      on_budget_account_count: 1,
+      debt_account_count: 0,
+      top_asset_accounts: [
+        {
+          id: "acct-1",
+          name: "Checking",
+          amount: "250.00",
+        },
+      ],
+    });
+  });
+
   it("builds a compact spending summary across a month range", async () => {
     const api = {
       transactions: {
@@ -422,6 +488,95 @@ describe("finance summary tools", () => {
         },
       ],
     });
+  });
+
+  it("defaults cash flow month ranges to the current month before applying date math", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-24T12:00:00.000Z"));
+
+    try {
+      const api = {
+        transactions: {
+          getTransactions: vi.fn().mockResolvedValue({
+            data: {
+              transactions: [
+                {
+                  id: "tx-1",
+                  date: "2026-03-03",
+                  amount: 350000,
+                  deleted: false,
+                  transfer_account_id: null,
+                },
+                {
+                  id: "tx-2",
+                  date: "2026-03-05",
+                  amount: -125000,
+                  deleted: false,
+                  transfer_account_id: null,
+                },
+                {
+                  id: "tx-3",
+                  date: "2026-04-02",
+                  amount: 999999,
+                  deleted: false,
+                  transfer_account_id: null,
+                },
+              ],
+            },
+          }),
+        },
+        months: {
+          getPlanMonths: vi.fn().mockResolvedValue({
+            data: {
+              months: [
+                {
+                  month: "2026-03-01",
+                  budgeted: 150000,
+                  activity: -125000,
+                  deleted: false,
+                },
+                {
+                  month: "2026-04-01",
+                  budgeted: 175000,
+                  activity: -100000,
+                  deleted: false,
+                },
+              ],
+            },
+          }),
+        },
+      };
+
+      const result = await GetCashFlowSummaryTool.execute(
+        { planId: "plan-1" },
+        api as any,
+      );
+
+      expect(api.transactions.getTransactions).toHaveBeenCalledWith("plan-1", "2026-03-01", undefined, undefined);
+      expect(parseText(result as any)).toEqual({
+        from_month: "2026-03-01",
+        to_month: "2026-03-01",
+        inflow: "350.00",
+        outflow: "125.00",
+        net_flow: "225.00",
+        assigned: "150.00",
+        spent: "125.00",
+        assigned_vs_spent: "25.00",
+        periods: [
+          {
+            month: "2026-03-01",
+            inflow: "350.00",
+            outflow: "125.00",
+            net_flow: "225.00",
+            assigned: "150.00",
+            spent: "125.00",
+            assigned_vs_spent: "25.00",
+          },
+        ],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("builds a compact budget health summary for a month", async () => {

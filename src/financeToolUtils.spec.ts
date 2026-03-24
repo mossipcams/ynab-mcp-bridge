@@ -8,6 +8,7 @@ import {
   formatMilliunits,
   listMonthsInRange,
   toTopRollups,
+  toSpentMilliunits,
 } from "./tools/financeToolUtils.js";
 
 describe("finance tool utils", () => {
@@ -22,6 +23,11 @@ describe("finance tool utils", () => {
       spent: "175.00",
       assigned_vs_spent: "75.00",
     });
+  });
+
+  it("treats positive activity as non-spending for spend-style summaries", () => {
+    expect(toSpentMilliunits(-125000)).toBe(125000);
+    expect(toSpentMilliunits(125000)).toBe(0);
   });
 
   it("sorts and limits top rollups while removing empty fields", () => {

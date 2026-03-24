@@ -2,7 +2,8 @@ import { z } from "zod";
 import * as ynab from "ynab";
 
 import {
-  hasCollectionControls,
+  hasPaginationControls,
+  hasProjectionControls,
   paginateEntries,
   projectRecord,
 } from "./collectionToolUtils.js";
@@ -46,9 +47,16 @@ export async function execute(
         to_be_budgeted: month.to_be_budgeted,
       }));
 
-    if (!hasCollectionControls(input)) {
+    if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
       return toTextResult({
         months,
+        month_count: months.length,
+      });
+    }
+
+    if (!hasPaginationControls(input)) {
+      return toTextResult({
+        months: months.map((month) => projectRecord(month, monthFields, input)),
         month_count: months.length,
       });
     }

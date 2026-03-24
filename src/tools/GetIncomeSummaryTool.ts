@@ -1,12 +1,19 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { formatMilliunits, listMonthsInRange, toTopRollups } from "./financeToolUtils.js";
+import {
+  formatMilliunits,
+  isReadyToAssignInflowCategory,
+  isWithinMonthRange,
+  listMonthsInRange,
+  normalizeMonthRange,
+  toTopRollups,
+} from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_income_summary";
 export const description =
-  "Returns a compact monthly income summary with totals, stability metrics, and top income sources.";
+  "Returns a compact monthly income summary using positive transactions categorized to `Inflow: Ready to Assign`, with totals, stability metrics, and top income sources.";
 export const inputSchema = {
   planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
   fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe(
@@ -17,19 +24,6 @@ export const inputSchema = {
   ),
   topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of income sources to include."),
 };
-
-function toMonthEnd(month: string) {
-  const [yearValue, monthValue] = month.split("-");
-  const year = Number.parseInt(yearValue ?? "", 10);
-  const monthNumber = Number.parseInt(monthValue ?? "", 10);
-
-  if (!Number.isInteger(year) || !Number.isInteger(monthNumber)) {
-    throw new Error(`Invalid month value: ${month}`);
-  }
-
-  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
-}
-
 function toMonthKey(date: string) {
   return `${date.slice(0, 7)}-01`;
 }
@@ -39,8 +33,7 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
-    const fromMonth = input.fromMonth || "current";
-    const toMonth = input.toMonth || fromMonth;
+    const { fromMonth, toMonth } = normalizeMonthRange(input.fromMonth, input.toMonth);
     const topN = input.topN ?? 5;
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
@@ -49,8 +42,8 @@ export async function execute(
         (transaction) => !transaction.deleted
           && !transaction.transfer_account_id
           && transaction.amount > 0
-          && transaction.date >= fromMonth
-          && transaction.date <= toMonthEnd(toMonth),
+          && isReadyToAssignInflowCategory(transaction.category_name)
+          && isWithinMonthRange(transaction.date, fromMonth, toMonth),
       );
 
       const incomeByMonth = new Map<string, number>(listMonthsInRange(fromMonth, toMonth).map((month) => [month, 0]));

@@ -2,7 +2,7 @@ import { z } from "zod";
 import * as ynab from "ynab";
 
 import { compactObject } from "./financeToolUtils.js";
-import { hasCollectionControls, paginateEntries } from "./collectionToolUtils.js";
+import { hasPaginationControls, hasProjectionControls, paginateEntries } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_list_categories";
@@ -45,13 +45,25 @@ export async function execute(
           })),
       }));
 
-    if (!hasCollectionControls(input)) {
+    if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
       return toTextResult({
         category_groups: groups,
       });
     }
 
     const requestedFields = input.fields?.length ? new Set(input.fields) : new Set(categoryGroupFields);
+
+    if (!hasPaginationControls(input)) {
+      return toTextResult({
+        category_groups: groups.map((group) => compactObject({
+          id: input.includeIds === false ? undefined : group["id"],
+          name: requestedFields.has("name") ? group["name"] : undefined,
+          categories: requestedFields.has("categories") ? group["categories"] : undefined,
+        })),
+        category_group_count: groups.length,
+      });
+    }
+
     const pagedGroups = paginateEntries(groups, input);
 
     return toTextResult({

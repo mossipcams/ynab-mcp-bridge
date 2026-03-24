@@ -93,25 +93,29 @@ describe("advanced finance tools", () => {
     expect(api.scheduledTransactions.getScheduledTransactions).toHaveBeenCalledWith("plan-1", undefined);
     expect(parseText(result)).toEqual({
       as_of_date: "2026-03-16",
-      obligation_count: 4,
+      obligation_count: 3,
+      expected_inflow_count: 1,
       windows: {
         "7d": {
           upcoming_inflows: "0.00",
           upcoming_outflows: "225.00",
           net_upcoming: "-225.00",
           obligation_count: 2,
+          expected_inflow_count: 0,
         },
         "14d": {
           upcoming_inflows: "250.00",
           upcoming_outflows: "225.00",
           net_upcoming: "25.00",
-          obligation_count: 3,
+          obligation_count: 2,
+          expected_inflow_count: 1,
         },
         "30d": {
           upcoming_inflows: "250.00",
           upcoming_outflows: "237.00",
           net_upcoming: "13.00",
-          obligation_count: 4,
+          obligation_count: 3,
+          expected_inflow_count: 1,
         },
       },
       top_due: [
@@ -144,6 +148,72 @@ describe("advanced finance tools", () => {
         },
       ],
     });
+  });
+
+  it("expands recurring obligations across the window while separating inflows and excluding transfers", async () => {
+    const api = {
+      scheduledTransactions: {
+        getScheduledTransactions: vi.fn().mockResolvedValue({
+          data: {
+            scheduled_transactions: [
+              {
+                id: "sched-weekly",
+                date_next: "2026-03-18",
+                frequency: "weekly",
+                amount: -10000,
+                deleted: false,
+                transfer_account_id: null,
+                payee_name: "Allowance Card",
+                category_name: "Kids",
+                account_name: "Checking",
+              },
+              {
+                id: "sched-income",
+                date_next: "2026-03-20",
+                frequency: "monthly",
+                amount: 50000,
+                deleted: false,
+                transfer_account_id: null,
+                payee_name: "Employer",
+                category_name: "Inflow: Ready to Assign",
+                account_name: "Checking",
+              },
+              {
+                id: "sched-transfer",
+                date_next: "2026-03-22",
+                frequency: "monthly",
+                amount: -30000,
+                deleted: false,
+                transfer_account_id: "acct-savings",
+                payee_name: "Transfer : Savings",
+                category_name: null,
+                account_name: "Checking",
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetUpcomingObligationsTool.execute(
+      { planId: "plan-1", asOfDate: "2026-03-16", topN: 5 },
+      api as any,
+    );
+
+    expect(parseText(result as any)).toEqual(expect.objectContaining({
+      as_of_date: "2026-03-16",
+      obligation_count: 5,
+      expected_inflow_count: 1,
+      windows: expect.objectContaining({
+        "30d": expect.objectContaining({
+          upcoming_inflows: "50.00",
+          upcoming_outflows: "50.00",
+          net_upcoming: "0.00",
+          obligation_count: 5,
+          expected_inflow_count: 1,
+        }),
+      }),
+    }));
   });
 
   it("builds a compact goal progress summary for a month", async () => {
@@ -372,6 +442,179 @@ describe("advanced finance tools", () => {
     });
   });
 
+  it("limits budget cleanup transaction counts to the requested month", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-03-02",
+                amount: -20000,
+                deleted: false,
+                approved: false,
+                cleared: "uncleared",
+                category_id: null,
+                payee_name: "Unknown Store",
+                account_name: "Checking",
+              },
+              {
+                id: "tx-2",
+                date: "2026-04-02",
+                amount: -45000,
+                deleted: false,
+                approved: false,
+                cleared: "uncleared",
+                category_id: null,
+                payee_name: "April Store",
+                account_name: "Checking",
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              deleted: false,
+              categories: [
+                {
+                  id: "cat-1",
+                  name: "Dining Out",
+                  hidden: false,
+                  deleted: false,
+                  balance: -12000,
+                  goal_under_funded: 0,
+                },
+              ],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetBudgetCleanupSummaryTool.execute(
+      { planId: "plan-1", month: "2026-03-01", topN: 5 },
+      api as any,
+    );
+
+    expect(parseText(result as any)).toEqual({
+      month: "2026-03-01",
+      uncategorized_transaction_count: 1,
+      unapproved_transaction_count: 1,
+      uncleared_transaction_count: 1,
+      overspent_category_count: 1,
+      hidden_problem_category_count: 0,
+      top_uncategorized_transactions: [
+        {
+          id: "tx-1",
+          date: "2026-03-02",
+          payee_name: "Unknown Store",
+          account_name: "Checking",
+          amount: "20.00",
+        },
+      ],
+      top_unapproved_transactions: [
+        {
+          id: "tx-1",
+          date: "2026-03-02",
+          payee_name: "Unknown Store",
+          amount: "20.00",
+        },
+      ],
+      top_overspent_categories: [
+        {
+          id: "cat-1",
+          name: "Dining Out",
+          amount: "12.00",
+        },
+      ],
+    });
+  });
+
+  it("excludes transfer transactions from budget cleanup backlog counts", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-transfer",
+                date: "2026-03-04",
+                amount: -50000,
+                deleted: false,
+                approved: false,
+                cleared: "uncleared",
+                category_id: null,
+                transfer_account_id: "acct-savings",
+                payee_name: "Transfer : Savings",
+                account_name: "Checking",
+              },
+              {
+                id: "tx-real",
+                date: "2026-03-06",
+                amount: -20000,
+                deleted: false,
+                approved: false,
+                cleared: "uncleared",
+                category_id: null,
+                transfer_account_id: null,
+                payee_name: "Unknown Store",
+                account_name: "Checking",
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              deleted: false,
+              categories: [],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetBudgetCleanupSummaryTool.execute(
+      { planId: "plan-1", month: "2026-03-01", topN: 5 },
+      api as any,
+    );
+
+    expect(parseText(result as any)).toEqual({
+      month: "2026-03-01",
+      uncategorized_transaction_count: 1,
+      unapproved_transaction_count: 1,
+      uncleared_transaction_count: 1,
+      overspent_category_count: 0,
+      hidden_problem_category_count: 0,
+      top_uncategorized_transactions: [
+        {
+          id: "tx-real",
+          date: "2026-03-06",
+          payee_name: "Unknown Store",
+          account_name: "Checking",
+          amount: "20.00",
+        },
+      ],
+      top_unapproved_transactions: [
+        {
+          id: "tx-real",
+          date: "2026-03-06",
+          payee_name: "Unknown Store",
+          amount: "20.00",
+        },
+      ],
+      top_overspent_categories: [],
+    });
+  });
+
   it("builds a compact income summary across a month range", async () => {
     const api = {
       transactions: {
@@ -384,6 +627,7 @@ describe("advanced finance tools", () => {
                 amount: 300000,
                 deleted: false,
                 transfer_account_id: null,
+                category_name: "Inflow: Ready to Assign",
                 payee_id: "payee-1",
                 payee_name: "Employer",
               },
@@ -393,6 +637,7 @@ describe("advanced finance tools", () => {
                 amount: 500000,
                 deleted: false,
                 transfer_account_id: null,
+                category_name: "Inflow: Ready to Assign",
                 payee_id: "payee-1",
                 payee_name: "Employer",
               },
@@ -402,6 +647,7 @@ describe("advanced finance tools", () => {
                 amount: 300000,
                 deleted: false,
                 transfer_account_id: null,
+                category_name: "Inflow: Ready to Assign",
                 payee_id: "payee-1",
                 payee_name: "Employer",
               },
@@ -411,6 +657,7 @@ describe("advanced finance tools", () => {
                 amount: 100000,
                 deleted: false,
                 transfer_account_id: null,
+                category_name: "Inflow: Ready to Assign",
                 payee_id: "payee-2",
                 payee_name: "Freelance Client",
               },
@@ -469,6 +716,78 @@ describe("advanced finance tools", () => {
         {
           month: "2026-03-01",
           income: "400.00",
+        },
+      ],
+    });
+  });
+
+  it("excludes refunds and generic positive inflows from income totals", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-income",
+                date: "2026-03-05",
+                amount: 250000,
+                deleted: false,
+                transfer_account_id: null,
+                category_name: "Inflow: Ready to Assign",
+                payee_id: "payee-1",
+                payee_name: "Employer",
+              },
+              {
+                id: "tx-refund",
+                date: "2026-03-06",
+                amount: 30000,
+                deleted: false,
+                transfer_account_id: null,
+                category_name: "Groceries",
+                payee_id: "payee-2",
+                payee_name: "Trader Joe's",
+              },
+              {
+                id: "tx-generic",
+                date: "2026-03-07",
+                amount: 50000,
+                deleted: false,
+                transfer_account_id: null,
+                category_name: null,
+                payee_id: "payee-3",
+                payee_name: "Opening Balance",
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetIncomeSummaryTool.execute(
+      { planId: "plan-1", fromMonth: "2026-03-01", toMonth: "2026-03-01", topN: 5 },
+      api as any,
+    );
+
+    expect(parseText(result as any)).toEqual({
+      from_month: "2026-03-01",
+      to_month: "2026-03-01",
+      income_total: "250.00",
+      average_monthly_income: "250.00",
+      median_monthly_income: "250.00",
+      income_month_count: 1,
+      volatility_percent: "0.00",
+      top_income_sources: [
+        {
+          id: "payee-1",
+          name: "Employer",
+          amount: "250.00",
+          transaction_count: 1,
+        },
+      ],
+      months: [
+        {
+          month: "2026-03-01",
+          income: "250.00",
         },
       ],
     });
@@ -591,6 +910,7 @@ describe("advanced finance tools", () => {
       scope: {
         type: "category_group",
         name: "Living",
+        match_basis: "category_group_name",
       },
       average_spent: "356.67",
       peak_month: "2026-02-01",
@@ -897,4 +1217,118 @@ describe("advanced finance tools", () => {
     });
   });
 
+  it("does not count positive refund activity as spending in category trends", async () => {
+    const api = {
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              deleted: false,
+              categories: [
+                {
+                  id: "cat-1",
+                  name: "Medical Reimbursement",
+                  category_group_name: "Reimbursements",
+                  deleted: false,
+                  hidden: false,
+                  budgeted: 0,
+                  activity: 12000,
+                  balance: 12000,
+                },
+              ],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetCategoryTrendSummaryTool.execute(
+      { planId: "plan-1", fromMonth: "2026-03-01", toMonth: "2026-03-01", categoryGroupName: "Reimbursements" },
+      api as any,
+    );
+
+    expect(parseText(result as any)).toEqual({
+      from_month: "2026-03-01",
+      to_month: "2026-03-01",
+      scope: {
+        type: "category_group",
+        name: "Reimbursements",
+        match_basis: "category_group_name",
+      },
+      average_spent: "0.00",
+      peak_month: "2026-03-01",
+      spent_change: "0.00",
+      periods: [
+        {
+          month: "2026-03-01",
+          assigned: "0.00",
+          spent: "0.00",
+          available: "12.00",
+        },
+      ],
+    });
+  });
+
+  it("defaults category trend month ranges to the current month before expanding the month list", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-24T12:00:00.000Z"));
+
+    try {
+      const api = {
+        months: {
+          getPlanMonth: vi.fn().mockResolvedValue({
+            data: {
+              month: {
+                month: "2026-03-01",
+                deleted: false,
+                categories: [
+                  {
+                    id: "cat-1",
+                    name: "Groceries",
+                    category_group_name: "Living",
+                    deleted: false,
+                    hidden: false,
+                    budgeted: 165000,
+                    activity: -150000,
+                    balance: 15000,
+                  },
+                ],
+              },
+            },
+          }),
+        },
+      };
+
+      const result = await GetCategoryTrendSummaryTool.execute(
+        { planId: "plan-1", categoryGroupName: "Living" },
+        api as any,
+      );
+
+      expect(api.months.getPlanMonth).toHaveBeenCalledTimes(1);
+      expect(api.months.getPlanMonth).toHaveBeenCalledWith("plan-1", "2026-03-01");
+      expect(parseText(result as any)).toEqual({
+        from_month: "2026-03-01",
+        to_month: "2026-03-01",
+        scope: {
+          type: "category_group",
+          name: "Living",
+          match_basis: "category_group_name",
+        },
+        average_spent: "150.00",
+        peak_month: "2026-03-01",
+        spent_change: "0.00",
+        periods: [
+          {
+            month: "2026-03-01",
+            assigned: "165.00",
+            spent: "150.00",
+            available: "15.00",
+          },
+        ],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
