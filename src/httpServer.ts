@@ -685,7 +685,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     const tokenClientId = auth.mode === "oauth" &&
       getRequestPath(req) === "/token" &&
       req.method === "POST"
-      ? getBodyStringValue(req.body as unknown, "client_id")
+      ? getBodyStringValue(req.body, "client_id")
       : undefined;
     const persistedProfileId = auth.mode === "oauth" && tokenClientId
       ? mcpAuthModule?.getClientCompatibilityProfile(tokenClientId)
