@@ -1,3 +1,253 @@
+# Calculation Logic Remediation Plan
+
+## Goal
+
+Fix the highest-impact YNAB calculation issues from the audit so the finance analytics tools use consistent money semantics, stop misclassifying transfers and refunds, and expose outputs that an LLM can interpret correctly.
+
+## Constraints And Notes
+
+- Work is isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-calculation-logic-remediation` on branch `fix/calculation-logic-remediation` from `origin/main`.
+- Repo rules require TDD for code changes, one task at a time, with a stop after each task.
+- The finance tools currently mix month snapshots, raw transactions, scheduled transactions, and current category metadata; several fixes will need shared helpers so the same YNAB rules are not reimplemented inconsistently.
+- The YNAB SDK confirms `transactions.getTransactions(planId, sinceDate, ...)` is a since-date endpoint, while `getTransactionsByMonth` is the month-scoped endpoint. Future implementation should prefer the month endpoint when the tool contract is month-specific.
+
+## Assumptions
+
+- The first remediation pass should prioritize semantic correctness over adding new tools.
+- Credit card payment categories should not count as discretionary spending in spending, anomaly, or ratio tools.
+- Positive category activity should not automatically be treated as spending; refunds should either reduce spend or be surfaced separately.
+- Tools that forecast upcoming obligations should separate due outflows from expected inflows instead of mixing them into one obligation total.
+- We can update existing Vitest specs under `src/` because they are not inside a `tests/` directory.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for shared money-classification semantics
+  Test to write:
+  Add focused red tests in `src/financeToolUtils.spec.ts` and the affected finance specs proving that:
+  negative expense activity counts as spend,
+  positive refund activity does not inflate spend,
+  transfers are excluded from expense/income classification,
+  and credit card payment categories are excluded from spending-style summaries.
+  Code to implement:
+  No production code in this task. Only failing specs that pin the desired behavior for refunds, transfers, and credit-card-payment handling.
+  How to verify it works:
+  Run `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the failures proving the current helpers and tools misclassify these cases.
+  Result:
+  Added red coverage in:
+  `src/financeToolUtils.spec.ts`,
+  `src/financeSummaryTools.spec.ts`,
+  `src/financeAdvancedTools.spec.ts`,
+  and `src/financialDiagnostics.spec.ts`.
+  Verified red with:
+  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
+  which failed because:
+  `toSpentMilliunits` still converts positive activity into spend,
+  `ynab_get_financial_snapshot` still reports positive month activity as spending,
+  `ynab_get_category_trend_summary` still counts positive refund activity as spend,
+  and `ynab_get_spending_anomalies` still flags credit card payment categories as spending anomalies.
+
+- [x] Task 2: Implement shared money classification and replace `Math.abs(activity)` spending logic
+  Test to write:
+  Reuse the failing specs from Task 1.
+  Code to implement:
+  Add shared helpers in `src/tools/financeToolUtils.ts` for sign-aware spending, refund treatment, transfer exclusion, and optional credit-card-payment exclusion.
+  Update these tools to use the shared logic instead of raw `Math.abs(...)`:
+  `GetFinancialSnapshotTool.ts`,
+  `GetBudgetHealthSummaryTool.ts`,
+  `GetCashFlowSummaryTool.ts`,
+  `GetCategoryTrendSummaryTool.ts`,
+  `GetSpendingAnomaliesTool.ts`,
+  and `GetBudgetRatioSummaryTool.ts`.
+  How to verify it works:
+  Re-run the Task 1 Vitest command and show the new tests passing.
+  Then run the broader touched suite:
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/financeToolUtils.spec.ts`.
+  Result:
+  Updated `src/tools/financeToolUtils.ts` so spend-style summaries only treat negative activity as spending and added a shared credit-card-payment category helper.
+  Updated `src/tools/GetSpendingAnomaliesTool.ts` to exclude categories in the `Credit Card Payments` group from anomaly detection.
+  Verified green with:
+  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
+  and
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/financeToolUtils.spec.ts`
+
+- [x] Task 3: Add failing coverage for month-scoped cleanup and health excluding transfer noise
+  Test to write:
+  Extend `src/financeAdvancedTools.spec.ts` and `src/financialDiagnostics.spec.ts` so they fail unless month cleanup and health counts exclude on-budget transfers from uncategorized backlog and other cleanup metrics.
+  Include a fixture where a transfer is uncategorized by design and must not be reported as user cleanup work.
+  Code to implement:
+  No production code in this task. Only failing tests for transfer-aware cleanup semantics.
+  How to verify it works:
+  Run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the failures proving transfer transactions are currently over-counted.
+  Result:
+  Added red coverage in `src/financeAdvancedTools.spec.ts` and `src/financialDiagnostics.spec.ts` proving that uncategorized transfer transactions were still being counted as cleanup backlog.
+  Verified red with:
+  `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
+  which failed because both budget cleanup and financial health metrics counted transfer transactions as uncategorized, unapproved, and uncleared work items.
+
+- [x] Task 4: Implement transfer-aware cleanup and health query fixes
+  Test to write:
+  Reuse the red tests from Task 3.
+  Code to implement:
+  Update `GetBudgetCleanupSummaryTool.ts` and `GetFinancialHealthCheckTool.ts` to exclude transfer transactions from cleanup counts.
+  Where the contract is explicitly month-based, prefer month-specific transaction fetches or equivalent exact month filtering with the transfer-aware classifier.
+  How to verify it works:
+  Re-run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the red tests turning green.
+  Then run `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` to confirm no finance-summary regression.
+  Result:
+  Added a shared `isTransferTransaction` helper in `src/tools/financeToolUtils.ts` and used it in `src/tools/GetBudgetCleanupSummaryTool.ts` and `src/tools/GetFinancialHealthCheckTool.ts`.
+  Verified green with:
+  `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
+  and
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
+
+- [x] Task 5: Add failing coverage for true-income versus generic positive inflow semantics
+  Test to write:
+  Extend `src/financeAdvancedTools.spec.ts` and, if helpful, add focused helper coverage so `ynab_get_income_summary` fails unless it distinguishes real income from refund/reimbursement-like positive inflows.
+  The fixture should cover:
+  paycheck income,
+  a merchant refund,
+  and a positive non-transfer inflow that should not be labeled as income without an explicit rule.
+  Code to implement:
+  No production code in this task. Only failing tests that define the intended income contract.
+  How to verify it works:
+  Run `npx vitest run src/financeAdvancedTools.spec.ts` and show the failure demonstrating the current tool over-counts positive inflows as income.
+  Result:
+  Tightened the existing income fixtures so true income is explicitly categorized as `Inflow: Ready to Assign`, then added red coverage proving that refunds and generic positive inflows were still counted as income.
+  Verified red with:
+  `npx vitest run src/financeAdvancedTools.spec.ts`
+  which failed because `ynab_get_income_summary` still counted a positive refund and a generic positive inflow in monthly income totals.
+
+- [x] Task 6: Implement tighter income semantics and expose any unavoidable ambiguity
+  Test to write:
+  Reuse the failing specs from Task 5.
+  Code to implement:
+  Update `GetIncomeSummaryTool.ts` to use a stricter income classifier.
+  If the available API data cannot reliably separate every positive inflow type, surface that limitation explicitly in the payload or tool description rather than silently calling all positive inflows "income".
+  Keep the implementation minimal and grounded in YNAB fields that actually exist.
+  How to verify it works:
+  Re-run `npx vitest run src/financeAdvancedTools.spec.ts` and show the tests passing.
+  Then run the broader finance specs to confirm no regression in downstream summaries that reference income.
+  Result:
+  Added a shared `isReadyToAssignInflowCategory` helper in `src/tools/financeToolUtils.ts` and updated `src/tools/GetIncomeSummaryTool.ts` so only positive, non-transfer `Inflow: Ready to Assign` transactions count as income.
+  Verified green with:
+  `npx vitest run src/financeAdvancedTools.spec.ts`
+  and
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/financeToolUtils.spec.ts`
+
+- [x] Task 7: Add failing coverage for obligation-window forecasting semantics
+  Test to write:
+  Extend `src/financeAdvancedTools.spec.ts` and `src/financialDiagnostics.spec.ts` so they fail unless:
+  upcoming obligation outputs separate due outflows from expected inflows,
+  transfer-like scheduled transactions are excluded,
+  and repeated schedules inside a 30-day window are not silently undercounted.
+  Code to implement:
+  No production code in this task. Only failing specs that define the forecast contract.
+  How to verify it works:
+  Run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the failures proving the current obligation math mixes inflows with obligations and only counts `date_next`.
+  Result:
+  Added red coverage in `src/financeAdvancedTools.spec.ts` and `src/financialDiagnostics.spec.ts` proving that:
+  recurring weekly scheduled outflows were undercounted,
+  transfer-like schedules were still included,
+  and obligation counts still mixed inflows with true due outflows.
+  Verified red with:
+  `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
+  which failed because the current implementation only counted each schedule's `date_next` and did not separate inflow counts from obligation counts.
+
+- [x] Task 8: Implement expanded obligation forecasting and align health-check cash-risk inputs
+  Test to write:
+  Reuse the failing specs from Task 7.
+  Code to implement:
+  Update `GetUpcomingObligationsTool.ts` to expand recurring scheduled transactions across the 7/14/30 day windows, exclude transfers, and return outflows separately from inflows.
+  Update `GetFinancialHealthCheckTool.ts` so its `upcoming_30d_net` or equivalent risk input is based on the corrected obligation model.
+  How to verify it works:
+  Re-run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the new tests passing.
+  Then run the broader finance suite to confirm the health-check output remains stable apart from the intentional semantic correction.
+  Result:
+  Added shared scheduled-occurrence expansion in `src/tools/financeToolUtils.ts` and reused it in `src/tools/GetUpcomingObligationsTool.ts` and `src/tools/GetFinancialHealthCheckTool.ts`.
+  `ynab_get_upcoming_obligations` now:
+  expands recurring schedules across the 30-day horizon,
+  excludes transfers,
+  separates `obligation_count` from `expected_inflow_count`,
+  and reports top due items by expanded occurrence date.
+  `ynab_get_financial_health_check` now bases `upcoming_30d_net` on the same expanded schedule model.
+  Verified green with:
+  `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
+  and
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/financeToolUtils.spec.ts`
+
+- [x] Task 9: Add failing coverage for ratio and trend labels that currently overstate meaning
+  Test to write:
+  Add focused assertions in `src/financeAdvancedTools.spec.ts`, `src/financeSummaryTools.spec.ts`, `src/serverFactory.spec.ts`, or `src/codeQuality.spec.ts` so they fail unless:
+  live finance tool descriptions explain timing and classification semantics explicitly,
+  `assigned_vs_spent` fields are described as timing/buffering metrics rather than discipline scores,
+  and category/group trend summaries surface enough context to avoid silent history rewrites when group names change.
+  Code to implement:
+  No production code in this task. Only red assertions for contract wording and output clarity.
+  How to verify it works:
+  Run the targeted Vitest specs and show the failures proving the current tool contracts are semantically too loose.
+  Result:
+  Adapted this task to the current branch state, where `ynab_get_70_20_10_summary` is already removed.
+  Added red coverage in `src/serverFactory.spec.ts` for live finance-tool descriptions and in `src/financeAdvancedTools.spec.ts` for category-group trend scope metadata.
+  Verified red with:
+  `npx vitest run src/serverFactory.spec.ts src/financeAdvancedTools.spec.ts`
+  which failed because the descriptions still overstated semantics and category-group trend output did not expose name-based matching.
+
+- [x] Task 10: Implement contract/description cleanup for ratio, trend, and snapshot semantics
+  Test to write:
+  Reuse the failing specs from Task 9.
+  Code to implement:
+  Update the affected tool descriptions and payload labels in:
+  `GetCategoryTrendSummaryTool.ts`,
+  `GetCashFlowSummaryTool.ts`,
+  `GetBudgetHealthSummaryTool.ts`,
+  `GetFinancialSnapshotTool.ts`,
+  `GetIncomeSummaryTool.ts`,
+  and `GetUpcomingObligationsTool.ts`.
+  Keep this task focused on truthful semantics and output shape, not on adding brand-new analytics.
+  How to verify it works:
+  Re-run the targeted specs from Task 9 and show them passing.
+  Then inspect the registered tool metadata through the existing registrar coverage to confirm the clarified contracts are exposed at runtime.
+  Result:
+  Updated live finance tool descriptions so they explicitly describe timing/buffering semantics, cash-flow versus savings semantics, `Inflow: Ready to Assign` income classification, and obligation windows as due outflows plus expected inflows excluding transfers.
+  Updated `GetCategoryTrendSummaryTool.ts` so group-based trend payloads expose `scope.match_basis: "category_group_name"`.
+  Verified green with:
+  `npx vitest run src/serverFactory.spec.ts src/financeAdvancedTools.spec.ts`
+
+- [x] Task 11: Final verification on the audited analytics surface
+  Test to write:
+  No new tests in this task. Use the approved red/green specs as proof.
+  Code to implement:
+  No new production behavior unless verification exposes a tightly coupled issue. If that happens, stop and re-plan before continuing.
+  How to verify it works:
+  Run at minimum:
+  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/serverFactory.spec.ts`
+  and
+  `npm run typecheck`
+  Add a short results section to this file before closing out implementation.
+  Result:
+  Final verification passed with:
+  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/serverFactory.spec.ts`
+  and
+  `npm run typecheck`
+
+## Review Bar
+
+- Spending-like fields treat refunds, transfers, and credit-card-payment shuffling correctly.
+- Cleanup-style tools do not tell the LLM that normal transfers are uncategorized user mistakes.
+- Income outputs are either meaningfully constrained to real income or explicitly labeled when ambiguity remains.
+- Obligation windows reflect the full scheduled horizon, not just each item's next occurrence.
+- Tool descriptions and payload labels are truthful enough that an LLM can answer finance questions without silently overstating what the server actually computed.
+
+## Results
+
+- Spend-style helpers now treat only negative activity as spending and exclude `Credit Card Payments` categories from anomaly detection.
+- Cleanup and health metrics now exclude transfer transactions from uncategorized, unapproved, and uncleared backlog counts.
+- Income summaries now count only positive, non-transfer `Inflow: Ready to Assign` transactions as income.
+- Upcoming obligations now expand recurring schedules across the full horizon, exclude transfers, and separate outflow obligation counts from expected inflow counts.
+- Health-check `upcoming_30d_net` now uses the same expanded schedule model as the obligations tool.
+- Tool descriptions now explicitly explain timing/buffering semantics and income/obligation classification boundaries.
+- Category-group trend summaries now expose `scope.match_basis: "category_group_name"` so name-based matching is visible in the payload.
+
 # Remove 70/20/10 Tool Plan
 
 ## Goal

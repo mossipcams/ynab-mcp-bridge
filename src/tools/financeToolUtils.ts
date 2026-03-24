@@ -7,6 +7,34 @@ type RollupEntry = {
   transactionCount?: number | undefined;
 };
 
+type ScheduledFrequency =
+  | "never"
+  | "daily"
+  | "weekly"
+  | "everyOtherWeek"
+  | "twiceAMonth"
+  | "every4Weeks"
+  | "monthly"
+  | "everyOtherMonth"
+  | "every3Months"
+  | "every4Months"
+  | "twiceAYear"
+  | "yearly"
+  | "everyOtherYear";
+
+type ScheduledTransactionLike = {
+  id: string;
+  date_next: string;
+  amount: number;
+  frequency?: ScheduledFrequency | null;
+  transfer_account_id?: string | null;
+};
+
+type ExpandedScheduledOccurrence<T extends ScheduledTransactionLike> = T & {
+  occurrence_date: string;
+  days_until_due: number;
+};
+
 export function formatMilliunits(value: number) {
   return (value / 1000).toFixed(2);
 }
@@ -20,7 +48,99 @@ export function buildAssignedSpentSummary(assignedMilliunits: number, spentMilli
 }
 
 export function toSpentMilliunits(activityMilliunits: number) {
-  return Math.abs(activityMilliunits);
+  return activityMilliunits < 0 ? Math.abs(activityMilliunits) : 0;
+}
+
+export function isCreditCardPaymentCategoryName(categoryGroupName?: string) {
+  return typeof categoryGroupName === "string"
+    && categoryGroupName.trim().toLowerCase() === "credit card payments";
+}
+
+export function isReadyToAssignInflowCategory(categoryName?: string | null) {
+  return categoryName === "Inflow: Ready to Assign";
+}
+
+export function isTransferTransaction(transaction: { transfer_account_id?: string | null }) {
+  return !!transaction.transfer_account_id;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function addMonths(date: Date, months: number) {
+  const next = new Date(date.getTime());
+  next.setUTCMonth(next.getUTCMonth() + months);
+  return next;
+}
+
+function toIsoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function incrementScheduledDate(date: Date, frequency?: ScheduledFrequency | null) {
+  switch (frequency ?? "never") {
+    case "never":
+      return null;
+    case "daily":
+      return addDays(date, 1);
+    case "weekly":
+      return addDays(date, 7);
+    case "everyOtherWeek":
+      return addDays(date, 14);
+    case "twiceAMonth":
+      return addDays(date, 15);
+    case "every4Weeks":
+      return addDays(date, 28);
+    case "monthly":
+      return addMonths(date, 1);
+    case "everyOtherMonth":
+      return addMonths(date, 2);
+    case "every3Months":
+      return addMonths(date, 3);
+    case "every4Months":
+      return addMonths(date, 4);
+    case "twiceAYear":
+      return addMonths(date, 6);
+    case "yearly":
+      return addMonths(date, 12);
+    case "everyOtherYear":
+      return addMonths(date, 24);
+  }
+}
+
+export function expandScheduledOccurrences<T extends ScheduledTransactionLike>(
+  transactions: T[],
+  asOfDate: string,
+  windowDays: number,
+) {
+  const windowEnd = addDays(new Date(`${asOfDate}T00:00:00.000Z`), windowDays);
+
+  return transactions.flatMap((transaction) => {
+    if (isTransferTransaction(transaction)) {
+      return [];
+    }
+
+    const occurrences: ExpandedScheduledOccurrence<T>[] = [];
+    let cursor: Date | null = new Date(`${transaction.date_next}T00:00:00.000Z`);
+
+    while (cursor && cursor <= windowEnd) {
+      const occurrenceDate = toIsoDate(cursor);
+      if (occurrenceDate >= asOfDate) {
+        occurrences.push({
+          ...transaction,
+          occurrence_date: occurrenceDate,
+          days_until_due: Math.floor((cursor.getTime() - new Date(`${asOfDate}T00:00:00.000Z`).getTime()) / 86_400_000),
+        });
+      }
+
+      cursor = incrementScheduledDate(cursor, transaction.frequency ?? undefined);
+    }
+
+    return occurrences;
+  });
 }
 
 export function getCurrentMonthStartIsoDate() {

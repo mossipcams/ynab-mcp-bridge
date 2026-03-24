@@ -122,6 +122,72 @@ describe("finance summary tools", () => {
     });
   });
 
+  it("does not treat net-positive month activity as spending in the snapshot summary", async () => {
+    const api = {
+      accounts: {
+        getAccounts: vi.fn().mockResolvedValue({
+          data: {
+            accounts: [
+              {
+                id: "acct-1",
+                name: "Checking",
+                type: "checking",
+                on_budget: true,
+                closed: false,
+                deleted: false,
+                balance: 250000,
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              income: 100000,
+              budgeted: 40000,
+              activity: 15000,
+              to_be_budgeted: 60000,
+              age_of_money: 25,
+              deleted: false,
+              categories: [],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetFinancialSnapshotTool.execute(
+      { planId: "plan-1", month: "2026-03-01" },
+      api as any,
+    );
+
+    expect(parseText(result)).toEqual({
+      month: "2026-03-01",
+      net_worth: "250.00",
+      liquid_cash: "250.00",
+      debt: "0.00",
+      ready_to_assign: "60.00",
+      income: "100.00",
+      assigned: "40.00",
+      spent: "0.00",
+      assigned_vs_spent: "40.00",
+      age_of_money: 25,
+      account_count: 1,
+      on_budget_account_count: 1,
+      debt_account_count: 0,
+      top_asset_accounts: [
+        {
+          id: "acct-1",
+          name: "Checking",
+          amount: "250.00",
+        },
+      ],
+    });
+  });
+
   it("builds a compact spending summary across a month range", async () => {
     const api = {
       transactions: {

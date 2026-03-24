@@ -12,7 +12,7 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 
 export const name = "ynab_get_financial_snapshot";
 export const description =
-  "Returns a compact personal finance snapshot with net worth, cash, debt, and assigned versus spent.";
+  "Returns a compact personal finance snapshot with net worth, cash, debt, and assigned versus spent. `assigned_vs_spent` reflects budget timing and buffering, not a discipline score.";
 export const inputSchema = {
   planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
   month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe(
