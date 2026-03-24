@@ -19,7 +19,7 @@ describe("createServer", () => {
     });
     const registeredTools = Object.keys((server as any)._registeredTools);
 
-    expect(registeredTools).toHaveLength(45);
+    expect(registeredTools).toHaveLength(47);
     expect(registeredTools).toEqual(
       expect.arrayContaining([
         "ynab_get_mcp_version",
@@ -53,6 +53,8 @@ describe("createServer", () => {
         "ynab_get_money_movement_groups",
         "ynab_get_money_movement_groups_by_month",
         "ynab_get_financial_snapshot",
+        "ynab_get_net_worth_trajectory",
+        "ynab_get_monthly_review",
         "ynab_get_financial_health_check",
         "ynab_get_spending_summary",
         "ynab_get_spending_anomalies",
@@ -82,7 +84,7 @@ describe("createServer", () => {
       {} as any,
     );
 
-    expect(registeredToolNames).toHaveLength(45);
+    expect(registeredToolNames).toHaveLength(47);
     expect(registeredToolNames).toEqual([
       "ynab_get_mcp_version",
       "ynab_get_user",
@@ -115,6 +117,8 @@ describe("createServer", () => {
       "ynab_get_money_movement_groups",
       "ynab_get_money_movement_groups_by_month",
       "ynab_get_financial_snapshot",
+      "ynab_get_net_worth_trajectory",
+      "ynab_get_monthly_review",
       "ynab_get_financial_health_check",
       "ynab_get_spending_summary",
       "ynab_get_spending_anomalies",
@@ -130,7 +134,7 @@ describe("createServer", () => {
       "ynab_get_recurring_expense_summary",
       "ynab_get_category_trend_summary",
     ]);
-    expect(registerTool).toHaveBeenCalledTimes(45);
+    expect(registerTool).toHaveBeenCalledTimes(47);
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_mcp_version",
       expect.objectContaining({
@@ -151,6 +155,61 @@ describe("createServer", () => {
       expect.anything(),
       expect.any(Function),
     );
+    expect(registerTool).toHaveBeenCalledWith(
+      "ynab_get_net_worth_trajectory",
+      expect.objectContaining({
+        title: "Get Net Worth Trajectory",
+        description: expect.any(String),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      }),
+      expect.any(Function),
+    );
+    expect(registerTool).toHaveBeenCalledWith(
+      "ynab_get_monthly_review",
+      expect.objectContaining({
+        title: "Get Monthly Review",
+        description: expect.any(String),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("documents assigned_vs_spent as buffering and timing behavior in finance tool descriptions", () => {
+    const registerTool = vi.fn();
+
+    registerServerTools(
+      {
+        registerTool,
+      },
+      {} as any,
+    );
+
+    const descriptions = new Map(
+      registerTool.mock.calls.map(([toolName, registration]) => [
+        toolName,
+        (registration as { description?: string }).description ?? "",
+      ]),
+    );
+
+    expect(descriptions.get("ynab_get_financial_snapshot")).toContain("buffering");
+    expect(descriptions.get("ynab_get_financial_snapshot")).toContain("timing");
+    expect(descriptions.get("ynab_get_budget_health_summary")).toContain("buffering");
+    expect(descriptions.get("ynab_get_budget_health_summary")).toContain("not a discipline score");
+    expect(descriptions.get("ynab_get_cash_flow_summary")).toContain("timing");
+    expect(descriptions.get("ynab_get_cash_flow_summary")).toContain("not a discipline score");
+    expect(descriptions.get("ynab_get_monthly_review")).toContain("buffering");
+    expect(descriptions.get("ynab_get_monthly_review")).toContain("timing");
   });
 
   it("registers finance tool descriptions that clarify timing and classification semantics", () => {

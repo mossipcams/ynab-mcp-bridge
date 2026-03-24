@@ -1,5 +1,19 @@
 type CompactObjectValue = unknown;
 
+type AccountBalanceLike = {
+  balance: number;
+  deleted?: boolean;
+  closed?: boolean;
+  on_budget?: boolean;
+};
+
+type AccountTransactionLike = {
+  account_id?: string;
+  amount: number;
+  date: string;
+  deleted?: boolean;
+};
+
 type RollupEntry = {
   id?: string | undefined;
   name: string;
@@ -211,6 +225,82 @@ export function buildUpcomingWindowSummary(inflowMilliunits: number, outflowMill
     upcoming_outflows: formatMilliunits(normalizedOutflow),
     net_upcoming: formatMilliunits(inflowMilliunits - normalizedOutflow),
   };
+}
+
+export function liquidCashMilliunits(accounts: AccountBalanceLike[]) {
+  return accounts
+    .filter((account) => !account.deleted && account.on_budget && account.balance > 0)
+    .reduce((sum, account) => sum + account.balance, 0);
+}
+
+export function debtMilliunits(accounts: AccountBalanceLike[]) {
+  return accounts
+    .filter((account) => !account.deleted && account.balance < 0)
+    .reduce((sum, account) => sum + Math.abs(account.balance), 0);
+}
+
+export function netWorthMilliunits(accounts: AccountBalanceLike[]) {
+  return accounts
+    .filter((account) => !account.deleted)
+    .reduce((sum, account) => sum + account.balance, 0);
+}
+
+export function reconstructHistoricalAccountBalances<
+  TAccount extends AccountBalanceLike & { id: string },
+  TTransaction extends AccountTransactionLike,
+>(
+  accounts: TAccount[],
+  transactions: TTransaction[],
+  months: string[],
+) {
+  const balances = new Map(accounts
+    .filter((account) => !account.deleted)
+    .map((account) => [account.id, account.balance] as const));
+  const snapshots = new Map<string, TAccount[]>();
+  const transactionsDescending = transactions
+    .filter((transaction) => !transaction.deleted && typeof transaction.account_id === "string" && balances.has(transaction.account_id))
+    .slice()
+    .sort((left, right) => right.date.localeCompare(left.date));
+
+  let transactionIndex = 0;
+  const sortedMonths = months.slice().sort((left, right) => right.localeCompare(left));
+
+  for (const month of sortedMonths) {
+    const monthEnd = toMonthEnd(month);
+
+    while (transactionIndex < transactionsDescending.length) {
+      const transaction = transactionsDescending[transactionIndex];
+      if (!transaction || transaction.date <= monthEnd) {
+        break;
+      }
+
+      const accountId = transaction.account_id;
+      if (!accountId) {
+        transactionIndex += 1;
+        continue;
+      }
+
+      const currentBalance = balances.get(accountId);
+
+      if (typeof currentBalance === "number") {
+        balances.set(accountId, currentBalance - transaction.amount);
+      }
+
+      transactionIndex += 1;
+    }
+
+    snapshots.set(
+      month,
+      accounts
+        .filter((account) => !account.deleted)
+        .map((account) => ({
+          ...account,
+          balance: balances.get(account.id) ?? account.balance,
+        })),
+    );
+  }
+
+  return snapshots;
 }
 
 export function compactObject(input: Record<string, CompactObjectValue>) {
