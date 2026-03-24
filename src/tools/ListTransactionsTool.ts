@@ -3,7 +3,8 @@ import * as ynab from "ynab";
 
 import {
   formatAmountMilliunits,
-  hasCollectionControls,
+  hasPaginationControls,
+  hasProjectionControls,
   paginateEntries,
   projectRecord,
 } from "./collectionToolUtils.js";
@@ -60,9 +61,16 @@ export async function execute(
         cleared: transaction.cleared,
       }));
 
-    if (!hasCollectionControls(input)) {
+    if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
       return toTextResult({
         transactions,
+        transaction_count: transactions.length,
+      });
+    }
+
+    if (!hasPaginationControls(input)) {
+      return toTextResult({
+        transactions: transactions.map((transaction) => projectRecord(transaction, transactionFields, input)),
         transaction_count: transactions.length,
       });
     }

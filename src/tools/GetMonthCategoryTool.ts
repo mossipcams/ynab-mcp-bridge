@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { compactObject } from "./financeToolUtils.js";
+import { compactObject, formatMilliunits } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_month_category";
@@ -34,12 +34,12 @@ export async function execute(
         name: category.name,
         hidden: category.hidden,
         category_group_name: category.category_group_name,
-        budgeted: category.budgeted,
-        activity: category.activity,
-        balance: category.balance,
+        budgeted: category.budgeted == null ? undefined : formatMilliunits(category.budgeted),
+        activity: category.activity == null ? undefined : formatMilliunits(category.activity),
+        balance: category.balance == null ? undefined : formatMilliunits(category.balance),
         goal_type: category.goal_type,
-        goal_target: category.goal_target,
-        goal_under_funded: category.goal_under_funded,
+        goal_target: category.goal_target == null ? undefined : formatMilliunits(category.goal_target),
+        goal_under_funded: category.goal_under_funded == null ? undefined : formatMilliunits(category.goal_under_funded),
       }),
     });
   } catch (error) {
