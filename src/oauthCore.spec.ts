@@ -274,13 +274,259 @@ describe("createOAuthCore", () => {
         token: "generated-5",
       },
       upstreamTokens: {
-        access_token: "upstream-access-token",
         expires_in: 1800,
         refresh_token: "upstream-refresh-token",
         token_type: "Bearer",
       },
     });
+    expect(store.state.grants.get("generated-2")?.upstreamTokens).not.toHaveProperty("access_token");
     expect(store.state.grants.size).toBe(1);
+  });
+
+  it("keeps the consent grant when approving consent cannot persist the pending authorization step", async () => {
+    const store = createStore();
+    let nextId = 0;
+    let failPendingAuthorizationSave = false;
+    const originalSaveGrant = store.saveGrant;
+
+    store.saveGrant = (grant) => {
+      if (failPendingAuthorizationSave && grant.pendingAuthorization) {
+        throw new Error("Simulated grant persistence failure.");
+      }
+
+      originalSaveGrant(grant);
+    };
+
+    const core = createOAuthCore({
+      config: {
+        callbackUrl: "https://mcp.example.com/oauth/callback",
+        defaultResource: "https://mcp.example.com/mcp",
+        defaultScopes: ["openid", "profile"],
+      },
+      dependencies: {
+        createId: () => `generated-${++nextId}`,
+        createUpstreamAuthorizationUrl: (pending) => {
+          const url = new URL("https://upstream.example.com/authorize");
+          url.searchParams.set("state", pending.upstreamState);
+          return url.href;
+        },
+        exchangeUpstreamAuthorizationCode: async () => ({
+          access_token: "upstream-access-token",
+          token_type: "Bearer",
+        }),
+        exchangeUpstreamRefreshToken: async () => ({
+          access_token: "upstream-refresh-token-access",
+          token_type: "Bearer",
+        }),
+        mintAccessToken: async () => "local-access-token-1",
+        now: () => 1_700_000_000_000,
+      },
+      store,
+    });
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    failPendingAuthorizationSave = true;
+
+    await expect(core.approveConsent(consentResult.consentChallenge, "approve")).rejects.toThrow(
+      "Simulated grant persistence failure.",
+    );
+    expect(store.state.grants.get(consentResult.consentChallenge)).toMatchObject({
+      consent: {
+        challenge: consentResult.consentChallenge,
+      },
+      grantId: consentResult.consentChallenge,
+    });
+  });
+
+  it("keeps the pending authorization grant when callback handling cannot persist the authorization code step", async () => {
+    const store = createStore();
+    let nextId = 0;
+    let failAuthorizationCodeSave = false;
+    const originalSaveGrant = store.saveGrant;
+
+    store.saveGrant = (grant) => {
+      if (failAuthorizationCodeSave && grant.authorizationCode) {
+        throw new Error("Simulated authorization-code persistence failure.");
+      }
+
+      originalSaveGrant(grant);
+    };
+
+    const core = createOAuthCore({
+      config: {
+        callbackUrl: "https://mcp.example.com/oauth/callback",
+        defaultResource: "https://mcp.example.com/mcp",
+        defaultScopes: ["openid", "profile"],
+      },
+      dependencies: {
+        createId: () => `generated-${++nextId}`,
+        createUpstreamAuthorizationUrl: (pending) => {
+          const url = new URL("https://upstream.example.com/authorize");
+          url.searchParams.set("state", pending.upstreamState);
+          return url.href;
+        },
+        exchangeUpstreamAuthorizationCode: async () => ({
+          access_token: "upstream-access-token",
+          token_type: "Bearer",
+        }),
+        exchangeUpstreamRefreshToken: async () => ({
+          access_token: "upstream-refresh-token-access",
+          token_type: "Bearer",
+        }),
+        mintAccessToken: async () => "local-access-token-1",
+        now: () => 1_700_000_000_000,
+      },
+      store,
+    });
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    const approvalResult = await core.approveConsent(consentResult.consentChallenge, "approve");
+
+    if (approvalResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    failAuthorizationCodeSave = true;
+    const upstreamState = new URL(approvalResult.location).searchParams.get("state");
+
+    await expect(core.handleCallback({
+      code: "upstream-code-123",
+      upstreamState: upstreamState!,
+    })).rejects.toThrow("Simulated authorization-code persistence failure.");
+    expect(store.getPendingAuthorizationGrant(upstreamState!)).toMatchObject({
+      grantId: consentResult.consentChallenge,
+      pendingAuthorization: {
+        stateId: upstreamState,
+      },
+    });
+  });
+
+  it("keeps the authorization code grant when token exchange cannot persist the refresh-token step", async () => {
+    const store = createStore();
+    let nextId = 0;
+    let failRefreshTokenSave = false;
+    const originalSaveGrant = store.saveGrant;
+
+    store.saveGrant = (grant) => {
+      if (failRefreshTokenSave && grant.refreshToken) {
+        throw new Error("Simulated refresh-token persistence failure.");
+      }
+
+      originalSaveGrant(grant);
+    };
+
+    const core = createOAuthCore({
+      config: {
+        callbackUrl: "https://mcp.example.com/oauth/callback",
+        defaultResource: "https://mcp.example.com/mcp",
+        defaultScopes: ["openid", "profile"],
+      },
+      dependencies: {
+        createId: () => `generated-${++nextId}`,
+        createUpstreamAuthorizationUrl: (pending) => {
+          const url = new URL("https://upstream.example.com/authorize");
+          url.searchParams.set("state", pending.upstreamState);
+          return url.href;
+        },
+        exchangeUpstreamAuthorizationCode: async () => ({
+          access_token: "upstream-access-token",
+          expires_in: 1800,
+          refresh_token: "upstream-refresh-token",
+          token_type: "Bearer",
+        }),
+        exchangeUpstreamRefreshToken: async () => ({
+          access_token: "upstream-refresh-token-access",
+          token_type: "Bearer",
+        }),
+        mintAccessToken: async () => "local-access-token-1",
+        now: () => 1_700_000_000_000,
+      },
+      store,
+    });
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    const approvalResult = await core.approveConsent(consentResult.consentChallenge, "approve");
+
+    if (approvalResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const upstreamState = new URL(approvalResult.location).searchParams.get("state");
+    const callbackResult = await core.handleCallback({
+      code: "upstream-code-123",
+      upstreamState: upstreamState!,
+    });
+
+    if (callbackResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    failRefreshTokenSave = true;
+    const authorizationCode = new URL(callbackResult.location).searchParams.get("code");
+
+    await expect(core.exchangeAuthorizationCode(
+      client,
+      authorizationCode!,
+      "https://claude.ai/oauth/callback",
+      new URL("https://mcp.example.com/mcp"),
+    )).rejects.toThrow("Simulated refresh-token persistence failure.");
+    expect(store.getAuthorizationCodeGrant(authorizationCode!)).toMatchObject({
+      grantId: consentResult.consentChallenge,
+      authorizationCode: {
+        code: authorizationCode,
+      },
+    });
   });
 
   it("refreshes local tokens against the upstream provider and rejects mismatched redirect or resource values", async () => {

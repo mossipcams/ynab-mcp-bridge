@@ -42,7 +42,8 @@
     "test": "vitest",
     "test:ci": "mkdir -p artifacts/test-results && vitest run --reporter=default --reporter=junit --outputFile.junit=./artifacts/test-results/vitest-junit.xml",
     "test:watch": "vitest watch",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "preflight": "npm run test:ci && npm run test:coverage && npm run lint:deps && npm run lint && npm run typecheck && npm run lint:unused && npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

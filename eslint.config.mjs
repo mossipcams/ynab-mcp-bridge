@@ -131,6 +131,7 @@ export default [
   },
   {
     files: ["src/clientProfiles/**/*.ts"],
+    ignores: NON_TYPED_TS_IGNORES,
     languageOptions: {
       globals: {
         ...globals.node,

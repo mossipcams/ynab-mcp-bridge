@@ -31,7 +31,12 @@ function safeStringify(value) {
  */
 export function getErrorMessage(error) {
     if (error instanceof Error) {
-        return error.message;
+        if (error.message) {
+            return error.message;
+        }
+    }
+    if (typeof error === "string" && error.length > 0) {
+        return error;
     }
     const ynabApiMessage = getYnabApiErrorMessage(error);
     if (ynabApiMessage) {

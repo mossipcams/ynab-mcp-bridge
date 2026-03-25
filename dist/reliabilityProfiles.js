@@ -87,11 +87,14 @@ const RELIABILITY_PROFILES = {
         },
     },
 };
+function isReliabilityProfileName(value) {
+    return Object.hasOwn(RELIABILITY_PROFILES, value);
+}
 export function listReliabilityProfiles() {
     return Object.values(RELIABILITY_PROFILES);
 }
 export function parseReliabilityProfileName(value) {
-    if (value in RELIABILITY_PROFILES) {
+    if (isReliabilityProfileName(value)) {
         return value;
     }
     throw new Error(`Unknown reliability profile: ${value}`);

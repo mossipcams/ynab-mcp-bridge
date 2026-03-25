@@ -36,6 +36,11 @@ npm install
 npm run build
 ```
 
+Build artifact policy:
+
+- `dist/` remains tracked in this repository for now because the published package and CLI entrypoints resolve from built JavaScript under `dist/`.
+- When a source change affects runtime output, keep the generated `dist/` artifacts in sync with the source change rather than treating them as disposable local-only files.
+
 ### 2. Run the default local HTTP server
 
 ```bash
@@ -55,6 +60,16 @@ Defaults:
 export YNAB_API_TOKEN=your-token
 npm run start:stdio
 ```
+
+### Local CI Preflight
+
+Run this before pushing when you want one command that mirrors the required CI gates:
+
+```bash
+npm run preflight
+```
+
+`preflight` runs the required local checks from CI: `test:ci`, `test:coverage`, `lint:deps`, `lint`, `typecheck`, `lint:unused`, and `build`. It intentionally does not include the advisory-only `lint:oxlint` step because that CI job is non-blocking.
 
 ### 4. Expose authless HTTP intentionally
 

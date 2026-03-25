@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createServer, registerServerTools } from "./server.js";
+import { defineReadOnlyTool, registerDefinedTools } from "./toolDefinition.js";
+import * as ListTransactionsTool from "./tools/ListTransactionsTool.js";
 
 describe("createServer", () => {
   const originalEnv = process.env;
@@ -185,6 +187,46 @@ describe("createServer", () => {
     );
   });
 
+  it("supports reusable read-only tool definitions outside the main server module", () => {
+    const registerTool = vi.fn();
+    const definitions = [
+      defineReadOnlyTool("List Transactions", ListTransactionsTool),
+    ];
+
+    const registeredToolNames = registerDefinedTools(
+      {
+        registerTool,
+      },
+      {} as any,
+      definitions,
+    );
+
+    expect(registeredToolNames).toEqual(["ynab_list_transactions"]);
+    expect(registerTool).toHaveBeenCalledWith(
+      "ynab_list_transactions",
+      expect.objectContaining({
+        title: "List Transactions",
+        description: ListTransactionsTool.description,
+        inputSchema: ListTransactionsTool.inputSchema,
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("sources server registrations from shared tool definitions instead of manual per-tool wrappers", () => {
+    const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("defineReadOnlyTool(");
+    expect(source).toContain("registerDefinedTools(");
+    expect(source).not.toContain("register: (registrar, api) =>");
+  });
+
   it("documents assigned_vs_spent as buffering and timing behavior in finance tool descriptions", () => {
     const registerTool = vi.fn();
 
@@ -307,8 +349,9 @@ describe("createServer", () => {
   it("defines an explicit tool registry instead of passing whole tool modules around", () => {
     const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
 
-    expect(source).toContain("name: GetMcpVersionTool.name");
-    expect(source).toContain("executeTool(GetAccountTool.execute, api)");
+    expect(source).toContain('defineReadOnlyTool("Get MCP Version", GetMcpVersionTool)');
+    expect(source).toContain('defineReadOnlyTool("Get Account", GetAccountTool)');
+    expect(source).toContain("const toolDefinitions = [");
     expect(source).not.toContain("module: GetAccountTool");
     expect(source).not.toContain("module.execute");
   });

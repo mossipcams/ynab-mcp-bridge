@@ -2,7 +2,6 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
-import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import type { ClientProfileId } from "./clientProfiles/types.js";
 import {
@@ -10,6 +9,7 @@ import {
   hasActiveGrantStep,
   normalizeGrant,
   normalizeScopes,
+  type OAuthGrantUpstreamTokens,
   type OAuthGrant,
   type OAuthGrantInput,
 } from "./oauthGrant.js";
@@ -35,7 +35,7 @@ type PendingAuthorizationRecord = Omit<PendingConsentRecord, "clientName">;
 
 type AuthorizationCodeRecord = PendingAuthorizationRecord & {
   principalId: string;
-  upstreamTokens: OAuthTokens;
+  upstreamTokens: OAuthGrantUpstreamTokens;
 };
 
 type RefreshTokenRecord = {
@@ -44,7 +44,7 @@ type RefreshTokenRecord = {
   principalId: string;
   resource: string;
   scopes: string[];
-  upstreamTokens: OAuthTokens;
+  upstreamTokens: OAuthGrantUpstreamTokens;
 };
 
 type LegacyPersistedOAuthState = {
@@ -86,10 +86,13 @@ function normalizeApprovalRecord(record: ApprovalRecord) {
   };
 }
 
-function isOAuthTokens(value: unknown): value is OAuthTokens {
+function isOAuthGrantUpstreamTokens(value: unknown): value is OAuthGrantUpstreamTokens {
   return isRecord(value) &&
-    typeof value["access_token"] === "string" &&
-    typeof value["token_type"] === "string";
+    typeof value["token_type"] === "string" &&
+    (value["access_token"] === undefined || typeof value["access_token"] === "string") &&
+    (value["expires_in"] === undefined || typeof value["expires_in"] === "number") &&
+    (value["refresh_token"] === undefined || typeof value["refresh_token"] === "string") &&
+    (value["scope"] === undefined || typeof value["scope"] === "string");
 }
 
 function isOAuthClientInformationFull(value: unknown): value is OAuthClientInformationFull {
@@ -223,7 +226,7 @@ function parseGrantRecord(value: unknown): OAuthGrant | undefined {
     ...(typeof value["state"] === "string" ? { state: value["state"] } : {}),
     ...(typeof value["principalId"] === "string" ? { principalId: value["principalId"] } : {}),
     ...(typeof value["subject"] === "string" ? { subject: value["subject"] } : {}),
-    ...(isOAuthTokens(value["upstreamTokens"]) ? { upstreamTokens: value["upstreamTokens"] } : {}),
+    ...(isOAuthGrantUpstreamTokens(value["upstreamTokens"]) ? { upstreamTokens: value["upstreamTokens"] } : {}),
   });
 }
 
@@ -380,7 +383,7 @@ function toLegacyAuthorizationCodeGrant(
     typeof resource !== "string" ||
     !Array.isArray(scopes) ||
     typeof principalId !== "string" ||
-    !isOAuthTokens(upstreamTokens)
+    !isOAuthGrantUpstreamTokens(upstreamTokens)
   ) {
     return undefined;
   }
@@ -427,7 +430,7 @@ function toLegacyRefreshTokenGrant(
     typeof resource !== "string" ||
     !Array.isArray(scopes) ||
     typeof principalId !== "string" ||
-    !isOAuthTokens(upstreamTokens)
+    !isOAuthGrantUpstreamTokens(upstreamTokens)
   ) {
     return undefined;
   }

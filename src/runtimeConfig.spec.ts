@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -329,5 +330,11 @@ describe("resolveRuntimeConfig", () => {
       planResolution: "dynamic",
       status: "ok",
     });
+  });
+
+  it("keeps runtimeConfig as a real module instead of a pure re-export facade", () => {
+    const source = readFileSync(new URL("./runtimeConfig.ts", import.meta.url), "utf8");
+
+    expect(source.trim()).not.toBe('export { assertBackendEnvironment, resolveRuntimeConfig } from "./config.js";');
   });
 });

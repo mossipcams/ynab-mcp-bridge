@@ -8,6 +8,36 @@ function getErrorMessage(error) {
     }
     return String(error);
 }
+function requireFlagValue(flag, value) {
+    if (!value) {
+        throw new Error(`Expected ${flag} to be followed by a value.`);
+    }
+    return value;
+}
+function applyLoadFlag(parsed, argument, value) {
+    if (argument === "--dry-run") {
+        parsed.dryRun = true;
+        return false;
+    }
+    const requiredValue = requireFlagValue(argument, value);
+    if (argument === "--profile") {
+        const profileName = parseReliabilityProfileName(requiredValue);
+        if (profileName === "smoke") {
+            throw new Error("The dedicated load suite only supports baseline, stress, spike, and soak.");
+        }
+        parsed.profileName = profileName;
+        return true;
+    }
+    if (argument === "--url") {
+        parsed.targetUrl = requiredValue;
+        return true;
+    }
+    if (argument === "--json-out") {
+        parsed.jsonOut = requiredValue;
+        return true;
+    }
+    throw new Error(`Unknown reliability load argument: ${argument}`);
+}
 export function parseReliabilityLoadArgs(argv) {
     const parsed = {
         dryRun: false,
@@ -17,36 +47,12 @@ export function parseReliabilityLoadArgs(argv) {
     };
     for (let index = 0; index < argv.length; index += 1) {
         const argument = argv[index];
+        if (!argument) {
+            continue;
+        }
         const value = argv[index + 1];
-        switch (argument) {
-            case "--profile": {
-                const profileName = parseReliabilityProfileName(value ?? "");
-                if (profileName === "smoke") {
-                    throw new Error("The dedicated load suite only supports baseline, stress, spike, and soak.");
-                }
-                parsed.profileName = profileName;
-                index += 1;
-                break;
-            }
-            case "--url":
-                if (!value) {
-                    throw new Error("Expected --url to be followed by a value.");
-                }
-                parsed.targetUrl = value;
-                index += 1;
-                break;
-            case "--json-out":
-                if (!value) {
-                    throw new Error("Expected --json-out to be followed by a value.");
-                }
-                parsed.jsonOut = value;
-                index += 1;
-                break;
-            case "--dry-run":
-                parsed.dryRun = true;
-                break;
-            default:
-                throw new Error(`Unknown reliability load argument: ${argument}`);
+        if (applyLoadFlag(parsed, argument, value)) {
+            index += 1;
         }
     }
     return parsed;

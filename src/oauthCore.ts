@@ -7,7 +7,7 @@ import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextproto
 
 import type { ClientProfileId } from "./clientProfiles/types.js";
 import { getEffectiveOAuthScopes } from "./config.js";
-import type { OAuthGrant } from "./oauthGrant.js";
+import { minimizeUpstreamTokens, type OAuthGrant } from "./oauthGrant.js";
 import { parseAuthorizationRequest, parseClientMetadata } from "./oauthSchemas.js";
 
 export type PendingAuthorization = {
@@ -259,9 +259,8 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       throw new InvalidRequestError("Unknown consent challenge.");
     }
 
-    store.deleteGrant(grant.grantId);
-
     if (action !== "approve") {
+      store.deleteGrant(grant.grantId);
       return {
         type: "redirect" as const,
         location: createErrorRedirect(grant.redirectUri, {
@@ -272,12 +271,6 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       };
     }
 
-    store.approveClient({
-      clientId: grant.clientId,
-      resource: grant.resource,
-      scopes: grant.scopes,
-    });
-
     const upstreamState = dependencies.createId();
     store.saveGrant({
       ...grant,
@@ -286,6 +279,11 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
         expiresAt: dependencies.now() + 10 * 60 * 1000,
         stateId: upstreamState,
       },
+    });
+    store.approveClient({
+      clientId: grant.clientId,
+      resource: grant.resource,
+      scopes: grant.scopes,
     });
 
     return {
@@ -308,9 +306,8 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       throw new InvalidRequestError("Unknown upstream OAuth state.");
     }
 
-    store.deleteGrant(grant.grantId);
-
     if (params.error) {
+      store.deleteGrant(grant.grantId);
       return {
         type: "redirect" as const,
         location: createErrorRedirect(grant.redirectUri, {
@@ -336,7 +333,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       },
       pendingAuthorization: undefined,
       principalId: grant.clientId,
-      upstreamTokens,
+      upstreamTokens: minimizeUpstreamTokens(upstreamTokens),
     });
 
     const redirectUrl = new URL(grant.redirectUri);
@@ -397,8 +394,6 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       throw new InvalidGrantError("Authorization code is missing grant context.");
     }
 
-    store.deleteGrant(grant.grantId);
-
     const expiresInSeconds = clampExpiresIn(grant.upstreamTokens.expires_in);
     const accessToken = await dependencies.mintAccessToken({
       clientId: grant.clientId,
@@ -416,6 +411,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
         expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
         token: refreshToken,
       },
+      upstreamTokens: minimizeUpstreamTokens(grant.upstreamTokens),
     });
 
     return {
@@ -482,7 +478,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
         expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
         token: nextRefreshToken,
       },
-      upstreamTokens: nextUpstreamTokens,
+      upstreamTokens: minimizeUpstreamTokens(nextUpstreamTokens),
     });
 
     return {

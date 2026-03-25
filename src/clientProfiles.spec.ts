@@ -1,3 +1,4 @@
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -8,8 +9,30 @@ import {
 import { getClientProfile } from "./clientProfiles/index.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
+import { setLoggerDestinationForTests } from "./logger.js";
 
 describe("client profiles", () => {
+  function createBufferedDestination() {
+    const destination = new PassThrough();
+    const chunks: string[] = [];
+
+    destination.on("data", (chunk) => {
+      chunks.push(chunk.toString("utf8"));
+    });
+
+    return {
+      destination,
+      readEntries() {
+        return chunks
+          .join("")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+      },
+    };
+  }
+
   function createRequestContext(overrides: Partial<{
     headers: Record<string, string | string[] | undefined>;
     method: string;
@@ -24,6 +47,7 @@ describe("client profiles", () => {
   }
 
   afterEach(() => {
+    setLoggerDestinationForTests();
     vi.restoreAllMocks();
   });
 
@@ -326,7 +350,8 @@ describe("client profiles", () => {
   });
 
   it("attaches a resolved client profile to request lifecycle context and logs the reason", () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const locals: Record<string, unknown> = {};
 
     setResolvedClientProfile(locals, {
@@ -340,16 +365,23 @@ describe("client profiles", () => {
     });
 
     logClientProfileEvent("profile.detected", {
+      apiToken: "secret-token",
       path: "/.well-known/oauth-authorization-server/sse",
       profileId: "codex",
       reason: "path:codex-oauth-probe",
     });
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith("[profile]", "profile.detected", {
-      path: "/.well-known/oauth-authorization-server/sse",
-      profileId: "codex",
-      reason: "path:codex-oauth-probe",
-    });
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        apiToken: "[Redacted]",
+        event: "profile.detected",
+        msg: "profile.detected",
+        path: "/.well-known/oauth-authorization-server/sse",
+        profileId: "codex",
+        reason: "path:codex-oauth-probe",
+        scope: "profile",
+      }),
+    ]));
   });
 
   it("detects a profile from initialize clientInfo and capabilities when available", () => {
