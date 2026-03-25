@@ -249,6 +249,28 @@ describe("code quality guardrails", () => {
     expect(workflow).toContain("npm run lint:unused");
   });
 
+  it("defines JSCPD duplicate detection and a checked-in tech debt report in repo config and CI", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(existsSync(new URL("../.jscpd.json", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("../scripts/tech-debt-report.sh", import.meta.url))).toBe(true);
+    expect(packageJson.devDependencies.jscpd).toBeTruthy();
+    expect(packageJson.devDependencies["npm-check-updates"]).toBeTruthy();
+    expect(packageJson.scripts["lint:duplicates"]).toBeTruthy();
+    expect(packageJson.scripts["tech-debt:report"]).toBeTruthy();
+    expect(packageJson.scripts["tech-debt:report"]).toContain("scripts/tech-debt-report.sh");
+    expect(workflow).toContain("Run JSCPD");
+    expect(workflow).toContain("npm run lint:duplicates");
+    expect(workflow).toContain("Run tech debt report");
+    expect(workflow).toContain("npm run tech-debt:report");
+  });
+
   it("runs the main CI workflow in the expected validation order", () => {
     const workflow = readFileSync(
       new URL("../.github/workflows/test.yml", import.meta.url),
@@ -265,6 +287,8 @@ describe("code quality guardrails", () => {
     const eslintIndex = workflow.indexOf("Run ESLint");
     const typecheckIndex = workflow.indexOf("Run TypeScript typecheck");
     const knipIndex = workflow.indexOf("Run Knip");
+    const jscpdIndex = workflow.indexOf("Run JSCPD");
+    const techDebtIndex = workflow.indexOf("Run tech debt report");
     const buildIndex = workflow.indexOf("Build package");
 
     expect(testsIndex).toBeGreaterThanOrEqual(0);
@@ -273,7 +297,9 @@ describe("code quality guardrails", () => {
     expect(eslintIndex).toBeGreaterThan(dependencyRulesIndex);
     expect(typecheckIndex).toBeGreaterThan(eslintIndex);
     expect(knipIndex).toBeGreaterThan(typecheckIndex);
-    expect(buildIndex).toBeGreaterThan(knipIndex);
+    expect(jscpdIndex).toBeGreaterThan(knipIndex);
+    expect(techDebtIndex).toBeGreaterThan(jscpdIndex);
+    expect(buildIndex).toBeGreaterThan(techDebtIndex);
   });
 
   it("keeps production typecheck in CI and exposes a separate test typecheck script", () => {

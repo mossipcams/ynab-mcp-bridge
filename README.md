@@ -71,6 +71,15 @@ npm run preflight
 
 `preflight` runs the required local checks from CI: `test:ci`, `test:coverage`, `lint:deps`, `lint`, `typecheck`, `lint:unused`, and `build`. It intentionally does not include the advisory-only `lint:oxlint` step because that CI job is non-blocking.
 
+For advisory quality reporting outside the blocking preflight gate, you can also run:
+
+```bash
+npm run lint:duplicates
+npm run tech-debt:report
+```
+
+`lint:duplicates` runs JSCPD with the checked-in `.jscpd.json` settings, and `tech-debt:report` prints the current duplication, dead-export, suppression, debt-marker, and dependency-update counts.
+
 ### 4. Expose authless HTTP intentionally
 
 Use this only when the network path is already trusted.

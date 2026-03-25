@@ -22,4 +22,22 @@ describe("local preflight command", () => {
     expect(preflightScript).toContain("npm run build");
     expect(readme).toContain("npm run preflight");
   });
+
+  it("documents the advisory duplicate-detection and tech debt report commands separately", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      scripts?: Record<string, string>;
+    };
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+    const preflightScript = packageJson.scripts?.["preflight"];
+
+    expect(packageJson.scripts?.["lint:duplicates"]).toContain(".jscpd.json");
+    expect(packageJson.scripts?.["tech-debt:report"]).toContain("scripts/tech-debt-report.sh");
+    expect(readme).toContain("npm run lint:duplicates");
+    expect(readme).toContain("npm run tech-debt:report");
+    expect(readme).toContain("advisory");
+    expect(preflightScript).not.toContain("lint:duplicates");
+    expect(preflightScript).not.toContain("tech-debt:report");
+  });
 });

@@ -1,0 +1,13 @@
+{
+  "threshold": 100,
+  "reporters": ["console", "json"],
+  "output": "artifacts/jscpd-report",
+  "gitignore": true,
+  "ignore": [
+    "**/*.spec.ts",
+    "**/*.contract.ts",
+    "artifacts/**",
+    "dist/**",
+    "node_modules/**"
+  ]
+}

@@ -874,6 +874,67 @@ The first version should be safe, deterministic, and useful for catching flaky t
 
 Plan ready. Approve to proceed.
 
+# Tech Debt Report Plan
+
+## Goal
+
+Add a checked-in CI tech-debt report script that outputs the requested duplication, dead-export, suppression, comment-marker, and dependency-update counts.
+
+## Constraints And Notes
+
+- This is a follow-on change on top of the already-open roadmap branch and PR.
+- Repo rules require stopping after the plan and waiting for approval before any non-Markdown implementation work.
+- The current repo already validates quality-tool wiring through `src/codeQuality.spec.ts`, so the safest place to pin the new script and workflow contract is there.
+- Your requested report shell uses `jscpd`, `knip`, `jq`, `grep`, `wc`, and `npm-check-updates`.
+- Because the script calls `jscpd` directly, we should make that binary reliably available from the repo rather than depending on a globally installed tool.
+
+## Assumptions
+
+- The cleanest implementation is a checked-in shell script such as `scripts/tech-debt-report.sh`, invoked from CI and optionally exposed through `package.json`.
+- This should be a reporting step, not a blocking gate, unless you later ask to turn one or more metrics into failures.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for the tech-debt report contract
+  Test to write:
+  Extend `src/codeQuality.spec.ts` so it fails unless the repo declares `jscpd` and the other required tooling for the report, includes a checked-in tech-debt report script, and runs that script from a named step in `.github/workflows/test.yml`.
+  Code to implement:
+  No production code in this task. Only the red spec updates that pin the script/dependency/workflow contract.
+  How to verify it works:
+  Run `npx vitest run src/codeQuality.spec.ts` and show the failure proving the report is not wired today.
+  Result:
+  Added red coverage in `src/codeQuality.spec.ts`, and it failed as expected because `scripts/tech-debt-report.sh` and the JSCPD/report workflow wiring did not exist yet.
+
+- [x] Task 2: Implement JSCPD and the tech-debt report script in CI
+  Test to write:
+  Reuse the failing `src/codeQuality.spec.ts` coverage from Task 1.
+  Code to implement:
+  Add `jscpd` to `devDependencies`, add a focused JSCPD config if needed, expose a stable local entry point for duplicate detection, add the shell script with the requested output shape, and add a `Run tech debt report` step to `.github/workflows/test.yml`.
+  How to verify it works:
+  Re-run `npx vitest run src/codeQuality.spec.ts`, then run both the JSCPD command and the tech-debt report locally and show that they print the intended duplication and debt metrics successfully.
+  Result:
+  Added `.jscpd.json`, `npm run lint:duplicates`, `scripts/tech-debt-report.sh`, `npm run tech-debt:report`, and CI steps for both `Run JSCPD` and `Run tech debt report`. Verified with `npx vitest run src/codeQuality.spec.ts`, `npm run lint:duplicates`, and `npm run tech-debt:report`.
+
+- [x] Task 3: Document the local entry point and finish verification
+  Test to write:
+  Add or extend a small metadata/doc assertion, likely in `src/preflight.spec.ts` or a nearby quality spec, so it fails unless `README.md` tells contributors how to run the same report locally.
+  Code to implement:
+  Document the command in `README.md` and, if helpful, expose it as an npm script such as `npm run tech-debt:report`.
+  How to verify it works:
+  Re-run the targeted spec coverage, then run the final proof set: `npm run preflight` plus the local tech-debt report command or script.
+  Result:
+  Documented the advisory `npm run lint:duplicates` and `npm run tech-debt:report` commands in `README.md`, added doc-contract coverage in `src/preflight.spec.ts`, and prepared the final proof set.
+
+## Review Bar
+
+- JSCPD is explicitly implemented, runnable locally, and available to the report script without relying on a global install.
+- The report script is checked in and matches the requested metric categories.
+- CI runs the report from a named workflow step instead of relying on tribal knowledge.
+- Contributors have one clear local command to reproduce the report.
+- The final verification proves both the contract tests and the real report command work.
+
+Plan ready. Approve to proceed.
+
 # OAuth-Persisted Client Profile Plan
 
 ## Goal
