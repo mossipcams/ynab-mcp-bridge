@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.1...ynab-mcp-bridge-v0.14.2) (2026-03-25)
+
+
+### Bug Fixes
+
+* reduce duplicate feature and oauth code ([4502450](https://github.com/mossipcams/ynab-mcp-bridge/commit/45024504f8984b17b4685895bc0f922e423cb168))
+* reduce duplicate feature and oauth code ([27da691](https://github.com/mossipcams/ynab-mcp-bridge/commit/27da691693be800171d01668994e779de5fd8072))
+* resolve duplicate remediation CI regressions ([5d5e3cb](https://github.com/mossipcams/ynab-mcp-bridge/commit/5d5e3cbe6a44fe800f5856c2bb6752bbf5f176a5))
+
 ## [0.14.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.0...ynab-mcp-bridge-v0.14.1) (2026-03-25)
 
 
