@@ -3,21 +3,11 @@ import * as ynab from "ynab";
 
 import {
   formatAmountMilliunits,
-  paginateEntries,
-  projectRecord,
+  renderCollectionResult,
 } from "./collectionToolUtils.js";
 import { compactObject } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-
-const transactionFields = [
-  "date",
-  "amount",
-  "payee_name",
-  "category_name",
-  "account_name",
-  "approved",
-  "cleared",
-] as const;
+import { toDisplayTransactions, transactionFields } from "./transactionToolUtils.js";
 
 const sortableValues = [
   "date_asc",
@@ -139,27 +129,20 @@ export async function execute(
       undefined,
     ));
 
-    const transactions = response.data.transactions
+    const matchingTransactions = response.data.transactions
       .filter((transaction) => !transaction.deleted)
       .filter((transaction) => matchesFilters(transaction, input))
-      .sort((left, right) => compareTransactions(left, right, sort))
-      .map((transaction) => ({
-        id: transaction.id,
-        date: transaction.date,
-        amount: formatAmountMilliunits(transaction.amount),
-        payee_name: transaction.payee_name,
-        category_name: transaction.category_name,
-        account_name: transaction.account_name,
-        approved: transaction.approved,
-        cleared: transaction.cleared,
-      }));
-
-    const pagedTransactions = paginateEntries(transactions, input);
+      .sort((left, right) => compareTransactions(left, right, sort));
+    const transactions = toDisplayTransactions(matchingTransactions);
 
     return toTextResult({
-      transactions: pagedTransactions.entries.map((transaction) => projectRecord(transaction, transactionFields, input)),
-      match_count: transactions.length,
-      ...pagedTransactions.metadata,
+      ...renderCollectionResult(
+        transactions,
+        transactionFields,
+        input,
+        "transactions",
+        "match_count",
+      ),
       filters: compactObject({
         from_date: input.fromDate,
         to_date: input.toDate,

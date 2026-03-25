@@ -1,0 +1,15 @@
+{
+  "threshold": 100,
+  "minLines": 3,
+  "minTokens": 20,
+  "reporters": ["console", "json"],
+  "output": "artifacts/jscpd-report",
+  "gitignore": true,
+  "ignore": [
+    ".git/**",
+    "artifacts/**",
+    "dist/**",
+    "node_modules/**",
+    "package-lock.json"
+  ]
+}

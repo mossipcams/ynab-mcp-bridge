@@ -8,21 +8,13 @@ import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextproto
 import type { ClientProfileId } from "./clientProfiles/types.js";
 import { getEffectiveOAuthScopes } from "./config.js";
 import type { OAuthGrant } from "./oauthGrant.js";
+import {
+  toPendingConsentRecord,
+  type PendingAuthorizationRecord as PendingAuthorization,
+  type PendingConsentRecord as PendingConsent,
+} from "./oauthGrantViews.js";
 import { parseAuthorizationRequest, parseClientMetadata } from "./oauthSchemas.js";
-
-export type PendingAuthorization = {
-  clientId: string;
-  codeChallenge: string;
-  expiresAt: number;
-  redirectUri: string;
-  resource: string;
-  scopes: string[];
-  state?: string | undefined;
-};
-
-export type PendingConsent = PendingAuthorization & {
-  clientName?: string | undefined;
-};
+export type { PendingAuthorization, PendingConsent } from "./oauthGrantViews.js";
 
 type OAuthCoreStore = {
   approveClient: (record: { clientId: string; resource: string; scopes: string[] }) => void;
@@ -145,24 +137,74 @@ function assertRegisteredRedirectUri(client: OAuthClientInformationFull, redirec
   }
 }
 
-function toPendingConsent(grant: OAuthGrant): PendingConsent {
-  if (!grant.consent) {
-    throw new InvalidRequestError("Unknown consent challenge.");
+export function createOAuthCore({ config, dependencies, store }: OAuthCoreOptions) {
+  function replaceGrant(currentGrantId: string, nextGrant: OAuthGrant) {
+    store.deleteGrant(currentGrantId);
+    store.saveGrant(nextGrant);
   }
 
-  return {
-    clientId: grant.clientId,
-    clientName: grant.clientName,
-    codeChallenge: grant.codeChallenge,
-    expiresAt: grant.consent.expiresAt,
-    redirectUri: grant.redirectUri,
-    resource: grant.resource,
-    scopes: grant.scopes,
-    state: grant.state,
-  };
-}
+  function requireAuthorizationCodeGrant(
+    client: OAuthClientInformationFull,
+    authorizationCode: string,
+  ) {
+    const grant = store.getAuthorizationCodeGrant(authorizationCode);
 
-export function createOAuthCore({ config, dependencies, store }: OAuthCoreOptions) {
+    if (!grant || !grant.authorizationCode || grant.clientId !== client.client_id) {
+      throw new InvalidGrantError("Unknown authorization code.");
+    }
+
+    if (isExpired(grant.authorizationCode.expiresAt, dependencies.now())) {
+      store.deleteGrant(grant.grantId);
+      throw new InvalidGrantError("Authorization code has expired.");
+    }
+
+    return grant;
+  }
+
+  function requirePendingConsentGrant(consentChallenge: string) {
+    const grant = store.getPendingConsentGrant(consentChallenge);
+
+    if (!grant || isExpired(grant.consent?.expiresAt, dependencies.now())) {
+      if (grant) {
+        store.deleteGrant(grant.grantId);
+      }
+      throw new InvalidRequestError("Unknown consent challenge.");
+    }
+
+    return grant;
+  }
+
+  function requirePendingAuthorizationGrant(upstreamState: string) {
+    const grant = store.getPendingAuthorizationGrant(upstreamState);
+
+    if (!grant || isExpired(grant.pendingAuthorization?.expiresAt, dependencies.now())) {
+      if (grant) {
+        store.deleteGrant(grant.grantId);
+      }
+      throw new InvalidRequestError("Unknown upstream OAuth state.");
+    }
+
+    return grant;
+  }
+
+  function requireRefreshTokenGrant(
+    client: OAuthClientInformationFull,
+    refreshToken: string,
+  ) {
+    const grant = store.getRefreshTokenGrant(refreshToken);
+
+    if (!grant || !grant.refreshToken || grant.clientId !== client.client_id) {
+      throw new InvalidGrantError("Unknown refresh token.");
+    }
+
+    if (isExpired(grant.refreshToken.expiresAt, dependencies.now())) {
+      store.deleteGrant(grant.grantId);
+      throw new InvalidGrantError("Refresh token has expired.");
+    }
+
+    return grant;
+  }
+
   async function registerClient(
     client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">,
   ) {
@@ -242,26 +284,23 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
 
     store.saveGrant(grant);
 
+    const pending = toPendingConsentRecord(grant);
+    if (!pending) {
+      throw new InvalidRequestError("Unknown consent challenge.");
+    }
+
     return {
       type: "consent" as const,
       consentChallenge,
-      pending: toPendingConsent(grant),
+      pending,
     };
   }
 
   async function approveConsent(consentChallenge: string, action: string) {
-    const grant = store.getPendingConsentGrant(consentChallenge);
-
-    if (!grant || isExpired(grant.consent?.expiresAt, dependencies.now())) {
-      if (grant) {
-        store.deleteGrant(grant.grantId);
-      }
-      throw new InvalidRequestError("Unknown consent challenge.");
-    }
-
-    store.deleteGrant(grant.grantId);
+    const grant = requirePendingConsentGrant(consentChallenge);
 
     if (action !== "approve") {
+      store.deleteGrant(grant.grantId);
       return {
         type: "redirect" as const,
         location: createErrorRedirect(grant.redirectUri, {
@@ -279,7 +318,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     });
 
     const upstreamState = dependencies.createId();
-    store.saveGrant({
+    replaceGrant(grant.grantId, {
       ...grant,
       consent: undefined,
       pendingAuthorization: {
@@ -299,18 +338,10 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
   }
 
   async function handleCallback(params: CallbackInput) {
-    const grant = store.getPendingAuthorizationGrant(params.upstreamState);
-
-    if (!grant || isExpired(grant.pendingAuthorization?.expiresAt, dependencies.now())) {
-      if (grant) {
-        store.deleteGrant(grant.grantId);
-      }
-      throw new InvalidRequestError("Unknown upstream OAuth state.");
-    }
-
-    store.deleteGrant(grant.grantId);
+    const grant = requirePendingAuthorizationGrant(params.upstreamState);
 
     if (params.error) {
+      store.deleteGrant(grant.grantId);
       return {
         type: "redirect" as const,
         location: createErrorRedirect(grant.redirectUri, {
@@ -328,7 +359,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     const authorizationCode = dependencies.createId();
     const upstreamTokens = await dependencies.exchangeUpstreamAuthorizationCode(params.code);
 
-    store.saveGrant({
+    replaceGrant(grant.grantId, {
       ...grant,
       authorizationCode: {
         code: authorizationCode,
@@ -353,17 +384,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
   }
 
   async function getAuthorizationCodeChallenge(client: OAuthClientInformationFull, authorizationCode: string) {
-    const grant = store.getAuthorizationCodeGrant(authorizationCode);
-
-    if (!grant || !grant.authorizationCode || grant.clientId !== client.client_id) {
-      throw new InvalidGrantError("Unknown authorization code.");
-    }
-
-    if (isExpired(grant.authorizationCode.expiresAt, dependencies.now())) {
-      store.deleteGrant(grant.grantId);
-      throw new InvalidGrantError("Authorization code has expired.");
-    }
-
+    const grant = requireAuthorizationCodeGrant(client, authorizationCode);
     return grant.codeChallenge;
   }
 
@@ -373,16 +394,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     redirectUri: string | undefined,
     resource: URL | undefined,
   ) {
-    const grant = store.getAuthorizationCodeGrant(authorizationCode);
-
-    if (!grant || !grant.authorizationCode || grant.clientId !== client.client_id) {
-      throw new InvalidGrantError("Unknown authorization code.");
-    }
-
-    if (isExpired(grant.authorizationCode.expiresAt, dependencies.now())) {
-      store.deleteGrant(grant.grantId);
-      throw new InvalidGrantError("Authorization code has expired.");
-    }
+    const grant = requireAuthorizationCodeGrant(client, authorizationCode);
 
     if (redirectUri && redirectUri !== grant.redirectUri) {
       throw new InvalidGrantError("redirect_uri does not match the authorization request.");
@@ -397,8 +409,6 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       throw new InvalidGrantError("Authorization code is missing grant context.");
     }
 
-    store.deleteGrant(grant.grantId);
-
     const expiresInSeconds = clampExpiresIn(grant.upstreamTokens.expires_in);
     const accessToken = await dependencies.mintAccessToken({
       clientId: grant.clientId,
@@ -409,7 +419,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     });
     const refreshToken = dependencies.createId();
 
-    store.saveGrant({
+    replaceGrant(grant.grantId, {
       ...grant,
       authorizationCode: undefined,
       refreshToken: {
@@ -433,16 +443,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     scopes: string[] | undefined,
     resource: URL | undefined,
   ) {
-    const grant = store.getRefreshTokenGrant(refreshToken);
-
-    if (!grant || !grant.refreshToken || grant.clientId !== client.client_id) {
-      throw new InvalidGrantError("Unknown refresh token.");
-    }
-
-    if (isExpired(grant.refreshToken.expiresAt, dependencies.now())) {
-      store.deleteGrant(grant.grantId);
-      throw new InvalidGrantError("Refresh token has expired.");
-    }
+    const grant = requireRefreshTokenGrant(client, refreshToken);
 
     const grantedScopes = scopes && scopes.length > 0 ? scopes : grant.scopes;
 
@@ -454,7 +455,14 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       throw new InvalidGrantError("resource does not match the refresh token.");
     }
 
-    const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(grant.upstreamTokens?.refresh_token ?? "");
+    const upstreamRefreshToken = grant.upstreamTokens?.refresh_token;
+
+    if (!upstreamRefreshToken) {
+      store.deleteGrant(grant.grantId);
+      throw new InvalidGrantError("Refresh token is missing upstream refresh-token context.");
+    }
+
+    const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(upstreamRefreshToken);
     const nextUpstreamTokens: OAuthTokens = {
       ...grant.upstreamTokens,
       ...refreshedUpstreamTokens,
@@ -476,7 +484,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     });
     const nextRefreshToken = dependencies.createId();
 
-    store.saveGrant({
+    replaceGrant(grant.grantId, {
       ...grant,
       refreshToken: {
         expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,

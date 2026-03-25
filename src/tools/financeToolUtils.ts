@@ -21,6 +21,23 @@ type RollupEntry = {
   transactionCount?: number | undefined;
 };
 
+type BudgetHealthMonthCategoryLike = {
+  id: string;
+  name: string;
+  balance: number;
+  deleted?: boolean;
+  hidden?: boolean;
+  goal_under_funded?: number | null;
+  category_group_name?: string;
+};
+
+type BudgetHealthMonthLike = {
+  budgeted: number;
+  activity: number;
+  to_be_budgeted: number;
+  categories: BudgetHealthMonthCategoryLike[];
+};
+
 type ScheduledFrequency =
   | "never"
   | "daily"
@@ -61,8 +78,65 @@ export function buildAssignedSpentSummary(assignedMilliunits: number, spentMilli
   };
 }
 
+function sortDescendingByAmount<T extends { amountMilliunits: number; name: string }>(entries: T[]) {
+  return entries
+    .slice()
+    .sort((left, right) => {
+      const difference = right.amountMilliunits - left.amountMilliunits;
+      if (difference !== 0) {
+        return difference;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
+}
+
 export function toSpentMilliunits(activityMilliunits: number) {
   return activityMilliunits < 0 ? Math.abs(activityMilliunits) : 0;
+}
+
+export function buildBudgetHealthMonthSummary(monthDetail: BudgetHealthMonthLike) {
+  const categories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden);
+  const overspentCategories = sortDescendingByAmount(
+    categories
+      .filter((category) => category.balance < 0)
+      .map((category) => ({
+        id: category.id,
+        name: category.name,
+        categoryGroupName: category.category_group_name,
+        amountMilliunits: Math.abs(category.balance),
+      })),
+  );
+  const underfundedCategories = sortDescendingByAmount(
+    categories
+      .filter((category) => (category.goal_under_funded ?? 0) > 0)
+      .map((category) => ({
+        id: category.id,
+        name: category.name,
+        categoryGroupName: category.category_group_name,
+        amountMilliunits: category.goal_under_funded ?? 0,
+      })),
+  );
+
+  return {
+    ready_to_assign: formatMilliunits(monthDetail.to_be_budgeted),
+    available_total: formatMilliunits(
+      categories
+        .filter((category) => category.balance > 0)
+        .reduce((sum, category) => sum + category.balance, 0),
+    ),
+    overspent_total: formatMilliunits(
+      overspentCategories.reduce((sum, category) => sum + category.amountMilliunits, 0),
+    ),
+    underfunded_total: formatMilliunits(
+      underfundedCategories.reduce((sum, category) => sum + category.amountMilliunits, 0),
+    ),
+    ...buildAssignedSpentSummary(monthDetail.budgeted, toSpentMilliunits(monthDetail.activity)),
+    overspent_category_count: overspentCategories.length,
+    underfunded_category_count: underfundedCategories.length,
+    overspent_categories: overspentCategories,
+    underfunded_categories: underfundedCategories,
+  };
 }
 
 export function isCreditCardPaymentCategoryName(categoryGroupName?: string) {

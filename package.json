@@ -28,7 +28,9 @@
     "lint:specs": "node --max-old-space-size=8192 ./node_modules/eslint/bin/eslint.js src/**/*.spec.ts --max-warnings=0",
     "lint:oxlint": "oxlint --type-aware -c .oxlintrc.json src",
     "lint:deps": "dependency-cruiser --config .dependency-cruiser.js src",
+    "lint:duplicates": "jscpd --config .jscpd.json .",
     "lint:unused": "knip --config knip.json --production --exclude dependencies",
+    "tech-debt:report": "node ./scripts/tech-debt-report.mjs",
     "typecheck": "node --max-old-space-size=12288 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
     "typecheck:tests": "node --max-old-space-size=12288 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.test.json",
     "typecheck:all": "npm run typecheck && npm run typecheck:tests",
@@ -66,10 +68,11 @@
     "eslint-plugin-sonarjs": "^4.0.2",
     "fast-check": "^4.6.0",
     "globals": "^17.4.0",
+    "jscpd": "^4.0.8",
     "knip": "^5.88.0",
-    "typescript": "^5.9.2",
     "oxlint": "^1.56.0",
     "oxlint-tsgolint": "^0.17.1",
+    "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }
 }

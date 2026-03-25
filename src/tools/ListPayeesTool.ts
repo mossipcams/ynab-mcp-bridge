@@ -2,10 +2,7 @@ import { z } from "zod";
 import * as ynab from "ynab";
 
 import {
-  hasPaginationControls,
-  hasProjectionControls,
-  paginateEntries,
-  projectRecord,
+  renderCollectionResult,
 } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
@@ -44,27 +41,13 @@ export async function execute(
         transfer_account_id: payee.transfer_account_id,
       }));
 
-    if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
-      return toTextResult({
-        payees,
-        payee_count: payees.length,
-      });
-    }
-
-    if (!hasPaginationControls(input)) {
-      return toTextResult({
-        payees: payees.map((payee) => projectRecord(payee, payeeFields, input)),
-        payee_count: payees.length,
-      });
-    }
-
-    const pagedPayees = paginateEntries(payees, input);
-
-    return toTextResult({
-      payees: pagedPayees.entries.map((payee) => projectRecord(payee, payeeFields, input)),
-      payee_count: payees.length,
-      ...pagedPayees.metadata,
-    });
+    return toTextResult(renderCollectionResult(
+      payees,
+      payeeFields,
+      input,
+      "payees",
+      "payee_count",
+    ));
   } catch (error) {
     return toErrorResult(error);
   }

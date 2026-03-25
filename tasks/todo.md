@@ -218,6 +218,637 @@ Fix the highest-impact YNAB calculation issues from the audit so the finance ana
 - [x] Task 2: Implement shared money classification and replace `Math.abs(activity)` spending logic
   Test to write:
   Reuse the failing specs from Task 1.
+
+# Duplicate Code Remediation Plan
+
+## Goal
+
+Reduce unexpected duplicate production code in this fresh `origin/main` worktree, while first establishing a repeatable measurement and verification loop so we can prove the percentage is actually improving.
+
+## Constraints And Notes
+
+- Work is isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation` from `origin/main`.
+- The original checkout remains untouched and is still dirty on another branch.
+- This fresh branch currently does not include duplicate-reporting guardrails yet:
+  - no checked-in [`.jscpd.json`](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/.jscpd.json)
+  - no `lint:duplicates` script in [package.json](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/package.json)
+  - no `tech-debt:report` script
+- Prior exploratory work on another isolated branch showed the worst production duplication clusters are likely in:
+  - `src/oauthStore.ts`
+  - `src/oauthCore.ts`
+  - `src/httpServerShared.ts`
+  - `src/reliabilityHttp.ts`
+  - `src/tools/SearchTransactionsTool.ts`
+  - `src/tools/transactionCollectionToolUtils.ts`
+  - `src/tools/planToolUtils.ts`
+- Repo rules require TDD for code changes, one task at a time, with a stop after each task once execution begins.
+
+## Assumptions
+
+- The first remediation pass should optimize for “unexpected production duplication,” not for crushing all repetition in specs/docs/config.
+- We still want a raw duplicate scan available eventually, but the first practical gate for this branch should focus on maintained implementation code.
+- The best first wins are clustered helper/module refactors that remove repeated control flow, not micro-deduping tiny expressions everywhere.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for duplicate-measurement guardrails
+  Test to write:
+  Add red coverage in `src/codeQuality.spec.ts` and, if needed, `src/preflight.spec.ts` that fails unless the repo defines:
+  - a checked-in JSCPD config,
+  - a `lint:duplicates` script,
+  - and documentation for the local duplicate-check command.
+  The contract should explicitly target unexpected production duplication first, not specs/docs.
+  Code to implement:
+  No production/config implementation in this task beyond the failing tests.
+  How to verify it works:
+  Run `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts` and show the red failure.
+  Result:
+  Added red guardrail coverage in `src/codeQuality.spec.ts` and `src/preflight.spec.ts`.
+  Verified red with:
+  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`
+  which failed because the branch was still missing `.jscpd.json`, `jscpd` in `devDependencies`, the `lint:duplicates` script, and README guidance for the local duplicate check.
+
+- [x] Task 2: Implement the first duplicate-measurement baseline for production code
+  Test to write:
+  Use the failing coverage from Task 1.
+  Code to implement:
+  Add:
+  - [`.jscpd.json`](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/.jscpd.json),
+  - the `lint:duplicates` script in [package.json](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/package.json),
+  - and a short README note.
+  Configure the baseline so the default percentage reflects unexpected production duplication by excluding expected-repetition classes such as `*.spec.ts`, `*.contract.ts`, Markdown, generated output, and vendor files.
+  How to verify it works:
+  Re-run `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`, then run `npm run lint:duplicates` and capture the first baseline percentage.
+  Result:
+  Added `.jscpd.json`, wired `lint:duplicates` in `package.json`, installed `jscpd`, and documented the command in `README.md`.
+  Verified green with:
+  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`
+  and
+  `npm run lint:duplicates`
+  which established the first unexpected-production baseline at `16.37%`.
+
+- [x] Task 3: Add failing coverage for the first targeted production deduplication seam
+  Test to write:
+  Add or tighten focused structure/behavior tests around the smallest high-value cluster we decide to tackle first, likely one of:
+  - transaction query tool wrappers,
+  - OAuth store/core record mutation helpers,
+  - HTTP shared response/guard helpers.
+  The red test should prove the new shared seam or helper abstraction is required, not just reassert behavior we already cover too indirectly.
+  Code to implement:
+  No production refactor in this task beyond the failing tests.
+  How to verify it works:
+  Run the narrow Vitest targets for the chosen cluster and show the red failure.
+  Result:
+  Added a focused structure spec in `src/duplicateCodeRemediation.spec.ts` that fails unless the repeated list-tool collection rendering is centralized behind a shared helper.
+  Verified red with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts`
+  which failed because `collectionToolUtils.ts` did not yet export the shared renderer and the list tools still inlined pagination/projection control flow.
+
+- [x] Task 4: Refactor the first high-value production cluster
+  Test to write:
+  Reuse the failing coverage from Task 3.
+  Code to implement:
+  Introduce the smallest clean shared helper or abstraction that removes repeated logic without broadening behavior.
+  Keep the write scope tight to the chosen cluster and preserve public tool/server behavior.
+  How to verify it works:
+  Re-run the targeted specs, then `npm run lint:duplicates` to confirm the percentage moves in the right direction.
+  Result:
+  Added `renderCollectionResult(...)` to `src/tools/collectionToolUtils.ts` and refactored:
+  `ListAccountsTool.ts`,
+  `ListPayeesTool.ts`,
+  `ListPlanMonthsTool.ts`,
+  `ListScheduledTransactionsTool.ts`,
+  and `ListTransactionsTool.ts`
+  to use the shared renderer instead of repeating three-way full/projection/pagination branches.
+  Verified green with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/additionalReadTools.spec.ts src/planReadTools.spec.ts src/aiToolOptimization.spec.ts`
+  and
+  `npm run lint:duplicates`
+  which moved the baseline from `16.37%` to `15.76%`.
+
+- [x] Task 5: Add failing coverage for the second high-value production cluster
+  Test to write:
+  Add red coverage around the next duplicate-heavy production seam from the updated baseline.
+  Prefer a different cluster than Task 4 so the changes do not overlap heavily.
+  Code to implement:
+  No production refactor in this task beyond the failing tests.
+  How to verify it works:
+  Run the narrow Vitest targets for the chosen cluster and show the red failure.
+  Result:
+  Added a second structural red test in `src/duplicateCodeRemediation.spec.ts` that fails unless the repeated `GetTransactionsBy*` lookup/rendering flow is centralized behind a shared helper.
+  Verified red with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts`
+  which failed because `src/tools/transactionToolUtils.ts` did not exist and the four lookup tools still repeated transaction filtering/formatting inline.
+
+- [x] Task 6: Refactor the second high-value production cluster
+  Test to write:
+  Reuse the failing coverage from Task 5.
+  Code to implement:
+  Apply the minimum elegant refactor to remove the duplicated control flow or payload-shaping logic in that cluster.
+  How to verify it works:
+  Re-run the targeted specs, then `npm run lint:duplicates` to capture the new baseline delta.
+  Result:
+  Added `src/tools/transactionToolUtils.ts` with `toDisplayTransactions(...)` and `executeTransactionLookup(...)`, then refactored:
+  `GetTransactionsByAccountTool.ts`,
+  `GetTransactionsByCategoryTool.ts`,
+  `GetTransactionsByMonthTool.ts`,
+  and `GetTransactionsByPayeeTool.ts`
+  to use the shared helper instead of repeating filter/map/render logic.
+  Added a small object-style wrapper in `collectionToolUtils.ts` so the focused utility spec stays green against the shared collection helper seam.
+  Verified green with:
+  `npx vitest run src/collectionToolUtils.spec.ts src/duplicateCodeRemediation.spec.ts src/additionalReadTools.spec.ts src/aiToolOptimization.spec.ts src/planReadTools.spec.ts`
+  and
+  `npm run lint:duplicates`
+  which moved the baseline from `15.76%` to `15.51%`.
+
+- [x] Task 7: Add a tech-debt report for duplicate-remediation tracking
+  Test to write:
+  Add red coverage in `src/techDebtReport.spec.ts` or `src/codeQuality.spec.ts` so the repo fails unless a local command exists to print at least:
+  - the current unexpected production duplication percentage,
+  - dead exports,
+  - suppression counts.
+  Code to implement:
+  No script implementation in this task beyond the failing tests.
+  How to verify it works:
+  Run the targeted Vitest command and show the red failure.
+  Result:
+  Added red coverage in `src/techDebtReport.spec.ts`, `src/codeQuality.spec.ts`, and `src/preflight.spec.ts` for a checked-in `tech-debt:report` command and script.
+  Verified red with:
+  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts src/techDebtReport.spec.ts`
+  which failed because the branch still had no `tech-debt:report` script and no `scripts/tech-debt-report.mjs`.
+
+- [x] Task 8: Implement the tracking report and final verification loop
+  Test to write:
+  Reuse the failing coverage from Task 7.
+  Code to implement:
+  Add a maintainable local report script and README note so we can track duplicate-remediation progress over time.
+  Keep the report aligned with the duplicate baseline defined in Task 2.
+  How to verify it works:
+  Run:
+  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts src/techDebtReport.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Then record the before/after duplicate percentages in this file.
+  Result:
+  Added `scripts/tech-debt-report.mjs`, wired `tech-debt:report` in `package.json`, and documented the command in `README.md`.
+  Verified green with:
+  `npx vitest run src/collectionToolUtils.spec.ts src/duplicateCodeRemediation.spec.ts src/additionalReadTools.spec.ts src/aiToolOptimization.spec.ts src/planReadTools.spec.ts src/codeQuality.spec.ts src/preflight.spec.ts src/techDebtReport.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Final duplicate/remediation snapshot:
+  - Baseline after measurement wiring: `16.37%`
+  - After list-tool deduplication: `15.76%`
+  - After transaction lookup deduplication and report wiring: `15.35%`
+  - `tech-debt:report` output:
+    - Duplication: `15.35%`
+    - Dead exports: `0`
+    - `ts-ignore` count: `6`
+    - `eslint-disable` count: `8`
+    - `TODO/FIXME/HACK` count: `9`
+
+## Review Bar
+
+- The branch has a repeatable duplicate baseline focused on unexpected production duplication.
+- At least two meaningful production duplication clusters are reduced with behavior preserved by tests.
+- The repo gains a local report/command that makes future duplicate-remediation work measurable.
+- We favor cleaner shared abstractions over “DRY at all costs” micro-refactors.
+
+Plan ready. Approve to proceed.
+
+# Next OAuth Seam Plan
+
+## Goal
+
+Reduce the next architecturally unnecessary overlap in the OAuth/token/exchange family by centralizing repeated active-grant validation and invalidation logic in `oauthCore.ts`.
+
+## Constraints And Notes
+
+- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
+- The previous slice already cleaned:
+  - refresh-token preconditions
+  - compatibility grant builders
+  - store migration split
+  - grant rotation
+- The next likely hotspot is repeated active-step validation in `oauthCore.ts`, especially around:
+  - pending consent lookup + expiry cleanup
+  - pending authorization lookup + expiry cleanup
+  - refresh-token lookup + expiry cleanup + ownership checks
+- The goal is to remove overlap only where the behavior is truly the same. We should not force unrelated OAuth branches into one generic engine.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for shared active-grant validation helpers
+  Test to write:
+  Add red structural coverage in `src/duplicateCodeRemediation.spec.ts` plus focused OAuth behavior coverage in `src/oauthCore.spec.ts` that fails unless repeated active-grant validation is routed through narrow helpers.
+  The best initial target is likely one or both of:
+  `requirePendingConsentGrant(...)`
+  `requirePendingAuthorizationGrant(...)`
+  with shared expiry cleanup behavior.
+  Code to implement:
+  No production code in this task. Only failing tests that pin the seam and preserve current behavior.
+  How to verify it works:
+  Run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts` and show the red failure.
+  Result:
+  Added red structure coverage for `requirePendingConsentGrant(...)`, `requirePendingAuthorizationGrant(...)`, and `requireRefreshTokenGrant(...)` in `src/duplicateCodeRemediation.spec.ts`, plus OAuth behavior coverage in `src/oauthCore.spec.ts` proving expired pending consent, pending authorization, and refresh-token grants are deleted through the shared validation path.
+  Verified red with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts`
+  which failed because the helper seams did not exist yet.
+
+- [x] Task 2: Implement the active-grant validation seam
+  Test to write:
+  Reuse the red tests from Task 1.
+  Code to implement:
+  Extract the smallest helper or helper set in `src/oauthCore.ts` that centralizes repeated validation, expiry checks, and invalid-grant cleanup for the chosen steps.
+  Keep redirect building, token minting, and resource/scope checks in place unless they are part of the exact seam under test.
+  How to verify it works:
+  Re-run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts` and show the new tests passing.
+  Result:
+  Implemented `requirePendingConsentGrant(...)`, `requirePendingAuthorizationGrant(...)`, and `requireRefreshTokenGrant(...)` inside `src/oauthCore.ts`, then routed `approveConsent(...)`, `handleCallback(...)`, and `exchangeRefreshToken(...)` through those narrow validators.
+  Verified green with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts`
+
+- [x] Task 3: Add failing coverage for architectural boundaries after the validation seam lands
+  Test to write:
+  Add a red structure/quality test that fails unless the new helper stays narrow and behavior-oriented.
+  The guard should prevent us from turning `oauthCore.ts` into a generic state-machine abstraction or leaking validation rules into unrelated modules.
+  Code to implement:
+  No production code yet beyond the failing guard.
+  How to verify it works:
+  Run the targeted Vitest structure coverage and show the red failure.
+  Result:
+  Used the structure guard in `src/duplicateCodeRemediation.spec.ts` to pin the helpers as narrow, local seams by requiring one named helper per grant type and limiting direct store lookups for pending consent, pending authorization, and refresh-token grants to a single call site each.
+  Verified red/green through the same focused command:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts`
+
+- [x] Task 4: Implement the boundary follow-up and final verification
+  Test to write:
+  Reuse the failing coverage from Task 3.
+  Code to implement:
+  Finish the smallest cleanup needed to keep the new seam readable and local.
+  How to verify it works:
+  Run:
+  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Then record:
+  the updated `oauthCore.ts` hotspot movement,
+  whether the OAuth/token/exchange family still looks `partially consolidated`,
+  and whether the remaining overlap now appears justified.
+  Result:
+  Final verification passed with:
+  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Current supporting metrics:
+  - whole-codebase duplication: `24.52%`
+  - `oauthCore.ts`: `89` duplicated lines, `18` clones, `17.28%`
+  - `oauthStore.ts`: `41` duplicated lines, `6` clones, `14.29%`
+  - `oauthStoreMigration.ts`: `248` duplicated lines, `31` clones, `53.45%`
+  Architectural read after this slice:
+  - The OAuth/token/exchange family is still `partially consolidated`.
+  - Pending-consent, pending-authorization, and refresh-token validation now share explicit active-grant seams inside `oauthCore.ts`.
+  - The main remaining OAuth debt is now concentrated more honestly in `oauthStoreMigration.ts` and the broader lifecycle split, which appears more justified than the previous repeated validation overlap.
+
+## Review Bar
+
+- The seam removes real repeated validation/invalidation behavior, not just a few similar lines.
+- The new helper stays inside `oauthCore.ts` unless a dedicated helper module is clearly cleaner.
+- OAuth behavior remains stable under targeted specs.
+- The result makes the OAuth lifecycle easier to reason about without hiding important branching logic.
+
+Plan ready. Approve to proceed.
+
+# OAuth Migration And Lifecycle Separation Plan
+
+## Goal
+
+Reduce the remaining architecturally unnecessary overlap in the OAuth/token/exchange family by shrinking duplicate legacy-grant conversion code in `oauthStoreMigration.ts` and by tightening the remaining repeated lifecycle transition setup in `oauthCore.ts`.
+
+## Constraints And Notes
+
+- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
+- The current overlap is no longer primarily in live store persistence. It is now concentrated in:
+  - legacy grant conversion paths in `src/oauthStoreMigration.ts`
+  - repeated lifecycle step construction in `src/oauthCore.ts`
+- The target is duplicate code for the same feature/function only. We should not merge distinct OAuth phases into one generic abstraction.
+- `oauthStoreMigration.ts` appears to repeat the same “record guard + shared required fields + optional extras + step-specific fields” pattern across pending-consent, pending-authorization, authorization-code, and refresh-token conversions.
+- `oauthCore.ts` still repeats some “advance this grant into the next lifecycle step” setup even after `replaceGrant(...)` and the `require*Grant(...)` validators.
+
+## Tasks
+
+- [ ] Task 1: Add failing coverage for shared legacy grant conversion helpers
+  Test to write:
+  Add red structural coverage in `src/duplicateCodeRemediation.spec.ts` and focused migration behavior coverage in `src/oauthStoreMigration.spec.ts` that fails unless `oauthStoreMigration.ts` routes legacy grant conversion through one shared required-fields seam plus one shared principal/upstream-token seam.
+  The coverage should pin:
+  - one helper for the common legacy grant envelope (`clientId`, `codeChallenge`, `redirectUri`, `resource`, `scopes`)
+  - one helper for the principal/upstream-token pair used by authorization-code and refresh-token migrations
+  - unchanged migration behavior for legacy consent/code/refresh records
+  Code to implement:
+  No production code in this task. Only failing tests that define the intended seam and protect current migration behavior.
+  How to verify it works:
+  Run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts` and show the red failure.
+
+- [ ] Task 2: Implement the legacy grant conversion seam
+  Test to write:
+  Reuse the red tests from Task 1.
+  Code to implement:
+  Refactor `src/oauthStoreMigration.ts` to share the common legacy grant parsing/building logic through narrow local helpers.
+  Keep the helpers local to the migration module and keep the four legacy entry points explicit so the migration paths remain readable.
+  How to verify it works:
+  Re-run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts` and show the new tests passing.
+
+- [ ] Task 3: Add failing coverage for the next lifecycle-step seam in `oauthCore.ts`
+  Test to write:
+  Add red structural coverage in `src/duplicateCodeRemediation.spec.ts` and focused behavior coverage in `src/oauthCore.spec.ts` that fails unless repeated grant-advancement setup is routed through one narrow helper.
+  The best target is the repeated “build next grant state with a generated step token and expiry” logic used when:
+  - consent becomes pending authorization
+  - pending authorization becomes authorization code
+  - authorization code becomes refresh token
+  Code to implement:
+  No production code in this task. Only failing tests that pin the seam without forcing a generic lifecycle engine.
+  How to verify it works:
+  Run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts` and show the red failure.
+
+- [ ] Task 4: Implement the lifecycle-step seam and rerun OAuth verification
+  Test to write:
+  Reuse the red tests from Task 3.
+  Code to implement:
+  Extract the smallest local helper or helper pair in `src/oauthCore.ts` that removes the repeated step-construction logic while keeping branch-specific work visible.
+  How to verify it works:
+  Run:
+  `npx vitest run src/oauthCore.spec.ts src/oauthStoreMigration.spec.ts src/oauthStore.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/duplicateCodeRemediation.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Then record:
+  - the updated `oauthStoreMigration.ts` and `oauthCore.ts` hotspot movement
+  - whether the remaining OAuth overlap now looks more justified
+  - whether the OAuth/token/exchange family is still `partially consolidated`
+
+## Review Bar
+
+- The migration refactor removes true same-feature conversion overlap without hiding the legacy formats.
+- The lifecycle refactor improves clarity without inventing a generic state machine.
+- All new helpers stay local unless a new module is clearly cleaner.
+- The resulting OAuth code should read more like separated responsibilities and less like repeated hand-built transitions.
+
+Plan ready. Approve to proceed.
+
+# Legacy OAuth Removal Plan
+
+## Goal
+
+Remove legacy OAuth state migration entirely and require re-authentication for installs that still have the old persisted OAuth schema.
+
+## Constraints And Notes
+
+- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
+- This is an intentional behavior change: older persisted OAuth state should no longer be migrated forward.
+- The new desired behavior is simpler startup logic and cleaner store ownership, even though older installs will lose in-progress OAuth state and need to re-auth.
+- The current legacy surface is concentrated in `src/oauthStoreMigration.ts` and the compatibility-loading path in `src/oauthStore.ts`.
+- We should keep support for the current version-2 persisted grant model and only remove the pre-v2 migration behavior.
+
+## Tasks
+
+- [ ] Task 1: Add failing coverage for dropping legacy OAuth state instead of migrating it
+  Test to write:
+  Update `src/oauthStoreMigration.spec.ts` and `src/duplicateCodeRemediation.spec.ts` so they fail unless:
+  - version-2 persisted state still loads correctly
+  - legacy persisted shapes no longer migrate into grants
+  - the migration module no longer exposes legacy conversion helpers
+  Code to implement:
+  No production code in this task. Only failing tests that define the new compatibility boundary.
+  How to verify it works:
+  Run `npx vitest run src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts` and show the red failure.
+
+- [ ] Task 2: Remove legacy OAuth migration behavior
+  Test to write:
+  Reuse the red tests from Task 1.
+  Code to implement:
+  Simplify `src/oauthStoreMigration.ts` so it only parses the current persisted OAuth schema.
+  Remove the legacy-state conversion path and any now-dead helpers/types.
+  Keep `src/oauthStore.ts` loading the current persisted state through the simplified parser.
+  How to verify it works:
+  Re-run `npx vitest run src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts` and show the new tests passing.
+
+- [ ] Task 3: Add failing coverage for the startup/re-auth boundary
+  Test to write:
+  Add focused coverage in `src/oauthStore.spec.ts` or `src/oauthCore.spec.ts` that proves the system behaves safely when old persisted OAuth data is effectively ignored.
+  The goal is to pin the intended fallback behavior: no migrated grants, no crash, normal re-auth flow from a clean current-state load.
+  Code to implement:
+  No production code in this task. Only failing tests that pin the re-auth boundary.
+  How to verify it works:
+  Run the focused OAuth specs and show the red failure.
+
+- [ ] Task 4: Implement any remaining cleanup, then run full OAuth verification
+  Test to write:
+  Reuse the red tests from Task 3.
+  Code to implement:
+  Finish the smallest cleanup needed after removing legacy migration, including any docs or task-log updates that clarify re-auth is now expected for old persisted state.
+  How to verify it works:
+  Run:
+  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthStoreMigration.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/duplicateCodeRemediation.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Then record:
+  - the updated OAuth overlap story
+  - whether `oauthStoreMigration.ts` is now appropriately minimal
+  - whether the OAuth/token/exchange family still looks `partially consolidated`
+
+## Review Bar
+
+- Legacy OAuth migration is fully removed, not half-kept.
+- Current version-2 persisted OAuth loading still works.
+- Old persisted OAuth state now safely falls back to re-auth instead of migration.
+- The result materially simplifies OAuth store ownership and removes duplicate legacy behavior.
+
+Plan ready. Approve to proceed.
+
+## Results
+
+- [x] Task 1: Add failing coverage for dropping legacy OAuth state instead of migrating it
+  Result:
+  Updated `src/oauthStoreMigration.spec.ts` to pin the new compatibility boundary:
+  version-2 persisted state still loads,
+  and legacy OAuth shapes now drop to an empty current-state load.
+  Tightened `src/duplicateCodeRemediation.spec.ts` so `src/oauthStoreMigration.ts` fails review if it still defines `LegacyPersistedOAuthState` or any `toLegacy*` / `migrateLegacyState(...)` helpers.
+  Verified red with:
+  `npx vitest run src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts`
+  which failed because the migration module still carried the legacy loader and conversion helpers.
+
+- [x] Task 2: Remove legacy OAuth migration behavior
+  Result:
+  Simplified `src/oauthStoreMigration.ts` to one responsibility: parse the current version-2 persisted OAuth schema.
+  Removed the legacy-state conversion path and all legacy conversion helpers/types.
+  `loadPersistedOAuthState(...)` now returns a clean empty version-2 state for any non-current persisted OAuth shape.
+  Verified green with:
+  `npx vitest run src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts`
+
+- [x] Task 3: Add failing coverage for the startup/re-auth boundary
+  Result:
+  Replaced the old migration-on-load store test in `src/oauthStore.spec.ts` with a startup boundary test that expects:
+  legacy persisted OAuth data is ignored,
+  no migrated grants survive load,
+  and the store can immediately persist a new current-model grant for a fresh re-auth flow.
+  This coverage was already green once Task 2 landed, which confirmed the simplified loader already gave us the intended startup behavior without extra production changes.
+  Verified with:
+  `npx vitest run src/oauthStore.spec.ts`
+
+- [x] Task 4: Implement any remaining cleanup, then run full OAuth verification
+  Result:
+  Final verification passed with:
+  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthStoreMigration.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/duplicateCodeRemediation.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Updated supporting metrics:
+  - whole-codebase duplication: `24.39%`
+  - `src/oauthStoreMigration.ts`: `38` duplicated lines, `9` clones, `16.89%`
+  - `src/oauthStore.ts`: `41` duplicated lines, `6` clones, `14.29%`
+  - `src/oauthCore.ts`: `89` duplicated lines, `18` clones, `17.28%`
+  Updated architectural read:
+  - `oauthStoreMigration.ts` is now appropriately minimal instead of acting as a legacy grant-conversion host.
+  - Old persisted OAuth state now safely falls back to re-auth.
+  - The OAuth/token/exchange family is still `partially consolidated`, but the remaining overlap is now mostly in current lifecycle behavior rather than backward-compatibility baggage.
+
+# OAuth Cleanliness Fix Plan
+
+## Goal
+
+Fix the highest-payoff cleanliness issues in the OAuth, token, and handoff path without forcing abstractions that blur responsibilities.
+
+## Constraints And Notes
+
+- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
+- The current architectural read is:
+  - `oauthGrantViews.ts` is clean
+  - `oauthCompatibilityGrants.ts` is clean
+  - `oauthCore.ts` is improved but still has brittle refresh-token invariants and repeated transition choreography
+  - `oauthStore.ts` is still overloaded, especially in legacy migration/parsing
+- The goal is cleaner code for the same feature/function, not maximal consolidation.
+- If implementation or verification shows this plan is wrong, stop and re-plan before continuing.
+
+## Tasks
+
+- [x] Task 1: Fail fast on missing upstream refresh-token context
+  Test to write:
+  Add red coverage in `src/oauthCore.spec.ts` proving `exchangeRefreshToken(...)` throws a local `InvalidGrantError` before calling the upstream adapter when the stored grant lacks `upstreamTokens` or `upstreamTokens.refresh_token`.
+  The test should explicitly assert the upstream refresh exchange mock is not called.
+  Code to implement:
+  Tighten `src/oauthCore.ts` so refresh-token exchange requires complete upstream refresh-token context before attempting the upstream handoff.
+  Keep the existing grant ownership, scope, and resource checks intact.
+  How to verify it works:
+  Run `npx vitest run src/oauthCore.spec.ts` and show the red failure first, then green after the implementation.
+  Result:
+  Added red coverage in `src/oauthCore.spec.ts` proving the refresh exchange must fail locally when a stored grant is missing `upstreamTokens.refresh_token`.
+  Updated `src/oauthCore.ts` so `exchangeRefreshToken(...)` deletes the invalid grant and throws `InvalidGrantError("Refresh token is missing upstream refresh-token context.")` before calling the upstream adapter.
+  Verified red with:
+  `npx vitest run src/oauthCore.spec.ts`
+  which failed because the refresh path still resolved successfully by handing an empty string upstream.
+  Verified green with:
+  `npx vitest run src/oauthCore.spec.ts`
+
+- [x] Task 2: Extract legacy OAuth migration/parsing out of `oauthStore.ts`
+  Test to write:
+  Add red structural coverage in `src/duplicateCodeRemediation.spec.ts` and focused behavior coverage in a new spec such as `src/oauthStoreMigration.spec.ts` that fails unless legacy parsing/migration is delegated to a dedicated module.
+  Preserve the existing migration contract for legacy pending consent, pending authorization, authorization code, and refresh token records.
+  Code to implement:
+  Move legacy parsing/migration helpers from `src/oauthStore.ts` into a dedicated module, likely `src/oauthStoreMigration.ts`.
+  Keep `oauthStore.ts` focused on current-state load/prune/persist/query responsibilities.
+  How to verify it works:
+  Run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts src/oauthStore.spec.ts` and show the red failure first, then green after the split.
+  Then run `npm run lint:duplicates` and record the `oauthStore.ts` hotspot movement.
+  Result:
+  Added red structural coverage in `src/duplicateCodeRemediation.spec.ts` and new behavior coverage in `src/oauthStoreMigration.spec.ts`.
+  Extracted legacy parsing and migration into `src/oauthStoreMigration.ts` and updated `src/oauthStore.ts` to delegate persisted-state loading to that module.
+  Verified red with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts`
+  which failed because `src/oauthStoreMigration.ts` did not exist yet and `oauthStore.ts` still owned inline migration helpers.
+  Verified green with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts src/oauthStore.spec.ts`
+
+- [x] Task 3: Protect architectural boundaries after the migration split
+  Test to write:
+  Add a red quality/structure test that fails unless:
+  `oauthStore.ts` no longer owns legacy migration details,
+  the migration module does not perform live persistence,
+  and the store module still owns file I/O and current grant persistence.
+  Code to implement:
+  Make the smallest follow-up cleanup needed so the split stays durable and responsibilities remain crisp.
+  How to verify it works:
+  Run the targeted Vitest structure coverage and show the red failure first, then green after the cleanup.
+  Result:
+  Added a red structural guard in `src/duplicateCodeRemediation.spec.ts` requiring deserialization to live in `src/oauthStoreMigration.ts` while `src/oauthStore.ts` keeps live file I/O.
+  Added `deserializePersistedOAuthState(...)` to `src/oauthStoreMigration.ts` and updated `src/oauthStore.ts` to stop calling `JSON.parse(...)` directly.
+  Verified red with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts`
+  which failed because `oauthStore.ts` still owned JSON deserialization.
+  Verified green with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts src/oauthStore.spec.ts`
+
+- [x] Task 4: Remove one repeated lifecycle transition seam in `oauthCore.ts`
+  Test to write:
+  Add red coverage in `src/duplicateCodeRemediation.spec.ts` plus targeted OAuth behavior specs that fails unless one repeated transition path is centralized behind a narrow helper.
+  The best candidate is the repeated “validate step, delete old grant, save next grant” choreography shared across consent approval, callback handling, authorization-code exchange, and refresh-token rotation.
+  Code to implement:
+  Extract one narrow transition helper in `src/oauthCore.ts` or a dedicated focused helper module.
+  Do not build a generic OAuth engine.
+  Keep redirect building and token minting where they currently belong unless the tests show a cleaner seam.
+  How to verify it works:
+  Run targeted OAuth Vitest coverage and show the red failure first, then green after the implementation.
+  Result:
+  Added a red structural guard in `src/duplicateCodeRemediation.spec.ts` for a narrow `replaceGrant(...)` helper in `src/oauthCore.ts`.
+  Implemented `replaceGrant(...)` and routed consent approval, callback handling, authorization-code exchange, and refresh-token rotation through it.
+  Verified red with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts`
+  which failed because `oauthCore.ts` still rotated grants inline.
+  Verified green with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts`
+
+- [x] Task 5: Final verification and architectural scorecard refresh
+  Test to write:
+  No new tests in this task. Use the approved red/green tests as proof.
+  Code to implement:
+  No new production behavior unless verification exposes a tightly coupled issue. If that happens, stop and re-plan.
+  How to verify it works:
+  Run:
+  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/duplicateCodeRemediation.spec.ts`
+  plus any new migration spec added in Task 2,
+  `npm run lint:duplicates`,
+  `npm run tech-debt:report`,
+  `npm run typecheck`
+  Then record:
+  the updated OAuth hotspot movement,
+  whether `oauthStore.ts` now looks primarily like a store instead of a migration host,
+  and whether the OAuth/token/exchange family remains `partially consolidated` or moves closer to `appropriately separated`.
+  Result:
+  Final verification passed with:
+  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Updated OAuth hotspot movement from the latest JSCPD report:
+  `src/oauthStore.ts`: `274` duplicated lines / `34` clones / `37.59%` before -> `41` duplicated lines / `6` clones / `14.29%` after
+  `src/oauthCore.ts`: `84` duplicated lines / `17` clones / `17.28%` before -> `89` duplicated lines / `18` clones / `18.02%` after
+  `src/oauthStoreMigration.ts`: new migration-focused module with `248` duplicated lines / `31` clones / `53.45%`
+  `src/oauthCompatibilityGrants.ts`: focused helper module remains at `26` duplicated lines / `4` clones / `30.23%`
+  Updated architectural reading:
+  `oauthStore.ts` now reads primarily like a live store instead of a migration host, the refresh-token handoff is safer, and grant rotation in `oauthCore.ts` is cleaner.
+  The OAuth/token/exchange family still remains `partially consolidated`, because the migration module now holds legacy complexity and `oauthCore.ts` still has some repeated lifecycle validation/choreography that may or may not merit another seam.
+
+## Review Bar
+
+- The refresh-token path no longer performs a brittle upstream handoff with missing local context.
+- `oauthStore.ts` has fewer unrelated responsibilities and is materially easier to reason about.
+- Any new seam in `oauthCore.ts` is narrow and behavior-oriented, not a speculative abstraction.
+- The final summary explains what is now clean, what remains intentionally separate, and what debt still remains.
+
+Plan ready. Approve to proceed.
   Code to implement:
   Add shared helpers in `src/tools/financeToolUtils.ts` for sign-aware spending, refund treatment, transfer exclusion, and optional credit-card-payment exclusion.
   Update these tools to use the shared logic instead of raw `Math.abs(...)`:
@@ -230,6 +861,116 @@ Fix the highest-impact YNAB calculation issues from the audit so the finance ana
   How to verify it works:
   Re-run the Task 1 Vitest command and show the new tests passing.
   Then run the broader touched suite:
+
+# Whole-Codebase Duplicate Scan Follow-Up
+
+## Goal
+
+Make the official duplicate-code metric a whole-codebase scan instead of the current implementation-only baseline, while keeping the report and docs aligned to that definition.
+
+## Constraints And Notes
+
+- Work stays isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
+- The user explicitly corrected the metric definition: duplicate scanning should cover the whole codebase.
+- "Whole codebase" should include maintained repo code such as `src/`, `scripts/`, `debugging/`, workflow/config files, specs, contracts, and Markdown.
+- It should still exclude generated/vendor paths like `.git/`, `node_modules/`, `dist/`, and `artifacts/`.
+- This is a config-and-contract change, so it still follows TDD before implementation.
+
+## Assumptions
+
+- `tasks/**` should now count, because it is repo-authored code/docs rather than generated output.
+- `package-lock.json` can remain excluded because it is generated dependency metadata, not maintained code.
+- The headline in `tech-debt:report` should explicitly reflect the whole-codebase number rather than the old narrowed baseline.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for whole-codebase duplicate-scan guardrails
+  Test to write:
+  Extend `src/codeQuality.spec.ts` and `src/preflight.spec.ts` so they fail unless the duplicate-scan contract matches a whole-codebase definition.
+  The red assertions should prove that [`.jscpd.json`](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/.jscpd.json) no longer excludes:
+  `**/*.spec.ts`,
+  `**/*.contract.ts`,
+  `**/*.md`,
+  or `tasks/**`.
+  Code to implement:
+  No config changes yet. Only the failing tests that pin the new boundary.
+  How to verify it works:
+  Run `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts` and show the red failure.
+  Result:
+  Tightened `src/codeQuality.spec.ts` and `src/preflight.spec.ts` so the duplicate-scan contract now rejects exclusions for `*.spec.ts`, `*.contract.ts`, `*.md`, and `tasks/**`, and requires README wording for whole-codebase duplication.
+  Verified red with:
+  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`
+  which failed because `.jscpd.json` still excluded those paths and the README still described an implementation-only baseline.
+
+- [x] Task 2: Implement the whole-codebase JSCPD scope
+  Test to write:
+  Reuse the failing coverage from Task 1.
+  Code to implement:
+  Update [`.jscpd.json`](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/.jscpd.json) so the scan covers the whole codebase, keeping only generated/vendor exclusions.
+  Update [README.md](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/README.md) so `lint:duplicates` is documented as a whole-codebase scan.
+  How to verify it works:
+  Re-run `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`, then run `npm run lint:duplicates` and capture the new whole-codebase baseline.
+  Result:
+  Updated `.jscpd.json` to keep only generated/vendor exclusions and rewrote the README command notes so `lint:duplicates` is described as a whole-codebase scan.
+  Verified green with:
+  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`
+  and
+  `npm run lint:duplicates`
+  which raised the live whole-codebase baseline to `24.35%`.
+
+- [x] Task 3: Add failing coverage for whole-codebase tech-debt reporting
+  Test to write:
+  Extend `src/techDebtReport.spec.ts` so it fails unless the report wording and contract reflect whole-codebase duplication rather than the narrowed implementation-only baseline.
+  If needed, tighten `src/preflight.spec.ts` to require README wording that matches the new scope.
+  Code to implement:
+  No script changes yet. Only the failing tests.
+  How to verify it works:
+  Run `npx vitest run src/techDebtReport.spec.ts src/preflight.spec.ts` and show the red failure.
+  Result:
+  Tightened `src/techDebtReport.spec.ts` so the report contract now requires a `Whole-codebase duplication:` headline.
+  Verified red with:
+  `npx vitest run src/techDebtReport.spec.ts src/preflight.spec.ts`
+  which failed because the report still printed the older generic `Duplication:` label.
+
+- [x] Task 4: Implement the report/doc alignment and rerun the official metric
+  Test to write:
+  Reuse the failing coverage from Task 3.
+  Code to implement:
+  Update [scripts/tech-debt-report.mjs](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/scripts/tech-debt-report.mjs) and [README.md](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/README.md) so the printed duplication number is explicitly the whole-codebase scan.
+  Keep the other report metrics unchanged unless verification forces a small adjacent fix.
+  How to verify it works:
+  Run:
+  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts src/techDebtReport.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Then record the new whole-codebase duplication percentage in this file.
+  Result:
+  Updated `scripts/tech-debt-report.mjs` so the report headline is `Whole-codebase duplication:` and aligned the supporting debt-marker scan with the same whole-codebase boundary by counting Markdown and `tasks/**` content too.
+  Verified green with:
+  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts src/techDebtReport.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Final whole-codebase duplicate/remediation snapshot:
+  - Whole-codebase duplication: `24.35%`
+  - Clones: `721`
+  - Duplicated lines: `5489`
+  - `tech-debt:report` output:
+    - Whole-codebase duplication: `24.35%`
+    - Dead exports: `0`
+    - `ts-ignore` count: `7`
+    - `eslint-disable` count: `10`
+    - `TODO/FIXME/HACK` count: `15`
+
+## Review Bar
+
+- The repo’s official duplicate scan matches the user’s whole-codebase definition.
+- Only generated/vendor paths stay excluded.
+- The report, docs, and test guardrails all describe the same scope.
+- The final number is rerun from the live config, not inferred from the previous narrowed baseline.
+
+Plan ready. Approve to proceed.
   `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/financeToolUtils.spec.ts`.
   Result:
   Updated `src/tools/financeToolUtils.ts` so spend-style summaries only treat negative activity as spending and added a shared credit-card-payment category helper.
@@ -1020,3 +1761,378 @@ Stop rebuilding the MCP server and transport on every `/mcp` request so ChatGPT 
 - Session cleanup is bounded and deterministic.
 - OAuth and bearer verification remain request-scoped and are not bypassed.
 - The implementation reduces reconnect/setup churn without introducing cross-session leakage.
+
+# Duplicate-Feature Consolidation Plan
+
+## Goal
+
+Reduce duplicate code by consolidating overlapping feature families, starting with the parts of the product surface where multiple tools appear to answer the same class of question with repeated fetch, shaping, and summary logic.
+
+## Constraints And Notes
+
+- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
+- The current official duplicate metric is whole-codebase duplication, but this plan prioritizes production feature overlap over pure clone-count reduction.
+- The highest-value overlap appears to be in:
+  - finance summary tools
+  - transaction browsing/query tools
+  - then supporting lifecycle internals like OAuth
+- Repo rules still require TDD, one task at a time, with a stop after each completed task during execution.
+
+## Assumptions
+
+- “Duplicate features” here means multiple tools or modules with materially overlapping user-facing purpose, not just textually similar code.
+- We should prefer extracting shared summary/query engines before removing tool surface area, unless tests prove some tools are actually redundant enough to merge.
+- Test duplication alone is not a primary target unless it blocks the feature-level consolidation work.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for the finance-summary consolidation seam
+  Test to write:
+  Add red structural and behavior coverage in the finance summary specs that fails unless the overlapping month-summary tools share one common summary-building seam.
+  Focus on tools like:
+  `GetMonthlyReviewTool.ts`,
+  `GetSpendingSummaryTool.ts`,
+  `GetCashFlowSummaryTool.ts`,
+  `GetBudgetHealthSummaryTool.ts`,
+  and `GetIncomeSummaryTool.ts`.
+  The red test should prove they derive overlapping month-level metrics from one shared builder or engine rather than each reshaping the same ideas independently.
+  Code to implement:
+  No production refactor yet. Only failing tests that pin the expected shared seam and preserve current payload behavior.
+  How to verify it works:
+  Run the targeted finance summary Vitest coverage and show the red failure.
+
+- [x] Task 2: Implement the finance-summary shared seam
+  Test to write:
+  Reuse the failing coverage from Task 1.
+  Code to implement:
+  Extract the smallest clean shared builder/engine for overlapping month-summary calculations and migrate the targeted finance tools onto it without changing their public payload contracts.
+  How to verify it works:
+  Re-run the targeted finance specs, then `npm run lint:duplicates` and capture the duplicate delta in the affected production files.
+
+- [x] Task 3: Add failing coverage for the transaction-browsing consolidation seam
+  Test to write:
+  Add red structural and behavior coverage around:
+  `SearchTransactionsTool.ts`,
+  `ListTransactionsTool.ts`,
+  and the `GetTransactionsBy*` family
+  so the repo fails unless they share a coherent transaction query/rendering pipeline rather than repeating overlapping filtering and response-shaping patterns.
+  Code to implement:
+  No production refactor yet beyond the failing tests.
+  How to verify it works:
+  Run the narrow transaction-tool Vitest coverage and show the red failure.
+
+- [x] Task 4: Implement the transaction-browsing shared seam
+  Test to write:
+  Reuse the failing coverage from Task 3.
+  Code to implement:
+  Consolidate the overlapping transaction retrieval and rendering logic behind one shared query/render layer while preserving each tool’s contract.
+  Prefer extending the existing transaction helper path rather than adding another parallel abstraction.
+  How to verify it works:
+  Re-run the targeted transaction specs, then `npm run lint:duplicates` and capture the duplicate delta in the transaction-tool family.
+
+- [x] Task 5: Add failing coverage for feature-overlap review and tool-surface clarity
+  Test to write:
+  Add quality/spec coverage that fails unless overlapping finance and transaction tools have clear differentiated descriptions or documented roles after consolidation.
+  The red test should protect against keeping multiple nearly-identical tools with unclear positioning.
+  Code to implement:
+  No production metadata/doc updates yet. Only failing tests that pin the clarity requirement.
+  How to verify it works:
+  Run the targeted registrar/quality coverage and show the red failure.
+
+- [x] Task 6: Implement tool-surface clarification
+  Test to write:
+  Reuse the failing coverage from Task 5.
+  Code to implement:
+  Update tool descriptions and, if needed, README notes so overlapping tools clearly state when to use each one after the shared refactors.
+  How to verify it works:
+  Re-run the targeted quality/registry specs and inspect the registered metadata for the consolidated feature families.
+
+- [x] Task 7: Add failing coverage for the next non-user-facing duplicate-feature seam
+  Test to write:
+  Add red coverage around the highest-value internal overlap that remains after finance and transaction consolidation, likely:
+  `oauthStore.ts` plus `oauthCore.ts`
+  or the reliability runner/artifact pair.
+  The red test should force one shared lifecycle or reporting seam rather than repeated internal state handling.
+  Code to implement:
+  No production refactor yet beyond the failing tests.
+  How to verify it works:
+  Run the narrow targeted Vitest coverage and show the red failure.
+
+- [x] Task 8: Implement the next internal consolidation seam and finish verification
+  Test to write:
+  Reuse the failing coverage from Task 7.
+  Code to implement:
+  Refactor the chosen internal overlap behind a single clean seam, then rerun the official duplicate/report commands.
+  How to verify it works:
+  Run:
+  `npx vitest run` for all touched targeted suites
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Then record the before/after whole-codebase duplication and the affected feature-family hotspots in this file.
+
+## Review Bar
+
+- At least two overlapping user-facing feature families are consolidated behind shared engines/builders.
+- Tool contracts stay stable while implementation overlap drops.
+- Tool descriptions become clearer where feature overlap remains intentional.
+- The next internal duplicate-feature seam is reduced only after the user-facing overlaps are cleaned up.
+- The final verification includes both behavior proofs and the official whole-codebase duplicate metric.
+
+Plan ready. Approve to proceed.
+
+## Results
+
+- Finance-summary overlap is now reduced through `buildBudgetHealthMonthSummary(...)` in `src/tools/financeToolUtils.ts`, with `GetMonthlyReviewTool.ts` and `GetBudgetHealthSummaryTool.ts` sharing one month budget-health shaping seam.
+- Transaction browse tools now share `transactionFields` plus `toDisplayTransactions(...)` in `src/tools/transactionToolUtils.ts`, and `SearchTransactionsTool.ts` now uses the same collection rendering path as `ListTransactionsTool.ts`.
+- Transaction tool descriptions now differentiate overview, filtered drill-down, and “already know the ID/month” lookup use cases in the registry metadata.
+- Reliability summary math is centralized in `src/reliabilitySummaryUtils.ts`, with both `reliabilityRunner.ts` and `reliabilityArtifact.ts` delegating percentile, failure-group, threshold, and totals shaping to one helper.
+- Whole-codebase duplication improved during this plan from `24.35%` to `24.04%`, with the current scan reporting `720` clones and `5489` duplicated lines.
+- Final verification on the current branch state passed with:
+  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/transactionToolUtils.spec.ts src/aiToolOptimization.spec.ts src/additionalReadTools.spec.ts src/serverFactory.spec.ts src/reliabilitySummaryUtils.spec.ts src/reliabilityRunner.spec.ts src/reliabilityArtifact.spec.ts src/duplicateCodeRemediation.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+- Current tech-debt report output:
+  whole-codebase duplication `24.04%`
+  dead exports `0`
+  `ts-ignore` count `7`
+  `eslint-disable` count `10`
+  `TODO/FIXME/HACK` count `15`
+
+# OAuth Duplicate-Feature Follow-Up Plan
+
+## Goal
+
+Reduce the largest remaining production duplicate hotspot by consolidating overlapping OAuth lifecycle/state-handling code in `src/oauthStore.ts` and `src/oauthCore.ts`.
+
+## Metric Correction
+
+- The JSCPD whole-codebase percentage is useful as a secondary clone signal, but it is not the primary baseline for this branch anymore.
+- The primary baseline for this effort should be duplicate features/functions: overlapping user-facing or internal behavioral seams that are implemented more than once.
+- Going forward, branch progress should be described first in terms of which duplicate feature families were consolidated and how their overlapping responsibilities shrank.
+- JSCPD percentages and duplicated-line counts should still be recorded, but only as supporting evidence.
+
+## Why This Hotspot
+
+- The latest whole-codebase JSCPD scan still shows `src/oauthStore.ts` as the largest non-test production hotspot on this branch.
+- `src/oauthCore.ts` is the paired internal seam with the clearest overlap in record validation, threshold checks, and repeated transition/report shaping.
+- This is a better next target than test-heavy files because it removes real implementation duplication instead of mostly fixture repetition.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for a shared OAuth lifecycle seam
+  Test to write:
+  Add red structural and behavior coverage in OAuth-focused specs so the repo fails unless `oauthStore.ts` and `oauthCore.ts` delegate one repeated lifecycle/reporting path to a shared helper.
+  Prefer the smallest seam that currently appears in both modules, such as repeated state transition shaping, stale/invalid-state handling, or repeated summary record construction.
+  Code to implement:
+  No production refactor yet. Only failing tests that pin the seam and preserve current OAuth behavior.
+  How to verify it works:
+  Run the narrow OAuth Vitest coverage and show the red failure.
+
+- [x] Task 2: Implement the shared OAuth lifecycle seam
+  Test to write:
+  Reuse the failing coverage from Task 1.
+  Code to implement:
+  Extract the smallest clean shared helper/module for the repeated OAuth lifecycle logic and migrate only the overlapping paths onto it.
+  Keep OAuth contracts and persistence behavior stable.
+  How to verify it works:
+  Re-run the targeted OAuth specs, then `npm run lint:duplicates` and capture the duplicate delta in `src/oauthStore.ts` and `src/oauthCore.ts`.
+
+- [x] Task 3: Add failing coverage for OAuth tool-surface or internal clarity where overlap remains
+  Test to write:
+  Add a narrow quality/structure test that fails unless the remaining OAuth responsibilities are more clearly separated after the shared seam lands.
+  This can be a structural guard that prevents the same repeated helper from being re-inlined in both modules again.
+  Code to implement:
+  No production change yet beyond the failing guard.
+  How to verify it works:
+  Run the targeted OAuth/structure Vitest coverage and show the red failure.
+
+- [x] Task 4: Implement the clarity follow-up and final verification
+  Test to write:
+  Reuse the failing coverage from Task 3.
+  Code to implement:
+  Finish the minimal follow-up refactor or metadata/structure cleanup needed to keep the new seam durable and easy to review.
+  How to verify it works:
+  Run:
+  `npx vitest run` for all touched OAuth suites
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Then record the before/after duplicate numbers and the remaining top production hotspots in this file.
+
+## Review Bar
+
+- The next largest production duplicate cluster is reduced in real implementation code, not just in tests.
+- OAuth behavior stays stable under targeted specs.
+- The extracted seam is narrow and readable, not a large speculative abstraction.
+- The final proof includes both behavior tests and an updated duplicate/report baseline.
+
+Plan ready. Approve to proceed.
+
+## Results
+
+- OAuth grant record projection now lives in `src/oauthGrantViews.ts`, and both `src/oauthStore.ts` and `src/oauthCore.ts` delegate consent, pending-authorization, authorization-code, and refresh-token record shaping to that helper.
+- `src/oauthCore.ts` now centralizes authorization-code grant validation behind `requireAuthorizationCodeGrant(...)` instead of repeating the same ownership and expiry checks in multiple call sites.
+- Targeted OAuth verification passed with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthGrantViews.spec.ts src/oauthStore.spec.ts src/oauthCore.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+- Whole-codebase duplication improved from `24.04%` to `23.85%` during this follow-up.
+- Feature/function baseline improvement:
+  the OAuth lifecycle family now has one shared grant-view seam and one shared authorization-code validation seam instead of duplicating those responsibilities across `oauthStore.ts` and `oauthCore.ts`.
+- OAuth hotspot movement from the latest JSCPD report:
+  `src/oauthStore.ts`: `386` duplicated lines / `48` clones / `44.11%` before -> `310` duplicated lines / `38` clones / `39.14%` after
+  `src/oauthCore.ts`: `132` duplicated lines / `21` clones / `26.04%` before -> `84` duplicated lines / `17` clones / `17.28%` after
+- Current tech-debt report output:
+  whole-codebase duplication `23.85%`
+  dead exports `0`
+  `ts-ignore` count `7`
+  `eslint-disable` count `11`
+  `TODO/FIXME/HACK` count `18`
+
+## Architecturally-Unnecessary Duplicate Feature/Function Scorecard
+
+Primary status scale for this branch:
+- `not started`: the family still has architecturally unnecessary duplicate feature/function code and no intentional shared seam yet
+- `partially consolidated`: at least one real shared behavioral seam is in place, but some architecturally unnecessary overlap still remains
+- `appropriately separated`: the remaining differences appear justified by responsibility boundaries, so more consolidation would likely hurt the architecture
+
+Scoring rule:
+- The primary baseline is not raw JSCPD percentage. It is whether the codebase still implements the same feature/function multiple times without an architectural reason.
+- JSCPD remains supporting evidence for lexical overlap and hotspot discovery, not the main success metric.
+- Similar code should stay separate when the responsibilities are genuinely different.
+
+Current branch scorecard:
+- OAuth, token, and exchange lifecycle family: `partially consolidated`
+  Shared seams now exist for grant-record views and authorization-code validation.
+  This still looks like the largest remaining duplicate-feature debt area because grant transitions, token persistence, exchange validation, and legacy compatibility paths are split across overlapping code in `src/oauthStore.ts` and `src/oauthCore.ts`.
+- Finance summary family: `partially consolidated`
+  Shared seam now exists for month budget-health shaping via `buildBudgetHealthMonthSummary(...)`.
+  Remaining overlap still exists across spending, income, cash-flow, and broader monthly summary behavior, but some separation may still be architecturally correct if the tools are intentionally different.
+- Transaction browsing family: `partially consolidated`
+  Shared browse rendering now exists through `transactionFields` and `toDisplayTransactions(...)`, and the tool surface is clearer.
+  Remaining overlap still exists between broad search/list behavior and narrower transaction query helpers, but this family should only be pushed further where the shared seam improves clarity rather than blurring tool responsibilities.
+- Reliability reporting family: `partially consolidated`
+  Shared summary math now exists through `summarizeReliabilityResults(...)`.
+  Remaining overlap still exists in surrounding CLI/report orchestration and related reliability surfaces, though some of that separation may be appropriate.
+
+Working branch baseline:
+- `0` families are clearly `appropriately separated`
+- `4` families remain `partially consolidated`
+- largest likely tech-debt area: OAuth, tokens, and exchange flow
+- highest-value next step is to reduce architecturally unnecessary overlap in the OAuth/token/exchange family before forcing more consolidation elsewhere
+
+# OAuth/Token/Exchange Duplicate-Feature Remediation Plan
+
+## Goal
+
+Reduce architecturally unnecessary duplicate code in the OAuth, token, and exchange lifecycle without collapsing responsibilities that should remain distinct.
+
+## Constraints And Notes
+
+- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
+- The primary success metric is not raw JSCPD percentage. The main question is whether the same OAuth/token/exchange behavior is still implemented multiple times without an architectural reason.
+- Existing work already introduced two real shared seams:
+  - grant-record projection in `src/oauthGrantViews.ts`
+  - authorization-code validation in `src/oauthCore.ts`
+- The biggest remaining overlap appears to be:
+  - grant transition and persistence shaping across `src/oauthStore.ts`
+  - token/exchange validation and update flow across `src/oauthCore.ts`
+  - legacy compatibility/import paths that rebuild similar grant state in parallel
+- The repo requires TDD for code changes, one task at a time, with a stop after each task once execution begins.
+
+## Assumptions
+
+- We should only extract shared seams where the same lifecycle responsibility is genuinely being implemented in more than one place.
+- Consent handling, authorization-code exchange, refresh-token rotation, and legacy persistence compatibility may share some mechanics but should not be forced into one oversized abstraction.
+- A good next seam is likely a narrow grant-transition or token-state updater helper rather than a general-purpose "OAuth engine".
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for the next shared OAuth/token/exchange seam
+  Test to write:
+  Add red structural and behavior coverage in `src/duplicateCodeRemediation.spec.ts` plus the narrow OAuth suites that fails unless one remaining repeated lifecycle path is routed through a shared helper.
+  Target one specific overlap, likely:
+  repeated grant-state persistence shaping,
+  repeated token update application,
+  or repeated legacy grant normalization.
+  Code to implement:
+  No production code in this task. Only failing tests that pin the next seam and preserve current OAuth/token/exchange behavior.
+  How to verify it works:
+  Run the targeted OAuth Vitest coverage and show the red failure.
+  Result:
+  Added red coverage in `src/duplicateCodeRemediation.spec.ts` and new helper-behavior coverage in `src/oauthCompatibilityGrants.spec.ts`.
+  The next seam is now pinned around the four compatibility grant builders still inlined in `src/oauthStore.ts`.
+  Verified red with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCompatibilityGrants.spec.ts`
+  which failed because `src/oauthCompatibilityGrants.ts` does not exist yet and `oauthStore.ts` still persists compat grants by rebuilding four near-identical `normalizeGrant({...})` objects inline.
+
+- [x] Task 2: Implement the narrow shared seam
+  Test to write:
+  Reuse the failing tests from Task 1.
+  Code to implement:
+  Extract the smallest clean shared helper/module for the chosen overlap and migrate only the duplicated responsibility onto it.
+  Keep grant ownership, token rotation rules, exchange validation, and persistence semantics stable.
+  How to verify it works:
+  Re-run the targeted OAuth specs and show them passing.
+  Then run `npm run lint:duplicates` and record the hotspot movement for `src/oauthStore.ts` and `src/oauthCore.ts`.
+  Result:
+  Added `src/oauthCompatibilityGrants.ts` with four narrow compatibility-grant builders for authorization-code, pending-authorization, pending-consent, and refresh-token persistence.
+  Updated `src/oauthStore.ts` to use those builders instead of rebuilding four near-identical `normalizeGrant(...)` payloads inline.
+  Verified green with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCompatibilityGrants.spec.ts src/oauthStore.spec.ts`
+
+- [x] Task 3: Add failing coverage for architectural boundaries after the seam lands
+  Test to write:
+  Add a narrow structure/quality test that fails unless the remaining OAuth/token/exchange responsibilities stay clearly separated.
+  The goal is to prevent a cleanup from turning into an over-broad abstraction that mixes persistence, validation, and exchange orchestration.
+  Code to implement:
+  No production code yet beyond the failing guard.
+  How to verify it works:
+  Run the targeted OAuth/structure Vitest coverage and show the red failure.
+  Result:
+  Added a red structural guard in `src/duplicateCodeRemediation.spec.ts` requiring compatibility persistence to stay local to `oauthStore.ts` behind one narrow save helper and requiring `src/oauthCompatibilityGrants.ts` to remain pure.
+  Verified red with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts`
+  which failed because `oauthStore.ts` still repeated the compatibility grant save/persist path inline and did not define `saveCompatibilityGrant(...)`.
+
+- [x] Task 4: Implement the follow-up cleanup and final verification
+  Test to write:
+  Reuse the failing coverage from Task 3.
+  Code to implement:
+  Finish the smallest follow-up cleanup needed to keep the new seam durable and architecturally honest.
+  Update docs or task notes only if verification changes the architectural reading of the family.
+  How to verify it works:
+  Run:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthGrantViews.spec.ts src/oauthStore.spec.ts src/oauthCore.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  Then record:
+  the before/after OAuth hotspot movement,
+  the updated scorecard status for the OAuth/token/exchange family,
+  and whether the remaining overlap now looks `partially consolidated` or `appropriately separated`.
+  Result:
+  Added `saveCompatibilityGrant(...)` inside `src/oauthStore.ts` so compatibility persistence remains store-owned without expanding the shared helper beyond pure grant shaping.
+  Final verification passed with:
+  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/oauthStore.spec.ts src/oauthCore.spec.ts`
+  `npm run lint:duplicates`
+  `npm run tech-debt:report`
+  `npm run typecheck`
+  OAuth hotspot movement from the latest JSCPD report:
+  `src/oauthStore.ts`: `310` duplicated lines / `38` clones / `39.14%` before -> `274` duplicated lines / `34` clones / `37.59%` after
+  `src/oauthCore.ts`: `84` duplicated lines / `17` clones / `17.28%` before -> `84` duplicated lines / `17` clones / `17.28%` after
+  `src/oauthCompatibilityGrants.ts`: new focused helper module with `26` duplicated lines / `4` clones / `30.23%`
+  Updated architectural reading:
+  the OAuth/token/exchange family is still `partially consolidated`, but one more architecturally unnecessary overlap is now removed and compatibility persistence is cleaner without forcing orchestration and storage into one abstraction.
+
+## Review Bar
+
+- The chosen seam removes a real duplicate OAuth/token/exchange responsibility, not just a few similar lines.
+- OAuth behavior stays stable under targeted specs.
+- The extraction is narrow and readable, not a speculative framework.
+- The final summary explains what overlap was removed and what overlap remains intentionally separate.
+
+Plan ready. Approve to proceed.

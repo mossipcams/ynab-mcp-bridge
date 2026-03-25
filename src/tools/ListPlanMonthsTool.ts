@@ -2,10 +2,7 @@ import { z } from "zod";
 import * as ynab from "ynab";
 
 import {
-  hasPaginationControls,
-  hasProjectionControls,
-  paginateEntries,
-  projectRecord,
+  renderCollectionResult,
 } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
@@ -47,27 +44,13 @@ export async function execute(
         to_be_budgeted: month.to_be_budgeted,
       }));
 
-    if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
-      return toTextResult({
-        months,
-        month_count: months.length,
-      });
-    }
-
-    if (!hasPaginationControls(input)) {
-      return toTextResult({
-        months: months.map((month) => projectRecord(month, monthFields, input)),
-        month_count: months.length,
-      });
-    }
-
-    const pagedMonths = paginateEntries(months, input);
-
-    return toTextResult({
-      months: pagedMonths.entries.map((month) => projectRecord(month, monthFields, input)),
-      month_count: months.length,
-      ...pagedMonths.metadata,
-    });
+    return toTextResult(renderCollectionResult(
+      months,
+      monthFields,
+      input,
+      "months",
+      "month_count",
+    ));
   } catch (error) {
     return toErrorResult(error);
   }

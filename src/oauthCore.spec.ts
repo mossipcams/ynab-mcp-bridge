@@ -364,6 +364,82 @@ describe("createOAuthCore", () => {
     )).rejects.toThrow(InvalidGrantError);
   });
 
+  it("rejects refresh exchange locally when upstream refresh-token context is missing", async () => {
+    const { core, store, upstreamRefreshExchanges } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+
+    store.saveGrant({
+      grantId: "grant-1",
+      clientId: client.client_id,
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile"],
+      principalId: client.client_id,
+      refreshToken: {
+        token: "refresh-1",
+        expiresAt: 1_700_000_060_000,
+      },
+      upstreamTokens: {
+        access_token: "upstream-access-token",
+        token_type: "Bearer",
+      },
+    });
+
+    await expect(core.exchangeRefreshToken(
+      client,
+      "refresh-1",
+      undefined,
+      new URL("https://mcp.example.com/mcp"),
+    )).rejects.toThrow("Refresh token is missing upstream refresh-token context.");
+
+    expect(upstreamRefreshExchanges).toEqual([]);
+  });
+
+  it("expires refresh tokens through a shared validation path", async () => {
+    const { core, store } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+
+    store.saveGrant({
+      grantId: "grant-1",
+      clientId: client.client_id,
+      codeChallenge: "pkce-challenge",
+      principalId: client.client_id,
+      redirectUri: "https://claude.ai/oauth/callback",
+      refreshToken: {
+        token: "refresh-1",
+        expiresAt: 1_699_999_999_000,
+      },
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile"],
+      upstreamTokens: {
+        access_token: "upstream-access-token",
+        refresh_token: "upstream-refresh-token",
+        token_type: "Bearer",
+      },
+    });
+
+    await expect(core.exchangeRefreshToken(
+      client,
+      "refresh-1",
+      undefined,
+      new URL("https://mcp.example.com/mcp"),
+    )).rejects.toThrow("Refresh token has expired.");
+    expect(store.state.grants.has("grant-1")).toBe(false);
+  });
+
   it("returns an OAuth error redirect when consent is denied and rejects unknown callback state", async () => {
     const { core } = createCore();
     const client = await core.registerClient({
@@ -401,6 +477,63 @@ describe("createOAuthCore", () => {
       code: "upstream-code-123",
       upstreamState: "missing-state",
     })).rejects.toThrow(InvalidRequestError);
+  });
+
+  it("expires pending consent challenges through a shared validation path", async () => {
+    const { core, store } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+
+    store.saveGrant({
+      grantId: "grant-1",
+      clientId: client.client_id,
+      codeChallenge: "pkce-challenge",
+      consent: {
+        challenge: "consent-1",
+        expiresAt: 1_699_999_999_000,
+      },
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile"],
+    });
+
+    await expect(core.approveConsent("consent-1", "approve")).rejects.toThrow("Unknown consent challenge.");
+    expect(store.state.grants.has("grant-1")).toBe(false);
+  });
+
+  it("expires pending authorization state through a shared validation path", async () => {
+    const { core, store } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+
+    store.saveGrant({
+      grantId: "grant-1",
+      clientId: client.client_id,
+      codeChallenge: "pkce-challenge",
+      pendingAuthorization: {
+        expiresAt: 1_699_999_999_000,
+        stateId: "state-1",
+      },
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile"],
+    });
+
+    await expect(core.handleCallback({
+      code: "upstream-code-123",
+      upstreamState: "state-1",
+    })).rejects.toThrow("Unknown upstream OAuth state.");
+    expect(store.state.grants.has("grant-1")).toBe(false);
   });
 
   it("rejects client metadata without at least one https redirect URI", async () => {

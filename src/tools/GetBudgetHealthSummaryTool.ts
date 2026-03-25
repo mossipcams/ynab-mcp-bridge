@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { buildAssignedSpentSummary, compactObject, formatMilliunits, toSpentMilliunits } from "./financeToolUtils.js";
+import { buildBudgetHealthMonthSummary, compactObject, formatMilliunits } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_budget_health_summary";
@@ -15,19 +15,6 @@ export const inputSchema = {
   topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of category rollups to include."),
 };
 
-function sortDescendingByAmount<T extends { amountMilliunits: number; name: string }>(entries: T[]) {
-  return entries
-    .slice()
-    .sort((left, right) => {
-      const difference = right.amountMilliunits - left.amountMilliunits;
-      if (difference !== 0) {
-        return difference;
-      }
-
-      return left.name.localeCompare(right.name);
-    });
-}
-
 export async function execute(
   input: { planId?: string; month?: string; topN?: number },
   api: ynab.API,
@@ -39,46 +26,16 @@ export async function execute(
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const response = await api.months.getPlanMonth(planId, month);
       const monthDetail = response.data.month;
-      const categories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden);
-      const overspentCategories = sortDescendingByAmount(
-        categories
-          .filter((category) => category.balance < 0)
-          .map((category) => ({
-            id: category.id,
-            name: category.name,
-            categoryGroupName: category.category_group_name,
-            amountMilliunits: Math.abs(category.balance),
-          })),
-      );
-      const underfundedCategories = sortDescendingByAmount(
-        categories
-          .filter((category) => (category.goal_under_funded ?? 0) > 0)
-          .map((category) => ({
-            id: category.id,
-            name: category.name,
-            categoryGroupName: category.category_group_name,
-            amountMilliunits: category.goal_under_funded ?? 0,
-          })),
-      );
+      const {
+        overspent_categories: overspentCategories,
+        underfunded_categories: underfundedCategories,
+        ...budgetHealthSummary
+      } = buildBudgetHealthMonthSummary(monthDetail);
 
       return toTextResult({
         month: monthDetail.month,
-        ready_to_assign: formatMilliunits(monthDetail.to_be_budgeted),
-        available_total: formatMilliunits(
-          categories
-            .filter((category) => category.balance > 0)
-            .reduce((sum, category) => sum + category.balance, 0),
-        ),
-        overspent_total: formatMilliunits(
-          overspentCategories.reduce((sum, category) => sum + category.amountMilliunits, 0),
-        ),
-        underfunded_total: formatMilliunits(
-          underfundedCategories.reduce((sum, category) => sum + category.amountMilliunits, 0),
-        ),
         age_of_money: monthDetail.age_of_money,
-        ...buildAssignedSpentSummary(monthDetail.budgeted, toSpentMilliunits(monthDetail.activity)),
-        overspent_category_count: overspentCategories.length,
-        underfunded_category_count: underfundedCategories.length,
+        ...budgetHealthSummary,
         top_overspent_categories: overspentCategories.slice(0, topN).map((category) => compactObject({
           id: category.id,
           name: category.name,

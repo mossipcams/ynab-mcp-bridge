@@ -249,6 +249,26 @@ describe("code quality guardrails", () => {
     expect(workflow).toContain("npm run lint:unused");
   });
 
+  it("defines duplicate-detection guardrails for a whole-codebase scan", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      scripts?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const jscpdConfigPath = new URL("../.jscpd.json", import.meta.url);
+    const jscpdConfig = readFileSync(jscpdConfigPath, "utf8");
+
+    expect(existsSync(jscpdConfigPath)).toBe(true);
+    expect(packageJson.devDependencies?.jscpd).toBeTruthy();
+    expect(packageJson.scripts?.["lint:duplicates"]).toBeDefined();
+    expect(packageJson.scripts?.["tech-debt:report"]).toBeDefined();
+    expect(jscpdConfig).not.toContain("**/*.spec.ts");
+    expect(jscpdConfig).not.toContain("**/*.contract.ts");
+    expect(jscpdConfig).not.toContain("**/*.md");
+    expect(jscpdConfig).not.toContain("tasks/**");
+  });
+
   it("runs the main CI workflow in the expected validation order", () => {
     const workflow = readFileSync(
       new URL("../.github/workflows/test.yml", import.meta.url),

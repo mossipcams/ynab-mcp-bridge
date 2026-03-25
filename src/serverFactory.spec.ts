@@ -212,6 +212,33 @@ describe("createServer", () => {
     expect(descriptions.get("ynab_get_monthly_review")).toContain("timing");
   });
 
+  it("documents how to choose between transaction browse tools", () => {
+    const registerTool = vi.fn();
+
+    registerServerTools(
+      {
+        registerTool,
+      },
+      {} as any,
+    );
+
+    const descriptions = new Map(
+      registerTool.mock.calls.map(([toolName, registration]) => [
+        toolName,
+        (registration as { description?: string }).description ?? "",
+      ]),
+    );
+
+    expect(descriptions.get("ynab_list_transactions")).toContain("overview");
+    expect(descriptions.get("ynab_list_transactions")).toContain("prefer ynab_search_transactions");
+    expect(descriptions.get("ynab_search_transactions")).toContain("filters");
+    expect(descriptions.get("ynab_search_transactions")).toContain("drill-down");
+    expect(descriptions.get("ynab_get_transactions_by_account")).toContain("already know the account ID");
+    expect(descriptions.get("ynab_get_transactions_by_category")).toContain("already know the category ID");
+    expect(descriptions.get("ynab_get_transactions_by_month")).toContain("already know the exact month");
+    expect(descriptions.get("ynab_get_transactions_by_payee")).toContain("already know the payee ID");
+  });
+
   it("registers finance tool descriptions that clarify timing and classification semantics", () => {
     const registerTool = vi.fn();
 

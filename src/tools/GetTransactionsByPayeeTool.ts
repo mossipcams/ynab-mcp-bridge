@@ -1,10 +1,11 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult } from "./planToolUtils.js";
+import { executeTransactionLookup } from "./transactionToolUtils.js";
 
 export const name = "ynab_get_transactions_by_payee";
-export const description = "Gets transactions for a single payee.";
+export const description = "Gets transactions for a single payee when you already know the payee ID.";
 export const inputSchema = {
   planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
   payeeId: z.string().describe("The payee ID to filter by."),
@@ -12,29 +13,17 @@ export const inputSchema = {
 
 export async function execute(input: { planId?: string; payeeId: string }, api: ynab.API) {
   try {
-    const response = await withResolvedPlan(input.planId, api, async (planId) => api.transactions.getTransactionsByPayee(
-      planId,
-      input.payeeId,
-      undefined,
-      undefined,
-      undefined,
-    ));
-
-    return toTextResult({
-      transactions: response.data.transactions
-        .filter((transaction) => !transaction.deleted)
-        .map((transaction) => ({
-          id: transaction.id,
-          date: transaction.date,
-          amount: (transaction.amount / 1000).toFixed(2),
-          payee_name: transaction.payee_name,
-          category_name: transaction.category_name,
-          account_name: transaction.account_name,
-          approved: transaction.approved,
-          cleared: transaction.cleared,
-        })),
-      transaction_count: response.data.transactions.filter((transaction) => !transaction.deleted).length,
-    });
+    return await executeTransactionLookup(
+      input.planId,
+      api,
+      async (planId) => api.transactions.getTransactionsByPayee(
+        planId,
+        input.payeeId,
+        undefined,
+        undefined,
+        undefined,
+      ),
+    );
   } catch (error) {
     return toErrorResult(error);
   }
