@@ -4,8 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const srcRoot = path.join(repoRoot, "src");
 const jscpdReportPath = path.join(repoRoot, "artifacts", "jscpd-report", "jscpd-report.json");
+const repoCodeFileExtensions = new Set([".cjs", ".js", ".json", ".mjs", ".sh", ".ts", ".yaml", ".yml"]);
+const repoCodeIgnoredDirectories = new Set([".git", "artifacts", "dist", "node_modules", "tasks"]);
+const repoCodeIgnoredRootRelativePaths = new Set(["package-lock.json"]);
+const repoCodeSpecialBasenames = new Set(["Dockerfile"]);
 
 export const reportMetricLabels = [
   "Duplication",
@@ -14,6 +17,13 @@ export const reportMetricLabels = [
   "eslint-disable count",
   "TODO/FIXME/HACK count",
   "Dependencies with major updates",
+];
+
+export const repoCodeRootRelativeDirectories = [
+  ".github",
+  "debugging",
+  "scripts",
+  "src",
 ];
 
 function npmCommand() {
@@ -36,12 +46,47 @@ function runJson(command, args) {
   return JSON.parse(runUtf8(command, args));
 }
 
-function walkFiles(root) {
+function normalizeRelativePath(relativePath) {
+  return relativePath.split(path.sep).join("/");
+}
+
+export function isRepoOwnedCodePath(relativePath) {
+  const normalizedPath = normalizeRelativePath(relativePath);
+  const segments = normalizedPath.split("/");
+  const basename = segments.at(-1) ?? "";
+  const extension = path.extname(basename);
+
+  if (repoCodeIgnoredRootRelativePaths.has(normalizedPath)) {
+    return false;
+  }
+
+  if (segments.some((segment) => repoCodeIgnoredDirectories.has(segment))) {
+    return false;
+  }
+
+  if (normalizedPath.endsWith(".md")) {
+    return false;
+  }
+
+  return repoCodeSpecialBasenames.has(basename) || repoCodeFileExtensions.has(extension);
+}
+
+function walkRepoOwnedCodeFiles(root, currentRelativePath = "") {
   return readdirSync(root).flatMap((entry) => {
     const fullPath = path.join(root, entry);
+    const relativePath = currentRelativePath ? path.join(currentRelativePath, entry) : entry;
+    const normalizedRelativePath = normalizeRelativePath(relativePath);
 
     if (statSync(fullPath).isDirectory()) {
-      return walkFiles(fullPath);
+      if (repoCodeIgnoredDirectories.has(entry)) {
+        return [];
+      }
+
+      return walkRepoOwnedCodeFiles(fullPath, relativePath);
+    }
+
+    if (!isRepoOwnedCodePath(normalizedRelativePath)) {
+      return [];
     }
 
     return [fullPath];
@@ -51,8 +96,7 @@ function walkFiles(root) {
 function countPatternMatches(pattern) {
   const regex = new RegExp(pattern, "g");
 
-  return walkFiles(srcRoot)
-    .filter((filePath) => filePath.endsWith(".ts"))
+  return walkRepoOwnedCodeFiles(repoRoot)
     .reduce((count, filePath) => {
       const matches = readFileSync(filePath, "utf8").match(regex);
       return count + (matches?.length ?? 0);

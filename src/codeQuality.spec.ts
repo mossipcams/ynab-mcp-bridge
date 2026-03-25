@@ -253,6 +253,11 @@ describe("code quality guardrails", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("../package.json", import.meta.url), "utf8"),
     );
+    const jscpdConfig = JSON.parse(
+      readFileSync(new URL("../.jscpd.json", import.meta.url), "utf8"),
+    ) as {
+      ignore?: string[];
+    };
     const workflow = readFileSync(
       new URL("../.github/workflows/test.yml", import.meta.url),
       "utf8",
@@ -263,7 +268,16 @@ describe("code quality guardrails", () => {
     expect(packageJson.devDependencies.jscpd).toBeTruthy();
     expect(packageJson.devDependencies["npm-check-updates"]).toBeTruthy();
     expect(packageJson.scripts["lint:duplicates"]).toBeTruthy();
+    expect(packageJson.scripts["lint:duplicates"]).toBe("jscpd --config .jscpd.json .");
     expect(packageJson.scripts["tech-debt:report"]).toBe("node ./scripts/tech-debt-report.mjs");
+    expect(jscpdConfig.ignore).toEqual(expect.arrayContaining([
+      "dist/**",
+      "artifacts/**",
+      "node_modules/**",
+      "tasks/**",
+      "**/*.md",
+      "package-lock.json",
+    ]));
     expect(workflow).toContain("Run JSCPD");
     expect(workflow).toContain("npm run lint:duplicates");
     expect(workflow).toContain("Run tech debt report");

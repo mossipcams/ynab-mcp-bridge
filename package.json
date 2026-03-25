@@ -29,7 +29,7 @@
     "lint:oxlint": "oxlint --type-aware -c .oxlintrc.json src",
     "lint:deps": "dependency-cruiser --config .dependency-cruiser.js src",
     "lint:unused": "knip --config knip.json --production --exclude dependencies",
-    "lint:duplicates": "jscpd --config .jscpd.json src",
+    "lint:duplicates": "jscpd --config .jscpd.json .",
     "typecheck": "node --max-old-space-size=12288 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
     "typecheck:tests": "node --max-old-space-size=12288 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.test.json",
     "typecheck:all": "npm run typecheck && npm run typecheck:tests",

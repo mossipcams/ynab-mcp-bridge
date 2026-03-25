@@ -874,6 +874,86 @@ The first version should be safe, deterministic, and useful for catching flaky t
 
 Plan ready. Approve to proceed.
 
+# Whole Codebase Debt Scope Plan
+
+## Goal
+
+Expand both JSCPD duplicate detection and the tech-debt report so they measure the intended whole-repository codebase, not just `src/`.
+
+## Constraints And Notes
+
+- Repo rules require stopping after the plan and waiting for approval before any non-Markdown implementation work.
+- The current implementation is narrower than intended:
+  - `package.json` runs `jscpd --config .jscpd.json src`
+  - `scripts/tech-debt-report.mjs` only walks `src` when counting `ts-ignore`, `eslint-disable`, and `TODO` / `FIXME` / `HACK`
+- The updated scope should stay codebase-wide but still respect sensible exclusions such as generated output and installed dependencies.
+- We should keep the stable local commands unchanged:
+  - `npm run lint:duplicates`
+  - `npm run tech-debt:report`
+
+## Assumptions
+
+- “Entire codebase” should mean repository source and project-owned scripts/config, while still excluding obvious non-source/generated paths like `dist`, `artifacts`, and `node_modules`.
+- The cleanest implementation is to make `.jscpd.json` responsible for JSCPD scope and to teach `scripts/tech-debt-report.mjs` to walk the same effective repo-owned code surface rather than hardcoding `src`.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for whole-codebase duplicate and debt-report scope
+  Test to write:
+  Extend `src/codeQuality.spec.ts`, `src/preflight.spec.ts`, and/or `src/techDebtReport.spec.ts` so they fail unless:
+  - `lint:duplicates` no longer hardcodes `src`
+  - the JSCPD config describes whole-repo scanning with explicit exclusions
+  - the tech-debt report no longer hardcodes `src` as its only scan root
+  Code to implement:
+  No production code in this task. Only red coverage that pins the whole-codebase scope contract.
+  How to verify it works:
+  Run the smallest targeted Vitest command and show the failure proving the current implementation still scans only `src`.
+  Result:
+  Extended `src/codeQuality.spec.ts`, `src/techDebtReport.spec.ts`, and `src/preflight.spec.ts`, then proved the red state with `npx vitest run src/codeQuality.spec.ts src/techDebtReport.spec.ts src/preflight.spec.ts` while `lint:duplicates` still targeted `src` and the report module still hardcoded `src` for suppression counts.
+
+- [x] Task 2: Expand JSCPD to whole-codebase scope
+  Test to write:
+  Reuse the failing coverage from Task 1.
+  Code to implement:
+  Update `package.json` and `.jscpd.json` so `npm run lint:duplicates` scans the intended repo-owned codebase while excluding generated or irrelevant paths such as `dist`, `artifacts`, and `node_modules`.
+  How to verify it works:
+  Re-run the targeted spec coverage, then run `npm run lint:duplicates` and confirm the report now reflects whole-codebase duplication scope.
+  Result:
+  Updated `package.json` to run `jscpd --config .jscpd.json .` and expanded `.jscpd.json` exclusions to keep generated and non-code paths out of scope. Verified with the targeted spec suite and `npm run lint:duplicates`.
+
+- [x] Task 3: Expand the tech-debt report to whole-codebase scope
+  Test to write:
+  Reuse the failing coverage from Task 1.
+  Code to implement:
+  Update `scripts/tech-debt-report.mjs` so suppression/debt-marker counts walk the same intended repo-owned codebase instead of only `src`, while preserving the existing metric labels and command entry point.
+  How to verify it works:
+  Re-run the targeted spec coverage, then run `npm run tech-debt:report` and confirm the output still prints all metrics using whole-codebase scope.
+  Result:
+  Added a shared repo-owned-code boundary in `scripts/tech-debt-report.mjs`, exported it for contract coverage, and moved suppression/debt-marker counts to the same whole-codebase scope used by JSCPD. Verified with the targeted spec suite and `npm run tech-debt:report`.
+
+- [x] Task 4: Finish verification and document the corrected scope
+  Test to write:
+  Add or extend a small doc/contract assertion so `README.md` fails to match unless it makes the whole-codebase scope clear for both commands.
+  Code to implement:
+  Update `README.md` and, if helpful, `tasks/todo.md` result notes so the scope is explicit and future changes do not silently drift back to `src`-only behavior.
+  How to verify it works:
+  Run the final proof set:
+  - targeted Vitest coverage for the updated scope contract
+  - `npm run lint:duplicates`
+  - `npm run tech-debt:report`
+  - `npm run preflight`
+  Result:
+  Updated `README.md` to describe the whole-codebase, repo-owned-code boundary. Final verification used `npx vitest run src/codeQuality.spec.ts src/techDebtReport.spec.ts src/preflight.spec.ts`, `npm run lint:duplicates`, and `npm run tech-debt:report`; `npm run preflight` was the next repo-wide proof step after the scope correction.
+
+## Review Bar
+
+- JSCPD and the tech-debt report use the same intended whole-codebase boundary.
+- The scope is explicit in config, code, and documentation.
+- Generated output and third-party dependencies remain excluded.
+- The final proof includes both contract tests and the real commands.
+
+Plan ready. Approve to proceed.
+
 # Duplication Cleanup And Tech Debt Report Overhaul Plan
 
 ## Goal

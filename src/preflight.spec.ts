@@ -36,6 +36,8 @@ describe("local preflight command", () => {
     expect(packageJson.scripts?.["tech-debt:report"]).toContain("scripts/tech-debt-report.mjs");
     expect(readme).toContain("npm run lint:duplicates");
     expect(readme).toContain("npm run tech-debt:report");
+    expect(readme).toContain("whole codebase");
+    expect(readme).toContain("repo-owned code");
     expect(readme).toContain("advisory");
     expect(preflightScript).not.toContain("lint:duplicates");
     expect(preflightScript).not.toContain("tech-debt:report");

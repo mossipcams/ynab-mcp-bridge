@@ -16,11 +16,20 @@ describe("tech debt report implementation", () => {
     const reportModule = await import(new URL("../scripts/tech-debt-report.mjs", import.meta.url).href) as {
       collectTechDebtMetrics?: unknown;
       formatTechDebtReport?: unknown;
+      isRepoOwnedCodePath?: unknown;
+      repoCodeRootRelativeDirectories?: unknown;
       reportMetricLabels?: unknown;
     };
 
     expect(reportModule.collectTechDebtMetrics).toBeTypeOf("function");
     expect(reportModule.formatTechDebtReport).toBeTypeOf("function");
+    expect(reportModule.isRepoOwnedCodePath).toBeTypeOf("function");
+    expect(reportModule.repoCodeRootRelativeDirectories).toEqual([
+      ".github",
+      "debugging",
+      "scripts",
+      "src",
+    ]);
     expect(reportModule.reportMetricLabels).toEqual([
       "Duplication",
       "Dead exports",

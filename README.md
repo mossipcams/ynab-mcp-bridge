@@ -78,7 +78,7 @@ npm run lint:duplicates
 npm run tech-debt:report
 ```
 
-`lint:duplicates` runs JSCPD with the checked-in `.jscpd.json` settings, and `tech-debt:report` prints the current duplication, dead-export, suppression, debt-marker, and dependency-update counts.
+`lint:duplicates` runs JSCPD across the whole codebase using the checked-in `.jscpd.json` settings and explicit exclusions for generated or non-code paths. `tech-debt:report` uses the same repo-owned code boundary and prints the current duplication, dead-export, suppression, debt-marker, and dependency-update counts.
 
 ### 4. Expose authless HTTP intentionally
 
