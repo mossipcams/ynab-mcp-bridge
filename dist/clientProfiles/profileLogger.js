@@ -1,3 +1,4 @@
+import { logAppEvent } from "../logger.js";
 export function logClientProfileEvent(event, details) {
-    console.error("[profile]", event, details);
+    logAppEvent("profile", event, details);
 }

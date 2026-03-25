@@ -14,10 +14,21 @@ describe("getFirstHeaderValue", () => {
   it("returns the first element from a string array", () => {
     expect(getFirstHeaderValue(["text/html", "application/json"])).toBe("text/html");
   });
+
+  it("returns undefined for blank header values", () => {
+    expect(getFirstHeaderValue("   ")).toBeUndefined();
+    expect(getFirstHeaderValue(["   ", "application/json"])).toBeUndefined();
+  });
 });
 
 describe("isLoopbackHostname", () => {
   it("returns true for localhost", () => {
     expect(isLoopbackHostname("localhost")).toBe(true);
+  });
+
+  it("returns true for loopback hosts that include an explicit port", () => {
+    expect(isLoopbackHostname("localhost:3000")).toBe(true);
+    expect(isLoopbackHostname("127.0.0.1:3000")).toBe(true);
+    expect(isLoopbackHostname("[::1]:3000")).toBe(true);
   });
 });

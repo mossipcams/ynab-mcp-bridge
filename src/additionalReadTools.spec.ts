@@ -523,6 +523,87 @@ describe("additional read-only tools", () => {
     });
   });
 
+  it("supports projected paginated transaction listings by month", async () => {
+    const api = {
+      transactions: {
+        getTransactionsByMonth: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "txn-1",
+                date: "2026-03-01",
+                amount: -12500,
+                payee_name: "Grocer",
+                category_name: "Food",
+                account_name: "Checking",
+                approved: true,
+                cleared: "cleared",
+                deleted: false,
+              },
+              {
+                id: "txn-2",
+                date: "2026-03-02",
+                amount: -5000,
+                payee_name: "Cafe",
+                category_name: "Dining Out",
+                account_name: "Checking",
+                approved: false,
+                cleared: "uncleared",
+                deleted: false,
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetTransactionsByMonthTool.execute(
+      {
+        planId: "plan-1",
+        month: "2026-03-01",
+        limit: 1,
+        offset: 1,
+        includeIds: false,
+        fields: ["date", "amount", "payee_name"],
+      },
+      api as any,
+    );
+
+    expect(parseText(result)).toEqual({
+      transactions: [
+        {
+          date: "2026-03-02",
+          amount: "-5.00",
+          payee_name: "Cafe",
+        },
+      ],
+      transaction_count: 2,
+      returned_count: 1,
+      offset: 1,
+      limit: 1,
+      has_more: false,
+    });
+  });
+
+  it("rejects non-month transaction month inputs before calling YNAB", async () => {
+    const api = {
+      transactions: {
+        getTransactionsByMonth: vi.fn(),
+      },
+    };
+
+    const result = await GetTransactionsByMonthTool.execute(
+      { planId: "plan-1", month: "2026-03-15" },
+      api as any,
+    );
+
+    expect(api.transactions.getTransactionsByMonth).not.toHaveBeenCalled();
+    expect(parseText(result)).toEqual({
+      success: false,
+      error: "Month must be 'current' or the first day of a month in YYYY-MM-DD format.",
+    });
+  });
+
   it("gets all transactions and filters deleted rows", async () => {
     const api = {
       transactions: {
@@ -782,6 +863,68 @@ describe("additional read-only tools", () => {
         },
       ],
       transaction_count: 1,
+    });
+  });
+
+  it("supports projected paginated transaction listings by payee", async () => {
+    const api = {
+      transactions: {
+        getTransactionsByPayee: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "txn-1",
+                date: "2026-03-01",
+                amount: -12500,
+                payee_name: "Grocer",
+                category_name: "Food",
+                account_name: "Checking",
+                approved: true,
+                cleared: "cleared",
+                deleted: false,
+              },
+              {
+                id: "txn-2",
+                date: "2026-03-02",
+                amount: -5000,
+                payee_name: "Grocer",
+                category_name: "Food",
+                account_name: "Credit Card",
+                approved: false,
+                cleared: "uncleared",
+                deleted: false,
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetTransactionsByPayeeTool.execute(
+      {
+        planId: "plan-1",
+        payeeId: "payee-1",
+        limit: 1,
+        includeIds: false,
+        fields: ["date", "amount", "account_name"],
+      },
+      api as any,
+    );
+
+    expect(parseText(result)).toEqual({
+      transactions: [
+        {
+          date: "2026-03-01",
+          amount: "-12.50",
+          account_name: "Checking",
+        },
+      ],
+      transaction_count: 2,
+      returned_count: 1,
+      offset: 0,
+      limit: 1,
+      has_more: true,
+      next_offset: 1,
     });
   });
 

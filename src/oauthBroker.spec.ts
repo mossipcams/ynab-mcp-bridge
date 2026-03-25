@@ -138,6 +138,48 @@ describe("oauth broker persistence", () => {
     ]));
   });
 
+  it("logs non-callback oauth events through the shared oauth logger", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
+
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const response = await startAuthorization(httpServer.url, registration.client_id);
+
+    expect(response.status).toBe(200);
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        clientId: registration.client_id,
+        event: "authorize.started",
+        hasRedirectUri: true,
+        hasResource: true,
+        hasState: true,
+        msg: "authorize.started",
+        scope: "oauth",
+      }),
+      expect.objectContaining({
+        clientId: registration.client_id,
+        consentChallengeIssued: true,
+        event: "authorize.consent_required",
+        msg: "authorize.consent_required",
+        scope: "oauth",
+      }),
+    ]));
+  });
+
   it("rejects repeated callback query parameters with an explicit validation error", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({

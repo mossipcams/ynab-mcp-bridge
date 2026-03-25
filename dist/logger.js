@@ -24,6 +24,9 @@ function normalizeKey(key) {
 }
 function isSensitiveKey(key) {
     const normalizedKey = normalizeKey(key);
+    if (normalizedKey.startsWith("has_") || normalizedKey.startsWith("issued_")) {
+        return false;
+    }
     return SENSITIVE_KEYS.has(normalizedKey) ||
         normalizedKey.endsWith("_secret") ||
         normalizedKey.endsWith("_token");

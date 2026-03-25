@@ -12,6 +12,14 @@ type PaginationOptions = {
 
 const DEFAULT_LIMIT = 50;
 
+function normalizePaginationNumber(value: number | undefined, fallback: number, minimum: number) {
+  if (value === undefined || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(Math.trunc(value), minimum);
+}
+
 export function formatAmountMilliunits(value: number) {
   return formatMilliunits(value);
 }
@@ -42,8 +50,8 @@ export function paginateEntries<Entry>(
   entries: Entry[],
   options: PaginationOptions = {},
 ) {
-  const offset = Math.max(options.offset ?? 0, 0);
-  const limit = Math.max(options.limit ?? DEFAULT_LIMIT, 1);
+  const offset = normalizePaginationNumber(options.offset, 0, 0);
+  const limit = normalizePaginationNumber(options.limit, DEFAULT_LIMIT, 1);
   const pagedEntries = entries.slice(offset, offset + limit);
   const nextOffset = offset + pagedEntries.length;
 

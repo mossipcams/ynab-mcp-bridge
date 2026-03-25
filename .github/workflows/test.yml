@@ -87,6 +87,12 @@ jobs:
       - name: Run Knip
         run: npm run lint:unused
 
+      - name: Run JSCPD
+        run: npm run lint:duplicates
+
+      - name: Run tech debt report
+        run: npm run tech-debt:report
+
       - name: Build package
         run: npm run build
 

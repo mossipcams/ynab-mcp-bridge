@@ -30,7 +30,7 @@ function getConsentPageHeaders(authorizationUrl: string) {
 }
 
 function logOAuthDebug(event: string, details: Record<string, unknown>) {
-  console.error("[oauth]", event, details);
+  logAppEvent("oauth", event, details);
 }
 
 function getErrorDetails(error: unknown) {
