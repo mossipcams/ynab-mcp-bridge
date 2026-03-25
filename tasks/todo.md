@@ -874,6 +874,116 @@ The first version should be safe, deterministic, and useful for catching flaky t
 
 Plan ready. Approve to proceed.
 
+# Duplication Cleanup And Tech Debt Report Overhaul Plan
+
+## Goal
+
+Reduce the highest-value duplication clusters identified by JSCPD, and overhaul the tech-debt report script so it is easier to maintain, more explicit about its metrics, and safer to extend.
+
+## Constraints And Notes
+
+- Repo rules require stopping after the plan and waiting for approval before any non-Markdown implementation work.
+- The current `npm run lint:duplicates` output shows the highest-payoff clusters are:
+  - analytics tools
+  - OAuth persistence and verifier internals
+  - transaction wrapper tools
+  - payee-location and money-movement fetchers
+  - reliability helpers
+- The current `scripts/tech-debt-report.sh` works, but it is a thin shell wrapper around several inline commands. It should be cleaned up while preserving the current output categories:
+  - duplication
+  - dead exports
+  - `ts-ignore` / `ts-expect-error`
+  - `eslint-disable`
+  - `TODO` / `FIXME` / `HACK`
+  - major dependency updates
+- The best early duplication target is the transaction-wrapper family because it is smaller than the analytics/OAuth clusters and already has a shared query engine seam.
+
+## Assumptions
+
+- The right first remediation slice is to finish consolidating the transaction-wrapper tools before tackling the much larger analytics and OAuth families.
+- The tech-debt report overhaul should keep the command advisory-only and preserve its existing human-readable output header and metric names.
+- If shell-only cleanup starts getting awkward, it is acceptable to move the report implementation behind a small Node script while keeping `npm run tech-debt:report` as the stable entry point.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for the next duplication-remediation seam
+  Test to write:
+  Extend or add focused specs around the transaction-wrapper tools so they fail unless the repeated wrapper behavior is driven through a narrower shared abstraction instead of duplicated per-tool setup.
+  Code to implement:
+  No production code in this task. Only the red tests or structure assertions that pin the desired consolidation seam.
+  How to verify it works:
+  Run the smallest targeted Vitest command for the new coverage and show the failure proving the wrapper duplication is still present.
+  Result:
+  Added `src/transactionToolStructure.spec.ts` and proved the red state with `npx vitest run src/transactionToolStructure.spec.ts` before the shared wrapper seam existed.
+
+- [x] Task 2: Consolidate the transaction-wrapper duplication
+  Test to write:
+  Reuse the failing coverage from Task 1.
+  Code to implement:
+  Refactor the transaction wrapper tools to share one generic wrapper path around `src/transactionQueryEngine.ts`, reducing repeated request/label/projection boilerplate across:
+  - `src/tools/ListTransactionsTool.ts`
+  - `src/tools/GetTransactionsByMonthTool.ts`
+  - `src/tools/GetTransactionsByAccountTool.ts`
+  - `src/tools/GetTransactionsByCategoryTool.ts`
+  - `src/tools/GetTransactionsByPayeeTool.ts`
+  How to verify it works:
+  Re-run the targeted specs, then run `npm run lint:duplicates` and confirm the transaction-tool cluster shrinks without behavior regressions.
+  Result:
+  Added `src/tools/transactionCollectionToolUtils.ts`, centralized the shared input-schema and executor patterns, and reduced JSCPD from `42` clones / `4.12%` duplication to `37` clones / `3.7%`. Verified with `npx vitest run src/transactionToolStructure.spec.ts src/additionalReadTools.spec.ts src/aiToolOptimization.spec.ts` and `npm run lint:duplicates`.
+
+- [x] Task 3: Add failing coverage for a maintainable tech-debt report implementation
+  Test to write:
+  Add focused contract coverage so it fails unless the tech-debt report implementation is decomposed into explicit metric steps or helpers rather than one opaque inline shell block, while preserving the current output labels and advisory workflow wiring.
+  Code to implement:
+  No production code in this task. Only red coverage that pins the desired structure and output contract for the report implementation.
+  How to verify it works:
+  Run the smallest targeted Vitest command and show the failure proving the current report implementation is still too monolithic.
+  Result:
+  Added `src/techDebtReport.spec.ts` and proved the red state with `npx vitest run src/techDebtReport.spec.ts` while `npm run tech-debt:report` still pointed at the shell entrypoint.
+
+- [x] Task 4: Overhaul the tech-debt report script
+  Test to write:
+  Reuse the failing coverage from Task 3.
+  Code to implement:
+  Refactor the report implementation into a cleaner, maintainable structure, likely by:
+  - extracting named helpers per metric
+  - making JSON parsing and empty-result handling explicit
+  - isolating the JSCPD report generation step from the formatting step
+  - keeping `npm run tech-debt:report` and the current output categories stable
+  How to verify it works:
+  Re-run the targeted specs, then run `npm run tech-debt:report` and confirm all metric lines still print correctly.
+  Result:
+  Replaced the shell implementation with `scripts/tech-debt-report.mjs`, which now exposes explicit metric helpers plus formatting logic while keeping `npm run tech-debt:report` stable. Verified with `npx vitest run src/techDebtReport.spec.ts src/codeQuality.spec.ts src/preflight.spec.ts` and `npm run tech-debt:report`.
+
+- [x] Task 5: Re-rank the remaining duplication backlog and finish verification
+  Test to write:
+  No new behavioral test unless the refactor reveals a missing regression boundary in the analytics, OAuth, reliability, or payee-location families.
+  Code to implement:
+  Update `tasks/todo.md` with the refreshed duplication ranking after the first cleanup slice and note the next-best candidate family.
+  How to verify it works:
+  Run the final proof set:
+  - targeted Vitest coverage for the new seams
+  - `npm run lint:duplicates`
+  - `npm run tech-debt:report`
+  - `npm run preflight`
+  Result:
+  Refreshed the duplication ranking after the transaction-tool cleanup:
+  1. analytics tools (`177` duplicated lines across `16` clones)
+  2. OAuth persistence and verifier internals (`151` duplicated lines across `11` clones)
+  3. payee-location and money-movement fetchers (`51` duplicated lines across `5` clones)
+  4. reliability helpers (`49` duplicated lines across `3` clones)
+  5. category drill-down tools (`23` duplicated lines across `2` clones)
+  The next-best candidate family is analytics tools because it now leads the duplication backlog by a clear margin. Final verification used the targeted Vitest suites, `npm run lint:duplicates`, `npm run tech-debt:report`, and `npm run preflight`.
+
+## Review Bar
+
+- The highest-value low-risk duplication slice is reduced, not just reshuffled.
+- The tech-debt report implementation is materially easier to understand and extend.
+- JSCPD and the tech-debt report still run from the same stable local commands.
+- Verification includes both behavior tests and the real repo-wide quality commands.
+
+Plan ready. Approve to proceed.
+
 # Tech Debt Report Plan
 
 ## Goal

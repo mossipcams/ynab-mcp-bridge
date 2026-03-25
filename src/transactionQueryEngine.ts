@@ -18,14 +18,15 @@ export const transactionFields = [
 
 type TransactionField = (typeof transactionFields)[number];
 
-type TransactionProjectionInput = {
+export type TransactionProjectionInput = {
   fields?: TransactionField[];
   includeIds?: boolean;
   limit?: number;
   offset?: number;
+  planId?: string;
 };
 
-type TransactionLike = {
+export type TransactionLike = {
   account_id?: string | null;
   account_name?: string | null;
   amount: number;

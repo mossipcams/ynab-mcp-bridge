@@ -33,7 +33,7 @@ describe("local preflight command", () => {
     const preflightScript = packageJson.scripts?.["preflight"];
 
     expect(packageJson.scripts?.["lint:duplicates"]).toContain(".jscpd.json");
-    expect(packageJson.scripts?.["tech-debt:report"]).toContain("scripts/tech-debt-report.sh");
+    expect(packageJson.scripts?.["tech-debt:report"]).toContain("scripts/tech-debt-report.mjs");
     expect(readme).toContain("npm run lint:duplicates");
     expect(readme).toContain("npm run tech-debt:report");
     expect(readme).toContain("advisory");

@@ -259,12 +259,11 @@ describe("code quality guardrails", () => {
     );
 
     expect(existsSync(new URL("../.jscpd.json", import.meta.url))).toBe(true);
-    expect(existsSync(new URL("../scripts/tech-debt-report.sh", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("../scripts/tech-debt-report.mjs", import.meta.url))).toBe(true);
     expect(packageJson.devDependencies.jscpd).toBeTruthy();
     expect(packageJson.devDependencies["npm-check-updates"]).toBeTruthy();
     expect(packageJson.scripts["lint:duplicates"]).toBeTruthy();
-    expect(packageJson.scripts["tech-debt:report"]).toBeTruthy();
-    expect(packageJson.scripts["tech-debt:report"]).toContain("scripts/tech-debt-report.sh");
+    expect(packageJson.scripts["tech-debt:report"]).toBe("node ./scripts/tech-debt-report.mjs");
     expect(workflow).toContain("Run JSCPD");
     expect(workflow).toContain("npm run lint:duplicates");
     expect(workflow).toContain("Run tech debt report");
