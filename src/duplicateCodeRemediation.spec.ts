@@ -10,8 +10,8 @@ const sharedCollectionTools = [
   "ListPayeesTool.ts",
   "ListPlanMonthsTool.ts",
   "ListScheduledTransactionsTool.ts",
-  "ListTransactionsTool.ts",
 ] as const;
+const transactionCollectionUtilsPath = path.join(projectRoot, "src", "tools", "transactionCollectionToolUtils.ts");
 const transactionLookupUtilsPath = path.join(projectRoot, "src", "tools", "transactionToolUtils.ts");
 const sharedTransactionLookupTools = [
   "GetTransactionsByAccountTool.ts",
@@ -24,7 +24,6 @@ const sharedBudgetHealthTools = [
   "GetMonthlyReviewTool.ts",
 ] as const;
 const sharedTransactionBrowseTools = [
-  "ListTransactionsTool.ts",
   "SearchTransactionsTool.ts",
 ] as const;
 
@@ -45,19 +44,19 @@ describe("duplicate code remediation", () => {
     }
   });
 
-  it("centralizes transaction lookup rendering behind a shared helper", () => {
-    const helperSource = readFileSync(transactionLookupUtilsPath, "utf8");
+  it("centralizes transaction collection tools behind a shared helper", () => {
+    const helperSource = readFileSync(transactionCollectionUtilsPath, "utf8");
 
-    expect(helperSource).toContain("export async function executeTransactionLookup");
-    expect(helperSource).toContain("export function toDisplayTransactions");
+    expect(helperSource).toContain("export const monthTransactionCollectionExecutor");
+    expect(helperSource).toContain("export function createIdFilteredTransactionCollectionExecutor");
 
     for (const toolFile of sharedTransactionLookupTools) {
       const toolSource = readFileSync(path.join(projectRoot, "src", "tools", toolFile), "utf8");
 
-      expect(toolSource).toContain("executeTransactionLookup(");
-      expect(toolSource).not.toContain('amount: (transaction.amount / 1000).toFixed(2)');
-      expect(toolSource).not.toContain(".filter((transaction) => !transaction.deleted)");
-      expect(toolSource).not.toContain(".map((transaction) => ({");
+      expect(toolSource).toContain("transactionCollectionToolUtils");
+      expect(toolSource).not.toContain("executeTransactionLookup(");
+      expect(toolSource).not.toContain("renderCollectionResult(");
+      expect(toolSource).not.toContain("toDisplayTransactions(");
     }
   });
 

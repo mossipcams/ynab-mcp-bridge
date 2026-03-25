@@ -1,9 +1,10 @@
-import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import type { ClientProfileId } from "./clientProfiles/types.js";
 import {
   normalizeGrant,
   normalizeScopes,
+  type OAuthGrantUpstreamTokens,
   type OAuthGrant,
 } from "./oauthGrant.js";
 
@@ -46,9 +47,8 @@ function isOAuthClientInformationFull(value: unknown): value is OAuthClientInfor
   return isRecord(value) && typeof value["client_id"] === "string";
 }
 
-function isOAuthTokens(value: unknown): value is OAuthTokens {
+function isOAuthGrantUpstreamTokens(value: unknown): value is OAuthGrantUpstreamTokens {
   return isRecord(value) &&
-    typeof value["access_token"] === "string" &&
     typeof value["token_type"] === "string";
 }
 
@@ -133,11 +133,25 @@ function parseClientProfiles(value: unknown): Record<string, ClientProfileId> {
   );
 }
 
-function parseGrantRecord(value: unknown): OAuthGrant | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
+function parseCompatibilityProfileId(value: unknown): ClientProfileId | undefined {
+  return value === "chatgpt" ||
+    value === "claude" ||
+    value === "codex" ||
+    value === "generic"
+    ? value
+    : undefined;
+}
 
+type ParsedGrantRequiredFields = {
+  clientId: string;
+  codeChallenge: string;
+  grantId: string;
+  redirectUri: string;
+  resource: string;
+  scopes: string[];
+};
+
+function parseGrantRequiredFields(value: Record<string, unknown>): ParsedGrantRequiredFields | undefined {
   const grantId = value["grantId"];
   const clientId = value["clientId"];
   const codeChallenge = value["codeChallenge"];
@@ -156,27 +170,51 @@ function parseGrantRecord(value: unknown): OAuthGrant | undefined {
     return undefined;
   }
 
-  return normalizeGrant({
-    ...(isAuthorizationCodeStep(value["authorizationCode"]) ? { authorizationCode: value["authorizationCode"] } : {}),
+  return {
     clientId,
-    ...(typeof value["clientName"] === "string" ? { clientName: value["clientName"] } : {}),
-    ...(value["compatibilityProfileId"] === "chatgpt" ||
-        value["compatibilityProfileId"] === "claude" ||
-        value["compatibilityProfileId"] === "codex" ||
-        value["compatibilityProfileId"] === "generic"
-      ? { compatibilityProfileId: value["compatibilityProfileId"] }
-      : {}),
     codeChallenge,
-    ...(isConsentStep(value["consent"]) ? { consent: value["consent"] } : {}),
     grantId,
-    ...(isPendingAuthorizationStep(value["pendingAuthorization"]) ? { pendingAuthorization: value["pendingAuthorization"] } : {}),
     redirectUri,
-    ...(isRefreshTokenStep(value["refreshToken"]) ? { refreshToken: value["refreshToken"] } : {}),
     resource,
     scopes: scopes.filter((scope): scope is string => typeof scope === "string"),
+  };
+}
+
+function buildOptionalGrantFields(value: Record<string, unknown>): Partial<OAuthGrant> {
+  const compatibilityProfileId = parseCompatibilityProfileId(value["compatibilityProfileId"]);
+
+  return {
+    ...(isAuthorizationCodeStep(value["authorizationCode"]) ? { authorizationCode: value["authorizationCode"] } : {}),
+    ...(typeof value["clientName"] === "string" ? { clientName: value["clientName"] } : {}),
+    ...(compatibilityProfileId ? { compatibilityProfileId } : {}),
+    ...(isConsentStep(value["consent"]) ? { consent: value["consent"] } : {}),
+    ...(isPendingAuthorizationStep(value["pendingAuthorization"]) ? { pendingAuthorization: value["pendingAuthorization"] } : {}),
+    ...(isRefreshTokenStep(value["refreshToken"]) ? { refreshToken: value["refreshToken"] } : {}),
     ...(typeof value["state"] === "string" ? { state: value["state"] } : {}),
     ...(typeof value["principalId"] === "string" ? { principalId: value["principalId"] } : {}),
-    ...(isOAuthTokens(value["upstreamTokens"]) ? { upstreamTokens: value["upstreamTokens"] } : {}),
+    ...(isOAuthGrantUpstreamTokens(value["upstreamTokens"]) ? { upstreamTokens: value["upstreamTokens"] } : {}),
+  };
+}
+
+function parseGrantRecord(value: unknown): OAuthGrant | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const requiredFields = parseGrantRequiredFields(value);
+
+  if (!requiredFields) {
+    return undefined;
+  }
+
+  return normalizeGrant({
+    ...buildOptionalGrantFields(value),
+    clientId: requiredFields.clientId,
+    codeChallenge: requiredFields.codeChallenge,
+    grantId: requiredFields.grantId,
+    redirectUri: requiredFields.redirectUri,
+    resource: requiredFields.resource,
+    scopes: requiredFields.scopes,
   });
 }
 
@@ -222,5 +260,5 @@ export function loadPersistedOAuthState(parsed: unknown): PersistedOAuthState {
 }
 
 export function deserializePersistedOAuthState(serialized: string): PersistedOAuthState {
-  return loadPersistedOAuthState(JSON.parse(serialized) as unknown);
+  return loadPersistedOAuthState(JSON.parse(serialized));
 }

@@ -8,11 +8,7 @@ import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextproto
 import type { ClientProfileId } from "./clientProfiles/types.js";
 import { getEffectiveOAuthScopes } from "./config.js";
 import { minimizeUpstreamTokens, type OAuthGrant } from "./oauthGrant.js";
-import {
-  toPendingConsentRecord,
-  type PendingAuthorizationRecord as PendingAuthorization,
-  type PendingConsentRecord as PendingConsent,
-} from "./oauthGrantViews.js";
+import { toPendingConsentRecord } from "./oauthGrantViews.js";
 import { parseAuthorizationRequest, parseClientMetadata } from "./oauthSchemas.js";
 export type { PendingAuthorization, PendingConsent } from "./oauthGrantViews.js";
 
