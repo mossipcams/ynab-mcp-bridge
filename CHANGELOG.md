@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.0...ynab-mcp-bridge-v0.14.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* add tech debt reporting to ci ([93b1315](https://github.com/mossipcams/ynab-mcp-bridge/commit/93b1315b8bfd7098b2436c7029fbfdcf3b49fd75))
+* complete tech debt remediation roadmap ([c6be124](https://github.com/mossipcams/ynab-mcp-bridge/commit/c6be124bccac6cec5566ecca8e1a1f1a6617efce))
+* persist oauth client compatibility profiles ([72ab56e](https://github.com/mossipcams/ynab-mcp-bridge/commit/72ab56e882927e463228d57e608c0debf0973d30))
+* reduce duplication and overhaul debt reporting ([fddb553](https://github.com/mossipcams/ynab-mcp-bridge/commit/fddb553c004dd3fab3f048d9999930decc166881))
+* remove http server lint assertion ([548826b](https://github.com/mossipcams/ynab-mcp-bridge/commit/548826b2b0aba407efe1eb9d5b5ef67c7c58825b))
+* widen debt reporting to whole codebase ([59f2437](https://github.com/mossipcams/ynab-mcp-bridge/commit/59f2437679773f891eb9b44df34bc9d651a14174))
+
 ## [0.14.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.13.0...ynab-mcp-bridge-v0.14.0) (2026-03-24)
 
 
