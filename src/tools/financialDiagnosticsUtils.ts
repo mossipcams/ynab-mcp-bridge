@@ -38,6 +38,10 @@ export function netWorthMilliunits(accounts: YnabAccountLike[]) {
 }
 
 export function recentMonths<T extends YnabMonthLike>(months: T[], asOfMonth: string, monthsBack: number) {
+  if (monthsBack <= 0) {
+    return [];
+  }
+
   return months
     .filter((month) => !month.deleted && month.month <= asOfMonth)
     .sort((left, right) => right.month.localeCompare(left.month))

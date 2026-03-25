@@ -1,6 +1,4 @@
-import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
-
-import type { OAuthGrant } from "./oauthGrant.js";
+import type { OAuthGrant, OAuthGrantUpstreamTokens } from "./oauthGrant.js";
 
 export type PendingAuthorizationRecord = {
   clientId: string;
@@ -21,7 +19,7 @@ export type PendingConsent = PendingConsentRecord;
 
 export type AuthorizationCodeRecord = PendingAuthorizationRecord & {
   principalId: string;
-  upstreamTokens: OAuthTokens;
+  upstreamTokens: OAuthGrantUpstreamTokens;
 };
 
 export type RefreshTokenRecord = {
@@ -30,7 +28,7 @@ export type RefreshTokenRecord = {
   principalId: string;
   resource: string;
   scopes: string[];
-  upstreamTokens: OAuthTokens;
+  upstreamTokens: OAuthGrantUpstreamTokens;
 };
 
 function toBasePendingRecord(

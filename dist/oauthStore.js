@@ -18,10 +18,13 @@ function normalizeApprovalRecord(record) {
         scopes: normalizeScopes(record.scopes),
     };
 }
-function isOAuthTokens(value) {
+function isOAuthGrantUpstreamTokens(value) {
     return isRecord(value) &&
-        typeof value["access_token"] === "string" &&
-        typeof value["token_type"] === "string";
+        typeof value["token_type"] === "string" &&
+        (value["access_token"] === undefined || typeof value["access_token"] === "string") &&
+        (value["expires_in"] === undefined || typeof value["expires_in"] === "number") &&
+        (value["refresh_token"] === undefined || typeof value["refresh_token"] === "string") &&
+        (value["scope"] === undefined || typeof value["scope"] === "string");
 }
 function isOAuthClientInformationFull(value) {
     return isRecord(value) && typeof value["client_id"] === "string";
@@ -126,7 +129,7 @@ function parseGrantRecord(value) {
         ...(typeof value["state"] === "string" ? { state: value["state"] } : {}),
         ...(typeof value["principalId"] === "string" ? { principalId: value["principalId"] } : {}),
         ...(typeof value["subject"] === "string" ? { subject: value["subject"] } : {}),
-        ...(isOAuthTokens(value["upstreamTokens"]) ? { upstreamTokens: value["upstreamTokens"] } : {}),
+        ...(isOAuthGrantUpstreamTokens(value["upstreamTokens"]) ? { upstreamTokens: value["upstreamTokens"] } : {}),
     });
 }
 function parseGrants(value) {
@@ -245,7 +248,7 @@ function toLegacyAuthorizationCodeGrant(code, record) {
         typeof resource !== "string" ||
         !Array.isArray(scopes) ||
         typeof principalId !== "string" ||
-        !isOAuthTokens(upstreamTokens)) {
+        !isOAuthGrantUpstreamTokens(upstreamTokens)) {
         return undefined;
     }
     return {
@@ -283,7 +286,7 @@ function toLegacyRefreshTokenGrant(token, record) {
         typeof resource !== "string" ||
         !Array.isArray(scopes) ||
         typeof principalId !== "string" ||
-        !isOAuthTokens(upstreamTokens)) {
+        !isOAuthGrantUpstreamTokens(upstreamTokens)) {
         return undefined;
     }
     return {

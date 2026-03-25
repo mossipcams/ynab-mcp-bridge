@@ -19,7 +19,6 @@ describe("oauth compatibility grants", () => {
       state: "client-state",
       principalId: "principal-1",
       upstreamTokens: {
-        access_token: "upstream-token",
         refresh_token: "upstream-refresh-token",
         token_type: "Bearer",
       },
@@ -37,7 +36,6 @@ describe("oauth compatibility grants", () => {
       scopes: ["openid", "profile"],
       state: "client-state",
       upstreamTokens: {
-        access_token: "upstream-token",
         refresh_token: "upstream-refresh-token",
         token_type: "Bearer",
       },
@@ -50,7 +48,6 @@ describe("oauth compatibility grants", () => {
       resource: "https://mcp.example.com/mcp",
       scopes: ["profile", "openid"],
       upstreamTokens: {
-        access_token: "upstream-token",
         refresh_token: "upstream-refresh-token",
         token_type: "Bearer",
       },
@@ -67,7 +64,6 @@ describe("oauth compatibility grants", () => {
       resource: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile"],
       upstreamTokens: {
-        access_token: "upstream-token",
         refresh_token: "upstream-refresh-token",
         token_type: "Bearer",
       },

@@ -1,59 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { toErrorResult, toTextResult } from "./tools/planToolUtils.js";
+import { attachYnabApiRuntimeContext } from "./ynabApi.js";
+import { withResolvedPlan } from "./tools/planToolUtils.js";
 
-describe("plan tool response helpers", () => {
-  it("serializes payloads as compact JSON by default", () => {
-    const result = toTextResult({
-      status: "ok",
-      metrics: {
-        net_worth: "123.45",
+describe("withResolvedPlan", () => {
+  it("does not let an auto-resolved plan bleed into a later call on the same API instance", async () => {
+    let plans = [{ id: "plan-a" }];
+    const api = attachYnabApiRuntimeContext({
+      plans: {
+        getPlans: vi.fn(async () => ({
+          data: {
+            plans,
+            default_plan: plans[0],
+          },
+        })),
       },
+    }, {
+      apiToken: "token-a",
     });
 
-    expect(result).toEqual({
-      content: [{
-        type: "text",
-        text: "{\"status\":\"ok\",\"metrics\":{\"net_worth\":\"123.45\"}}",
-      }],
-    });
-  });
+    await expect(withResolvedPlan(undefined, api as never, async (planId) => planId)).resolves.toBe("plan-a");
 
-  it("can still serialize payloads as pretty JSON when requested", () => {
-    const result = toTextResult(
-      {
-        status: "ok",
-        metrics: {
-          net_worth: "123.45",
-        },
-      },
-      "pretty",
-    );
+    plans = [{ id: "plan-b" }];
 
-    expect(result).toEqual({
-      content: [{
-        type: "text",
-        text: [
-          "{",
-          "  \"status\": \"ok\",",
-          "  \"metrics\": {",
-          "    \"net_worth\": \"123.45\"",
-          "  }",
-          "}",
-        ].join("\n"),
-      }],
-    });
-  });
-
-  it("keeps error payloads compact by default", () => {
-    const result = toErrorResult(new Error("Bad request"));
-
-    expect(result).toEqual({
-      isError: true,
-      content: [{
-        type: "text",
-        text: "{\"success\":false,\"error\":\"Bad request\"}",
-      }],
-    });
+    await expect(withResolvedPlan(undefined, api as never, async (planId) => planId)).resolves.toBe("plan-b");
   });
 });

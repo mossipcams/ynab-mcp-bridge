@@ -66,13 +66,23 @@ describe("startHttpServer", () => {
     event: string,
     matcher: (details: Record<string, unknown>) => boolean = () => true,
   ) {
-    return spy.mock.calls.find(([scope, loggedEvent, details]) => (
-      scope === "[profile]" &&
-      loggedEvent === event &&
-      typeof details === "object" &&
-      details !== null &&
-      matcher(details as Record<string, unknown>)
-    ));
+    return spy.mock.calls.find((call) => {
+      const structuredEntry = getStructuredLogEntry(call);
+
+      if (structuredEntry) {
+        return structuredEntry.scope === "profile" &&
+          structuredEntry.event === event &&
+          matcher(structuredEntry);
+      }
+
+      const [scope, loggedEvent, details] = call;
+
+      return scope === "[profile]" &&
+        loggedEvent === event &&
+        typeof details === "object" &&
+        details !== null &&
+        matcher(details as Record<string, unknown>);
+    });
   }
   function findOAuthLogCall(
     spy: ReturnType<typeof vi.spyOn>,

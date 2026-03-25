@@ -1,34 +1,42 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-describe("tech debt report", () => {
-  it("formats the duplicate-remediation tracking metrics with a whole-codebase duplication headline", async () => {
-    const scriptUrl = new URL("../scripts/tech-debt-report.mjs", import.meta.url);
-
-    expect(existsSync(scriptUrl)).toBe(true);
-
-    const { formatTechDebtReport } = await import(scriptUrl.href) as {
-      formatTechDebtReport: (metrics: {
-        duplication: string;
-        deadExports: number;
-        tsIgnoreCount: number;
-        eslintDisableCount: number;
-        todoCount: number;
-      }) => string;
+describe("tech debt report implementation", () => {
+  it("uses a maintainable node entrypoint with explicit metric helpers", async () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      scripts?: Record<string, string>;
     };
 
-    expect(formatTechDebtReport({
-      duplication: "24.35",
-      deadExports: 0,
-      tsIgnoreCount: 4,
-      eslintDisableCount: 5,
-      todoCount: 2,
-    })).toContain(`=== Tech Debt Report ===
-Whole-codebase duplication: 24.35%
-Dead exports: 0
-ts-ignore count: 4
-eslint-disable count: 5
-TODO/FIXME/HACK count: 2`);
+    expect(packageJson.scripts?.["tech-debt:report"]).toBe("node ./scripts/tech-debt-report.mjs");
+    expect(existsSync(new URL("../scripts/tech-debt-report.mjs", import.meta.url))).toBe(true);
+
+    const reportModule = await import(new URL("../scripts/tech-debt-report.mjs", import.meta.url).href) as {
+      collectTechDebtMetrics?: unknown;
+      formatTechDebtReport?: unknown;
+      isRepoOwnedCodePath?: unknown;
+      repoCodeRootRelativeDirectories?: unknown;
+      reportMetricLabels?: unknown;
+    };
+
+    expect(reportModule.collectTechDebtMetrics).toBeTypeOf("function");
+    expect(reportModule.formatTechDebtReport).toBeTypeOf("function");
+    expect(reportModule.isRepoOwnedCodePath).toBeTypeOf("function");
+    expect(reportModule.repoCodeRootRelativeDirectories).toEqual([
+      ".github",
+      "debugging",
+      "scripts",
+      "src",
+    ]);
+    expect(reportModule.reportMetricLabels).toEqual([
+      "Duplication",
+      "Dead exports",
+      "ts-ignore count",
+      "eslint-disable count",
+      "TODO/FIXME/HACK count",
+      "Dependencies with major updates",
+    ]);
   });
 });

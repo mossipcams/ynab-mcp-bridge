@@ -1,6 +1,6 @@
 {
   "name": "ynab-mcp-bridge",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "ynab-mcp-bridge MCP server",
   "author": "Matt",
   "repository": {
@@ -28,9 +28,8 @@
     "lint:specs": "node --max-old-space-size=8192 ./node_modules/eslint/bin/eslint.js src/**/*.spec.ts --max-warnings=0",
     "lint:oxlint": "oxlint --type-aware -c .oxlintrc.json src",
     "lint:deps": "dependency-cruiser --config .dependency-cruiser.js src",
-    "lint:duplicates": "jscpd --config .jscpd.json .",
     "lint:unused": "knip --config knip.json --production --exclude dependencies",
-    "tech-debt:report": "node ./scripts/tech-debt-report.mjs",
+    "lint:duplicates": "jscpd --config .jscpd.json .",
     "typecheck": "node --max-old-space-size=12288 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
     "typecheck:tests": "node --max-old-space-size=12288 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.test.json",
     "typecheck:all": "npm run typecheck && npm run typecheck:tests",
@@ -41,10 +40,12 @@
     "reliability:http": "npm run build && node dist/reliabilityHttpCli.js",
     "reliability:load": "npm run build && node dist/reliabilityLoadCli.js",
     "debug": "npm run build && npx @modelcontextprotocol/inspector dist/index.js",
+    "tech-debt:report": "node ./scripts/tech-debt-report.mjs",
     "test": "vitest",
     "test:ci": "mkdir -p artifacts/test-results && vitest run --reporter=default --reporter=junit --outputFile.junit=./artifacts/test-results/vitest-junit.xml",
     "test:watch": "vitest watch",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "preflight": "npm run test:ci && npm run test:coverage && npm run lint:deps && npm run lint && npm run typecheck && npm run lint:unused && npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
@@ -70,6 +71,7 @@
     "globals": "^17.4.0",
     "jscpd": "^4.0.8",
     "knip": "^5.88.0",
+    "npm-check-updates": "^19.6.5",
     "oxlint": "^1.56.0",
     "oxlint-tsgolint": "^0.17.1",
     "typescript": "^5.9.2",

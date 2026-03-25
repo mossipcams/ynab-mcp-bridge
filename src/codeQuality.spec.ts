@@ -249,24 +249,39 @@ describe("code quality guardrails", () => {
     expect(workflow).toContain("npm run lint:unused");
   });
 
-  it("defines duplicate-detection guardrails for a whole-codebase scan", () => {
+  it("defines JSCPD duplicate detection and a checked-in tech debt report in repo config and CI", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+    const jscpdConfig = JSON.parse(
+      readFileSync(new URL("../.jscpd.json", import.meta.url), "utf8"),
     ) as {
-      scripts?: Record<string, string>;
-      devDependencies?: Record<string, string>;
+      ignore?: string[];
     };
-    const jscpdConfigPath = new URL("../.jscpd.json", import.meta.url);
-    const jscpdConfig = readFileSync(jscpdConfigPath, "utf8");
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
 
-    expect(existsSync(jscpdConfigPath)).toBe(true);
-    expect(packageJson.devDependencies?.jscpd).toBeTruthy();
-    expect(packageJson.scripts?.["lint:duplicates"]).toBeDefined();
-    expect(packageJson.scripts?.["tech-debt:report"]).toBeDefined();
-    expect(jscpdConfig).not.toContain("**/*.spec.ts");
-    expect(jscpdConfig).not.toContain("**/*.contract.ts");
-    expect(jscpdConfig).not.toContain("**/*.md");
-    expect(jscpdConfig).not.toContain("tasks/**");
+    expect(existsSync(new URL("../.jscpd.json", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("../scripts/tech-debt-report.mjs", import.meta.url))).toBe(true);
+    expect(packageJson.devDependencies.jscpd).toBeTruthy();
+    expect(packageJson.devDependencies["npm-check-updates"]).toBeTruthy();
+    expect(packageJson.scripts["lint:duplicates"]).toBeTruthy();
+    expect(packageJson.scripts["lint:duplicates"]).toBe("jscpd --config .jscpd.json .");
+    expect(packageJson.scripts["tech-debt:report"]).toBe("node ./scripts/tech-debt-report.mjs");
+    expect(jscpdConfig.ignore).toEqual(expect.arrayContaining([
+      "dist/**",
+      "artifacts/**",
+      "node_modules/**",
+      "tasks/**",
+      "**/*.md",
+      "package-lock.json",
+    ]));
+    expect(workflow).toContain("Run JSCPD");
+    expect(workflow).toContain("npm run lint:duplicates");
+    expect(workflow).toContain("Run tech debt report");
+    expect(workflow).toContain("npm run tech-debt:report");
   });
 
   it("runs the main CI workflow in the expected validation order", () => {
@@ -285,6 +300,8 @@ describe("code quality guardrails", () => {
     const eslintIndex = workflow.indexOf("Run ESLint");
     const typecheckIndex = workflow.indexOf("Run TypeScript typecheck");
     const knipIndex = workflow.indexOf("Run Knip");
+    const jscpdIndex = workflow.indexOf("Run JSCPD");
+    const techDebtIndex = workflow.indexOf("Run tech debt report");
     const buildIndex = workflow.indexOf("Build package");
 
     expect(testsIndex).toBeGreaterThanOrEqual(0);
@@ -293,7 +310,9 @@ describe("code quality guardrails", () => {
     expect(eslintIndex).toBeGreaterThan(dependencyRulesIndex);
     expect(typecheckIndex).toBeGreaterThan(eslintIndex);
     expect(knipIndex).toBeGreaterThan(typecheckIndex);
-    expect(buildIndex).toBeGreaterThan(knipIndex);
+    expect(jscpdIndex).toBeGreaterThan(knipIndex);
+    expect(techDebtIndex).toBeGreaterThan(jscpdIndex);
+    expect(buildIndex).toBeGreaterThan(techDebtIndex);
   });
 
   it("keeps production typecheck in CI and exposes a separate test typecheck script", () => {

@@ -1,12 +1,7 @@
+import { getFirstHeaderValue } from "./headerUtils.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthTokenVerifier } from "./oauthVerifier.js";
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
-function getFirstHeaderValue(value) {
-    if (typeof value === "string") {
-        return value.split(",")[0]?.trim();
-    }
-    return value?.[0]?.split(",")[0]?.trim();
-}
 function clampExpiresIn(expiresAtSeconds) {
     if (expiresAtSeconds === undefined) {
         return 3600;

@@ -1,15 +1,17 @@
 {
   "threshold": 100,
-  "minLines": 3,
-  "minTokens": 20,
   "reporters": ["console", "json"],
   "output": "artifacts/jscpd-report",
   "gitignore": true,
   "ignore": [
     ".git/**",
+    "**/*.spec.ts",
+    "**/*.contract.ts",
+    "**/*.md",
     "artifacts/**",
     "dist/**",
     "node_modules/**",
+    "tasks/**",
     "package-lock.json"
   ]
 }

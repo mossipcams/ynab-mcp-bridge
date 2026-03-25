@@ -18,7 +18,7 @@ function getConsentPageHeaders(authorizationUrl) {
     };
 }
 function logOAuthDebug(event, details) {
-    console.error("[oauth]", event, details);
+    logAppEvent("oauth", event, details);
 }
 function getErrorDetails(error) {
     if (error instanceof Error) {

@@ -1,5 +1,11 @@
 import { compactObject, formatMilliunits } from "./financeToolUtils.js";
 const DEFAULT_LIMIT = 50;
+function normalizePaginationNumber(value, fallback, minimum) {
+    if (value === undefined || !Number.isFinite(value)) {
+        return fallback;
+    }
+    return Math.max(Math.trunc(value), minimum);
+}
 export function formatAmountMilliunits(value) {
     return formatMilliunits(value);
 }
@@ -14,8 +20,8 @@ export function projectRecord(entry, allFields, options = {}) {
     return compactObject(projected);
 }
 export function paginateEntries(entries, options = {}) {
-    const offset = Math.max(options.offset ?? 0, 0);
-    const limit = Math.max(options.limit ?? DEFAULT_LIMIT, 1);
+    const offset = normalizePaginationNumber(options.offset, 0, 0);
+    const limit = normalizePaginationNumber(options.limit, DEFAULT_LIMIT, 1);
     const pagedEntries = entries.slice(offset, offset + limit);
     const nextOffset = offset + pagedEntries.length;
     return {

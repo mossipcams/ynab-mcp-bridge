@@ -172,12 +172,17 @@ describe("oauth store", () => {
     });
 
     const persistedState = JSON.parse(await readFile(storePath, "utf8")) as {
-      grants: Record<string, unknown>;
+      grants: Record<string, { upstreamTokens?: Record<string, unknown> }>;
       version: number;
     };
 
     expect(persistedState.version).toBe(2);
     expect(Object.keys(persistedState.grants)).toEqual(["grant-1"]);
+    expect(persistedState.grants["grant-1"]?.upstreamTokens).toMatchObject({
+      refresh_token: "upstream-refresh-token",
+      token_type: "Bearer",
+    });
+    expect(persistedState.grants["grant-1"]?.upstreamTokens).not.toHaveProperty("access_token");
   });
 
   it("normalizes legacy subject fields into a grant principal identity", async () => {

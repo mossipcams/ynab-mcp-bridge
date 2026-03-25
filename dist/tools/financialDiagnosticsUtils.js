@@ -16,6 +16,9 @@ export function netWorthMilliunits(accounts) {
     return activeAccounts(accounts).reduce((sum, account) => sum + account.balance, 0);
 }
 export function recentMonths(months, asOfMonth, monthsBack) {
+    if (monthsBack <= 0) {
+        return [];
+    }
     return months
         .filter((month) => !month.deleted && month.month <= asOfMonth)
         .sort((left, right) => right.month.localeCompare(left.month))

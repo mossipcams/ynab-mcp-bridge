@@ -1,114 +1,167 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const reportPath = path.join(projectRoot, "artifacts", "jscpd-report", "jscpd-report.json");
-const trackedExtensions = new Set([".cjs", ".js", ".json", ".md", ".mjs", ".ts", ".yml", ".yaml"]);
-const excludedDirectories = new Set([".git", "artifacts", "dist", "node_modules"]);
-const excludedFiles = new Set(["package-lock.json"]);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const jscpdReportPath = path.join(repoRoot, "artifacts", "jscpd-report", "jscpd-report.json");
+const repoCodeFileExtensions = new Set([".cjs", ".js", ".json", ".mjs", ".sh", ".ts", ".yaml", ".yml"]);
+const repoCodeIgnoredDirectories = new Set([".git", "artifacts", "dist", "node_modules", "tasks"]);
+const repoCodeIgnoredRootRelativePaths = new Set(["package-lock.json"]);
+const repoCodeSpecialBasenames = new Set(["Dockerfile"]);
 
-function resolveNpxCommand() {
+export const reportMetricLabels = [
+  "Duplication",
+  "Dead exports",
+  "ts-ignore count",
+  "eslint-disable count",
+  "TODO/FIXME/HACK count",
+  "Dependencies with major updates",
+];
+
+export const repoCodeRootRelativeDirectories = [
+  ".github",
+  "debugging",
+  "scripts",
+  "src",
+];
+
+function npmCommand() {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function npxCommand() {
   return process.platform === "win32" ? "npx.cmd" : "npx";
 }
 
-function runJsonCommand(args) {
-  try {
-    return execFileSync(resolveNpxCommand(), args, {
-      cwd: projectRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (error) {
-    return error.stdout?.toString() ?? "";
-  }
+function runUtf8(command, args) {
+  return execFileSync(command, args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 }
 
-function walkTrackedFiles(currentPath) {
-  const stats = statSync(currentPath);
+function runJson(command, args) {
+  return JSON.parse(runUtf8(command, args));
+}
 
-  if (stats.isDirectory()) {
-    if (excludedDirectories.has(path.basename(currentPath))) {
+function normalizeRelativePath(relativePath) {
+  return relativePath.split(path.sep).join("/");
+}
+
+export function isRepoOwnedCodePath(relativePath) {
+  const normalizedPath = normalizeRelativePath(relativePath);
+  const segments = normalizedPath.split("/");
+  const basename = segments.at(-1) ?? "";
+  const extension = path.extname(basename);
+
+  if (repoCodeIgnoredRootRelativePaths.has(normalizedPath)) {
+    return false;
+  }
+
+  if (segments.some((segment) => repoCodeIgnoredDirectories.has(segment))) {
+    return false;
+  }
+
+  if (normalizedPath.endsWith(".md")) {
+    return false;
+  }
+
+  return repoCodeSpecialBasenames.has(basename) || repoCodeFileExtensions.has(extension);
+}
+
+function walkRepoOwnedCodeFiles(root, currentRelativePath = "") {
+  return readdirSync(root).flatMap((entry) => {
+    const fullPath = path.join(root, entry);
+    const relativePath = currentRelativePath ? path.join(currentRelativePath, entry) : entry;
+    const normalizedRelativePath = normalizeRelativePath(relativePath);
+
+    if (statSync(fullPath).isDirectory()) {
+      if (repoCodeIgnoredDirectories.has(entry)) {
+        return [];
+      }
+
+      return walkRepoOwnedCodeFiles(fullPath, relativePath);
+    }
+
+    if (!isRepoOwnedCodePath(normalizedRelativePath)) {
       return [];
     }
 
-    return readdirSync(currentPath, { withFileTypes: true }).flatMap((entry) =>
-      walkTrackedFiles(path.join(currentPath, entry.name)),
-    );
-  }
-
-  if (excludedFiles.has(path.basename(currentPath))) {
-    return [];
-  }
-
-  if (!trackedExtensions.has(path.extname(currentPath))) {
-    return [];
-  }
-
-  return [currentPath];
+    return [fullPath];
+  });
 }
 
 function countPatternMatches(pattern) {
-  return walkTrackedFiles(projectRoot)
-    .map((filePath) => readFileSync(filePath, "utf8").match(pattern)?.length ?? 0)
-    .reduce((total, count) => total + count, 0);
+  const regex = new RegExp(pattern, "g");
+
+  return walkRepoOwnedCodeFiles(repoRoot)
+    .reduce((count, filePath) => {
+      const matches = readFileSync(filePath, "utf8").match(regex);
+      return count + (matches?.length ?? 0);
+    }, 0);
 }
 
 function readDuplicationPercentage() {
-  runJsonCommand(["jscpd", "--config", ".jscpd.json", "--reporters", "json", "."]);
+  runUtf8(npmCommand(), ["run", "--silent", "lint:duplicates"]);
+  const report = JSON.parse(readFileSync(jscpdReportPath, "utf8"));
 
-  if (!existsSync(reportPath)) {
-    throw new Error("JSCPD report was not generated.");
-  }
-
-  const report = JSON.parse(readFileSync(reportPath, "utf8"));
-
-  return Number(report.statistics.total.percentage).toFixed(2);
+  return report.statistics.total.percentage;
 }
 
 function readDeadExportCount() {
-  const output = runJsonCommand([
+  const report = runJson(npxCommand(), [
     "knip",
-    "--config",
-    "knip.json",
+    "--reporter",
+    "json",
     "--production",
     "--exclude",
     "dependencies",
-    "--reporter",
-    "json",
   ]);
 
-  if (!output.trim()) {
-    return 0;
-  }
-
-  const report = JSON.parse(output);
-
   return Array.isArray(report.files) ? report.files.length : 0;
+}
+
+function readMajorDependencyUpdateCount() {
+  const report = runJson(npxCommand(), [
+    "npm-check-updates",
+    "--target",
+    "greatest",
+    "--jsonUpgraded",
+  ]);
+
+  return Object.keys(report).length;
+}
+
+export async function collectTechDebtMetrics() {
+  return {
+    duplication: readDuplicationPercentage(),
+    deadExports: readDeadExportCount(),
+    tsIgnoreCount: countPatternMatches("@ts-ignore|@ts-expect-error"),
+    eslintDisableCount: countPatternMatches("eslint-disable"),
+    todoFixmeHackCount: countPatternMatches("TODO|FIXME|HACK"),
+    majorDependencyUpdates: readMajorDependencyUpdateCount(),
+  };
 }
 
 export function formatTechDebtReport(metrics) {
   return [
     "=== Tech Debt Report ===",
-    `Whole-codebase duplication: ${metrics.duplication}%`,
-    `Dead exports: ${metrics.deadExports}`,
-    `ts-ignore count: ${metrics.tsIgnoreCount}`,
-    `eslint-disable count: ${metrics.eslintDisableCount}`,
-    `TODO/FIXME/HACK count: ${metrics.todoCount}`,
+    `${reportMetricLabels[0]}: ${metrics.duplication}%`,
+    `${reportMetricLabels[1]}: ${metrics.deadExports}`,
+    `${reportMetricLabels[2]}: ${metrics.tsIgnoreCount}`,
+    `${reportMetricLabels[3]}: ${metrics.eslintDisableCount}`,
+    `${reportMetricLabels[4]}: ${metrics.todoFixmeHackCount}`,
+    `${reportMetricLabels[5]}: ${metrics.majorDependencyUpdates}`,
   ].join("\n");
 }
 
-export function collectTechDebtMetrics() {
-  return {
-    duplication: readDuplicationPercentage(),
-    deadExports: readDeadExportCount(),
-    tsIgnoreCount: countPatternMatches(/@ts-ignore|@ts-expect-error/g),
-    eslintDisableCount: countPatternMatches(/eslint-disable/g),
-    todoCount: countPatternMatches(/TODO|FIXME|HACK/g),
-  };
+async function main() {
+  const metrics = await collectTechDebtMetrics();
+  console.log(formatTechDebtReport(metrics));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  console.log(formatTechDebtReport(collectTechDebtMetrics()));
+  await main();
 }

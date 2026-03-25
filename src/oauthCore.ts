@@ -7,7 +7,7 @@ import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextproto
 
 import type { ClientProfileId } from "./clientProfiles/types.js";
 import { getEffectiveOAuthScopes } from "./config.js";
-import type { OAuthGrant } from "./oauthGrant.js";
+import { minimizeUpstreamTokens, type OAuthGrant } from "./oauthGrant.js";
 import {
   toPendingConsentRecord,
   type PendingAuthorizationRecord as PendingAuthorization,
@@ -139,8 +139,11 @@ function assertRegisteredRedirectUri(client: OAuthClientInformationFull, redirec
 
 export function createOAuthCore({ config, dependencies, store }: OAuthCoreOptions) {
   function replaceGrant(currentGrantId: string, nextGrant: OAuthGrant) {
-    store.deleteGrant(currentGrantId);
     store.saveGrant(nextGrant);
+
+    if (currentGrantId !== nextGrant.grantId) {
+      store.deleteGrant(currentGrantId);
+    }
   }
 
   function requireAuthorizationCodeGrant(
@@ -367,7 +370,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       },
       pendingAuthorization: undefined,
       principalId: grant.clientId,
-      upstreamTokens,
+      upstreamTokens: minimizeUpstreamTokens(upstreamTokens),
     });
 
     const redirectUrl = new URL(grant.redirectUri);
@@ -426,6 +429,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
         expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
         token: refreshToken,
       },
+      upstreamTokens: minimizeUpstreamTokens(grant.upstreamTokens),
     });
 
     return {
@@ -490,7 +494,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
         expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
         token: nextRefreshToken,
       },
-      upstreamTokens: nextUpstreamTokens,
+      upstreamTokens: minimizeUpstreamTokens(nextUpstreamTokens),
     });
 
     return {

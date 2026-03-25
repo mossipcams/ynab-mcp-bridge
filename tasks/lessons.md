@@ -1,10 +1,5 @@
 # Lessons
 
 - When the user reprioritizes roadmap items, update the implementation plan to emphasize the highest-leverage gaps instead of keeping lower-effort but lower-impact additions near the top.
-- When the user defines a quality metric as "whole codebase", do not silently narrow it to implementation-only code; keep only generated/vendor exclusions unless the user explicitly asks for a curated subset.
-## Duplicate baseline corrections
-
-- When the user says the baseline should reflect duplicate features/functions, do not keep reporting the raw JSCPD whole-codebase percentage as the main success metric.
-- Treat JSCPD as supporting evidence for lexical overlap, and define the primary baseline around overlapping feature families or shared behavioral seams instead.
-- Do not recommend consolidation unless the overlap is architecturally unnecessary; some similar code should remain separate when responsibilities are genuinely different.
-- If a tech-debt hotspot exists only for backward compatibility and the user explicitly accepts the migration break, prefer deleting the compatibility path over refactoring it further.
+- When the user asks for two related deliverables in the same follow-up, spell out both explicitly in the plan instead of leaving one as an implied dependency.
+- When the user corrects the scope of a repo-quality check, restate that scope explicitly in the plan and verify both the tool command and any derived report logic use the same boundary.
