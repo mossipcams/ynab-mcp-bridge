@@ -217,7 +217,7 @@ describe("oauth store", () => {
     expect(store.getGrant("grant-1")).not.toHaveProperty("subject");
   });
 
-  it("migrates legacy OAuth state into the grant model on load", async () => {
+  it("drops legacy OAuth state on load and falls back to a clean re-auth path", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
     const storePath = path.join(tempDir, "oauth-store.json");
     cleanups.push(async () => {
@@ -296,33 +296,34 @@ describe("oauth store", () => {
 
     const store = createOAuthStore(storePath);
 
-    expect(store.getPendingConsentGrant("consent-1")).toMatchObject({
+    expect(store.getPendingConsentGrant("consent-1")).toBeUndefined();
+    expect(store.getPendingAuthorizationGrant("state-1")).toBeUndefined();
+    expect(store.getAuthorizationCodeGrant("code-1")).toBeUndefined();
+    expect(store.getRefreshTokenGrant("refresh-1")).toBeUndefined();
+
+    store.saveGrant({
+      grantId: "grant-1",
+      clientId: "client-1",
+      codeChallenge: "challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile"],
+      consent: {
+        challenge: "consent-2",
+        expiresAt: Date.now() + 60_000,
+      },
+    });
+
+    expect(store.getPendingConsentGrant("consent-2")).toMatchObject({
       clientId: "client-1",
       consent: {
-        challenge: "consent-1",
-      },
-    });
-    expect(store.getPendingAuthorizationGrant("state-1")).toMatchObject({
-      clientId: "client-1",
-      pendingAuthorization: {
-        stateId: "state-1",
-      },
-    });
-    expect(store.getAuthorizationCodeGrant("code-1")).toMatchObject({
-      clientId: "client-1",
-      authorizationCode: {
-        code: "code-1",
-      },
-    });
-    expect(store.getRefreshTokenGrant("refresh-1")).toMatchObject({
-      clientId: "client-1",
-      refreshToken: {
-        token: "refresh-1",
+        challenge: "consent-2",
       },
     });
 
     const persistedState = JSON.parse(await readFile(storePath, "utf8")) as {
       authorizationCodes?: unknown;
+      clients?: Record<string, unknown>;
       grants: Record<string, unknown>;
       pendingAuthorizations?: unknown;
       pendingConsents?: unknown;
@@ -335,7 +336,8 @@ describe("oauth store", () => {
     expect(persistedState.pendingAuthorizations).toBeUndefined();
     expect(persistedState.authorizationCodes).toBeUndefined();
     expect(persistedState.refreshTokens).toBeUndefined();
-    expect(Object.keys(persistedState.grants)).toHaveLength(4);
+    expect(persistedState.clients).toEqual({});
+    expect(Object.keys(persistedState.grants)).toEqual(["grant-1"]);
   });
 
   it("persists compatibility profiles for oauth clients and grants across reload", async () => {

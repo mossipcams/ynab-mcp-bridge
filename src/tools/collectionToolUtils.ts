@@ -10,6 +10,8 @@ type PaginationOptions = {
   offset?: number;
 };
 
+type CollectionRenderingOptions<FieldName extends string> = ProjectionOptions<FieldName> & PaginationOptions;
+
 const DEFAULT_LIMIT = 50;
 
 function normalizePaginationNumber(value: number | undefined, fallback: number, minimum: number) {
@@ -77,8 +79,62 @@ export function hasPaginationControls(input: {
 
 export function hasProjectionControls(input: {
   includeIds?: boolean;
-  fields?: unknown[];
+  fields?: readonly unknown[];
 }) {
   return input.includeIds !== undefined
     || input.fields !== undefined;
+}
+
+export function renderCollectionResult<
+  Entry extends Record<string, unknown> & { id?: string },
+  FieldName extends string,
+  CollectionKey extends string,
+  CountKey extends string,
+>(
+  entries: Entry[],
+  allFields: readonly FieldName[],
+  input: CollectionRenderingOptions<FieldName>,
+  collectionKey: CollectionKey,
+  countKey: CountKey,
+) {
+  if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
+    return {
+      [collectionKey]: entries,
+      [countKey]: entries.length,
+    };
+  }
+
+  if (!hasPaginationControls(input)) {
+    return {
+      [collectionKey]: entries.map((entry) => projectRecord(entry, allFields, input)),
+      [countKey]: entries.length,
+    };
+  }
+
+  const pagedEntries = paginateEntries(entries, input);
+
+  return {
+    [collectionKey]: pagedEntries.entries.map((entry) => projectRecord(entry, allFields, input)),
+    [countKey]: entries.length,
+    ...pagedEntries.metadata,
+  };
+}
+
+export function buildCollectionResult<
+  Entry extends Record<string, unknown> & { id?: string },
+  FieldName extends string,
+>(options: {
+  entries: Entry[];
+  entryKey: string;
+  countKey: string;
+  allFields: readonly FieldName[];
+  input?: CollectionRenderingOptions<FieldName>;
+}) {
+  return renderCollectionResult(
+    options.entries,
+    options.allFields,
+    options.input ?? {},
+    options.entryKey,
+    options.countKey,
+  );
 }

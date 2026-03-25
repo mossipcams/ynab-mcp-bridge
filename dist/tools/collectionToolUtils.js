@@ -43,3 +43,26 @@ export function hasProjectionControls(input) {
     return input.includeIds !== undefined
         || input.fields !== undefined;
 }
+export function renderCollectionResult(entries, allFields, input, collectionKey, countKey) {
+    if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
+        return {
+            [collectionKey]: entries,
+            [countKey]: entries.length,
+        };
+    }
+    if (!hasPaginationControls(input)) {
+        return {
+            [collectionKey]: entries.map((entry) => projectRecord(entry, allFields, input)),
+            [countKey]: entries.length,
+        };
+    }
+    const pagedEntries = paginateEntries(entries, input);
+    return {
+        [collectionKey]: pagedEntries.entries.map((entry) => projectRecord(entry, allFields, input)),
+        [countKey]: entries.length,
+        ...pagedEntries.metadata,
+    };
+}
+export function buildCollectionResult(options) {
+    return renderCollectionResult(options.entries, options.allFields, options.input ?? {}, options.entryKey, options.countKey);
+}

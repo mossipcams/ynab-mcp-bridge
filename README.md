@@ -356,4 +356,9 @@ YNAB documents a limit of 200 requests per rolling hour per access token. The br
 ```bash
 npm test
 npm run build
+npm run lint:duplicates
+npm run tech-debt:report
 ```
+
+`lint:duplicates` runs a JSCPD baseline for whole-codebase duplication. It covers maintained repo code, specs, contracts, Markdown, scripts, and tasks, and excludes only generated/vendor paths such as `.git`, `node_modules`, `dist`, `artifacts`, and `package-lock.json`.
+`tech-debt:report` prints the current whole-codebase duplicate-remediation baseline together with dead-export and suppression counts so local cleanup work has one repeatable snapshot command.

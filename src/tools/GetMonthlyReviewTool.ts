@@ -3,7 +3,7 @@ import * as ynab from "ynab";
 
 import { previousMonths } from "./financialDiagnosticsUtils.js";
 import {
-  buildAssignedSpentSummary,
+  buildBudgetHealthMonthSummary,
   formatMilliunits,
   isWithinMonthRange,
   normalizeMonthInput,
@@ -70,6 +70,18 @@ export async function execute(
 
       const monthDetail = currentMonthResponse.data.month;
       const categories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden);
+      const budgetHealthDetails = buildBudgetHealthMonthSummary(monthDetail);
+      const budgetHealthSummary = {
+        ready_to_assign: budgetHealthDetails.ready_to_assign,
+        available_total: budgetHealthDetails.available_total,
+        overspent_total: budgetHealthDetails.overspent_total,
+        underfunded_total: budgetHealthDetails.underfunded_total,
+        assigned: budgetHealthDetails.assigned,
+        spent: budgetHealthDetails.spent,
+        assigned_vs_spent: budgetHealthDetails.assigned_vs_spent,
+        overspent_category_count: budgetHealthDetails.overspent_category_count,
+        underfunded_category_count: budgetHealthDetails.underfunded_category_count,
+      };
       const monthTransactions = transactionsResponse.data.transactions.filter(
         (transaction) => !transaction.deleted
           && !transaction.transfer_account_id
@@ -93,8 +105,6 @@ export async function execute(
         });
       }
 
-      const overspentCategories = categories.filter((category) => category.balance < 0);
-      const underfundedCategories = categories.filter((category) => (category.goal_under_funded ?? 0) > 0);
       const anomalies = categories
         .map((category) => {
           const latestSpent = toSpentMilliunits(category.activity);
@@ -134,21 +144,7 @@ export async function execute(
         inflow: formatMilliunits(inflowMilliunits),
         outflow: formatMilliunits(outflowMilliunits),
         net_flow: formatMilliunits(inflowMilliunits - outflowMilliunits),
-        ready_to_assign: formatMilliunits(monthDetail.to_be_budgeted),
-        available_total: formatMilliunits(
-          categories
-            .filter((category) => category.balance > 0)
-            .reduce((sum, category) => sum + category.balance, 0),
-        ),
-        overspent_total: formatMilliunits(
-          overspentCategories.reduce((sum, category) => sum + Math.abs(category.balance), 0),
-        ),
-        underfunded_total: formatMilliunits(
-          underfundedCategories.reduce((sum, category) => sum + (category.goal_under_funded ?? 0), 0),
-        ),
-        overspent_category_count: overspentCategories.length,
-        underfunded_category_count: underfundedCategories.length,
-        ...buildAssignedSpentSummary(monthDetail.budgeted, toSpentMilliunits(monthDetail.activity)),
+        ...budgetHealthSummary,
         top_spending_categories: toTopRollups(Array.from(spendingRollups.values()), topN),
         anomalies,
       });

@@ -61,6 +61,7 @@ describe("pure v4 refactor", () => {
       "financialDiagnosticsUtils.ts",
       "planToolUtils.ts",
       "transactionCollectionToolUtils.ts",
+      "transactionToolUtils.ts",
     ]);
   });
 

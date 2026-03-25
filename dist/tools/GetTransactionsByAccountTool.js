@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { buildTransactionCollectionInputSchema, createIdFilteredTransactionCollectionExecutor, } from "./transactionCollectionToolUtils.js";
 export const name = "ynab_get_transactions_by_account";
-export const description = "Gets transactions for a single account with optional compact projections and pagination.";
+export const description = "Gets transactions for a single account when you already know the account ID.";
 export const inputSchema = buildTransactionCollectionInputSchema({
     accountId: z.string().describe("The account ID to filter by."),
 });

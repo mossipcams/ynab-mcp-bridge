@@ -3,10 +3,7 @@ import * as ynab from "ynab";
 
 import {
   formatAmountMilliunits,
-  hasPaginationControls,
-  hasProjectionControls,
-  paginateEntries,
-  projectRecord,
+  renderCollectionResult,
 } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
@@ -49,27 +46,13 @@ export async function execute(
         balance: formatAmountMilliunits(account.balance),
       }));
 
-    if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
-      return toTextResult({
-        accounts,
-        account_count: accounts.length,
-      });
-    }
-
-    if (!hasPaginationControls(input)) {
-      return toTextResult({
-        accounts: accounts.map((account) => projectRecord(account, accountFields, input)),
-        account_count: accounts.length,
-      });
-    }
-
-    const pagedAccounts = paginateEntries(accounts, input);
-
-    return toTextResult({
-      accounts: pagedAccounts.entries.map((account) => projectRecord(account, accountFields, input)),
-      account_count: accounts.length,
-      ...pagedAccounts.metadata,
-    });
+    return toTextResult(renderCollectionResult(
+      accounts,
+      accountFields,
+      input,
+      "accounts",
+      "account_count",
+    ));
   } catch (error) {
     return toErrorResult(error);
   }

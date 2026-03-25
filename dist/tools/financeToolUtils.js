@@ -8,8 +8,51 @@ export function buildAssignedSpentSummary(assignedMilliunits, spentMilliunits) {
         assigned_vs_spent: formatMilliunits(assignedMilliunits - spentMilliunits),
     };
 }
+function sortDescendingByAmount(entries) {
+    return entries
+        .slice()
+        .sort((left, right) => {
+        const difference = right.amountMilliunits - left.amountMilliunits;
+        if (difference !== 0) {
+            return difference;
+        }
+        return left.name.localeCompare(right.name);
+    });
+}
 export function toSpentMilliunits(activityMilliunits) {
     return activityMilliunits < 0 ? Math.abs(activityMilliunits) : 0;
+}
+export function buildBudgetHealthMonthSummary(monthDetail) {
+    const categories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden);
+    const overspentCategories = sortDescendingByAmount(categories
+        .filter((category) => category.balance < 0)
+        .map((category) => ({
+        id: category.id,
+        name: category.name,
+        categoryGroupName: category.category_group_name,
+        amountMilliunits: Math.abs(category.balance),
+    })));
+    const underfundedCategories = sortDescendingByAmount(categories
+        .filter((category) => (category.goal_under_funded ?? 0) > 0)
+        .map((category) => ({
+        id: category.id,
+        name: category.name,
+        categoryGroupName: category.category_group_name,
+        amountMilliunits: category.goal_under_funded ?? 0,
+    })));
+    return {
+        ready_to_assign: formatMilliunits(monthDetail.to_be_budgeted),
+        available_total: formatMilliunits(categories
+            .filter((category) => category.balance > 0)
+            .reduce((sum, category) => sum + category.balance, 0)),
+        overspent_total: formatMilliunits(overspentCategories.reduce((sum, category) => sum + category.amountMilliunits, 0)),
+        underfunded_total: formatMilliunits(underfundedCategories.reduce((sum, category) => sum + category.amountMilliunits, 0)),
+        ...buildAssignedSpentSummary(monthDetail.budgeted, toSpentMilliunits(monthDetail.activity)),
+        overspent_category_count: overspentCategories.length,
+        underfunded_category_count: underfundedCategories.length,
+        overspent_categories: overspentCategories,
+        underfunded_categories: underfundedCategories,
+    };
 }
 export function isCreditCardPaymentCategoryName(categoryGroupName) {
     return typeof categoryGroupName === "string"
