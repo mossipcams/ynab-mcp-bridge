@@ -1,9 +1,10 @@
 import type { AddressInfo } from "node:net";
+import { readFileSync } from "node:fs";
 
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createMcpAuthModule } from "./mcpAuthServer.js";
+import { createMcpAuthModule } from "./oauthRuntime.js";
 import { createCloudflareOAuthAuth } from "./oauthTestHelpers.js";
 
 describe("createMcpAuthModule", () => {
@@ -79,5 +80,13 @@ describe("createMcpAuthModule", () => {
 
     expect(mcpResponse.status).toBe(401);
     expect(mcpResponse.headers.get("www-authenticate")).toContain("Bearer");
+  });
+
+  it("keeps auth module assembly owned by oauthRuntime", () => {
+    const oauthRuntimeSource = readFileSync(new URL("./oauthRuntime.ts", import.meta.url), "utf8");
+
+    expect(oauthRuntimeSource).toContain("export function createMcpAuthModule");
+    expect(oauthRuntimeSource).toContain("getOpenIdConfiguration");
+    expect(oauthRuntimeSource).toContain("mcpAuthRouter(");
   });
 });

@@ -24,6 +24,64 @@ Default all PR creation to `mossipcams/ynab-mcp-bridge`.
 When using `gh pr create`, set `--repo mossipcams/ynab-mcp-bridge` unless the user explicitly names a different target repo.
 Do not open PRs, create commits for, push to, or take any other action against a different repository unless the user explicitly asks for that target repo.
 
+## Workflow Expectations
+
+### 1. Plan Node Default
+
+- Enter plan mode for any non-trivial task with 3 or more steps or any architectural decision.
+- If something goes sideways, stop and re-plan immediately instead of pushing through.
+- Use plan mode for verification steps too, not just implementation.
+- Write detailed specs up front to reduce ambiguity.
+
+### 2. Subagent Strategy
+
+- Use subagents liberally to keep the main context window clean.
+- Offload research, exploration, and parallel analysis to subagents.
+- For complex problems, spend more compute through subagents when that improves clarity or speed.
+- Give each subagent one focused task.
+
+### 3. Self-Improvement Loop
+
+- After any correction from the user, update `tasks/lessons.md` with the pattern.
+- Write rules that prevent the same mistake from recurring.
+- Iterate on these lessons until the mistake rate drops.
+- Review relevant lessons at session start for the project.
+
+### 4. Verification Before Done
+
+- Never mark a task complete without proving it works.
+- Diff behavior between `main` and the current change when relevant.
+- Ask whether a staff engineer would approve the work.
+- Run tests, check logs, and demonstrate correctness.
+
+### 5. Demand Elegance (Balanced)
+
+- For non-trivial changes, pause and ask whether there is a more elegant way.
+- If a fix feels hacky, revisit it with the benefit of everything learned so far and implement the cleaner solution.
+- Skip this for simple, obvious fixes to avoid over-engineering.
+- Challenge your own work before presenting it.
+
+### 6. Autonomous Bug Fixing
+
+- When given a bug report, move directly to root cause analysis and resolution.
+- Use logs, errors, and failing tests as the starting point, then fix the issue.
+- Minimize context switching for the user.
+- Fix failing CI tests proactively when they are part of the task.
+
+## Task Management
+
+1. Plan first: write the plan to `tasks/todo.md` with checkable items.
+2. Verify plan: check in before starting implementation.
+3. Track progress: mark items complete as work advances.
+4. Explain changes: provide a high-level summary at each step.
+5. Document results: add a review section to `tasks/todo.md`.
+6. Capture lessons: update `tasks/lessons.md` after corrections.
+
+## Core Principles
+
+- Simplicity first: make every change as simple as possible and impact minimal code.
+- No laziness: find root causes, avoid temporary fixes, and hold work to senior developer standards.
+
 ## Architecture Overview
 
 This is a **Model Context Protocol (MCP) server** that provides AI tools for interacting with YNAB plans. Built with `@modelcontextprotocol/sdk`.

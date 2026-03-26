@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { hasCollectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
+import { hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_list_plan_months";
 export const description = "Lists plan month summaries for budgeting analysis with optional compact projections and pagination.";
@@ -28,9 +28,15 @@ export async function execute(input, api) {
             activity: month.activity,
             to_be_budgeted: month.to_be_budgeted,
         }));
-        if (!hasCollectionControls(input)) {
+        if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
             return toTextResult({
                 months,
+                month_count: months.length,
+            });
+        }
+        if (!hasPaginationControls(input)) {
+            return toTextResult({
+                months: months.map((month) => projectRecord(month, monthFields, input)),
                 month_count: months.length,
             });
         }

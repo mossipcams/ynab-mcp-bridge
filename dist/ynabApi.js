@@ -62,7 +62,6 @@ export function attachYnabApiRuntimeContext(api, config) {
         enumerable: false,
         value: {
             config,
-            runtimePlanIdOverride: undefined,
         },
         writable: false,
     });

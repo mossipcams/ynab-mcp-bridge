@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { formatMilliunits, listMonthsInRange, toSpentMilliunits } from "./financeToolUtils.js";
+import { formatMilliunits, listMonthsInRange, normalizeMonthRange, toSpentMilliunits, } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_category_trend_summary";
 export const description = "Returns a compact assigned, spent, and available trend for a category or category group across months.";
@@ -12,8 +12,7 @@ export const inputSchema = {
 };
 export async function execute(input, api) {
     try {
-        const fromMonth = input.fromMonth || "current";
-        const toMonth = input.toMonth || fromMonth;
+        const { fromMonth, toMonth } = normalizeMonthRange(input.fromMonth, input.toMonth);
         if (!input.categoryId && !input.categoryGroupName) {
             throw new Error("Provide either categoryId or categoryGroupName.");
         }

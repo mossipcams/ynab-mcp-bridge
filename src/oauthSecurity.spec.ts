@@ -3,7 +3,7 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createServer as createNodeHttpServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startHttpServer } from "./httpServer.js";
+import { startHttpServer } from "./httpTransport.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,

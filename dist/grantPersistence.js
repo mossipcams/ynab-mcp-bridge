@@ -1,3 +1,8 @@
+/**
+ * Owns: persisted approvals/clients/client-profiles/grants state, legacy migration, pruning, and atomic file persistence.
+ * Inputs/dependencies: store path plus grant normalization helpers.
+ * Outputs/contracts: createOAuthStore(...) and the persistence contract consumed by grant lifecycle and the OAuth runtime.
+ */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { getGrantExpiry, hasActiveGrantStep, normalizeGrant, normalizeScopes, } from "./oauthGrant.js";
@@ -22,6 +27,7 @@ function createEmptyState() {
     return {
         approvals: [],
         clients: {},
+        clientProfiles: {},
         grants: {},
         version: 2,
     };
@@ -40,6 +46,14 @@ function parseClients(value) {
     }
     return value;
 }
+function parseClientProfiles(value) {
+    if (!value || typeof value !== "object") {
+        return {};
+    }
+    return Object.fromEntries(Object.entries(value)
+        .filter((entry) => (typeof entry[0] === "string" &&
+        (entry[1] === "chatgpt" || entry[1] === "claude" || entry[1] === "codex" || entry[1] === "generic"))));
+}
 function parseGrantRecord(value) {
     if (!value || typeof value !== "object") {
         return undefined;
@@ -57,6 +71,7 @@ function parseGrantRecord(value) {
         authorizationCode: grant.authorizationCode,
         clientId: grant.clientId,
         clientName: grant.clientName,
+        compatibilityProfileId: grant.compatibilityProfileId,
         codeChallenge: grant.codeChallenge,
         consent: grant.consent,
         grantId: grant.grantId,
@@ -204,6 +219,7 @@ function migrateLegacyState(parsed) {
     return {
         approvals: parseApprovals(parsed.approvals),
         clients: parseClients(parsed.clients),
+        clientProfiles: {},
         grants,
         version: 2,
     };
@@ -233,6 +249,7 @@ function loadState(storePath) {
             return {
                 approvals: parseApprovals(parsed.approvals),
                 clients: parseClients(parsed.clients),
+                clientProfiles: parseClientProfiles(parsed.clientProfiles),
                 grants: parseGrants(parsed.grants),
                 version: 2,
             };
@@ -304,6 +321,25 @@ function toRefreshTokenRecord(grant) {
         upstreamTokens: grant.upstreamTokens,
     };
 }
+function sanitizePersistedUpstreamTokens(tokens) {
+    if (!tokens) {
+        return tokens;
+    }
+    if (typeof tokens.refresh_token !== "string" || tokens.refresh_token.length === 0) {
+        return tokens;
+    }
+    const { access_token: _accessToken, ...persistedTokens } = tokens;
+    return persistedTokens;
+}
+function createPersistedStateSnapshot(state) {
+    return {
+        ...state,
+        grants: Object.fromEntries(Object.entries(state.grants).map(([grantId, grant]) => [grantId, {
+                ...grant,
+                upstreamTokens: sanitizePersistedUpstreamTokens(grant.upstreamTokens),
+            }])),
+    };
+}
 export function createOAuthStore(storePath) {
     let state = pruneExpiredEntries(loadState(storePath));
     function persist() {
@@ -312,7 +348,7 @@ export function createOAuthStore(storePath) {
         }
         mkdirSync(path.dirname(storePath), { recursive: true });
         const tempPath = `${storePath}.${process.pid}.tmp`;
-        writeFileSync(tempPath, JSON.stringify(state, null, 2));
+        writeFileSync(tempPath, JSON.stringify(createPersistedStateSnapshot(state), null, 2));
         renameSync(tempPath, storePath);
     }
     function deleteGrant(grantId) {
@@ -392,6 +428,9 @@ export function createOAuthStore(storePath) {
         getClient(clientId) {
             return state.clients[clientId];
         },
+        getClientCompatibilityProfile(clientId) {
+            return state.clientProfiles[clientId];
+        },
         getGrant(grantId) {
             const grant = state.grants[grantId];
             if (!grant) {
@@ -461,6 +500,16 @@ export function createOAuthStore(storePath) {
                 clients: {
                     ...state.clients,
                     [client.client_id]: client,
+                },
+            };
+            persist();
+        },
+        saveClientCompatibilityProfile(clientId, profileId) {
+            state = {
+                ...state,
+                clientProfiles: {
+                    ...state.clientProfiles,
+                    [clientId]: profileId,
                 },
             };
             persist();

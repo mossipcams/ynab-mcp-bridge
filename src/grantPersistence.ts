@@ -1,3 +1,8 @@
+/**
+ * Owns: persisted approvals/clients/client-profiles/grants state, legacy migration, pruning, and atomic file persistence.
+ * Inputs/dependencies: store path plus grant normalization helpers.
+ * Outputs/contracts: createOAuthStore(...) and the persistence contract consumed by grant lifecycle and the OAuth runtime.
+ */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 

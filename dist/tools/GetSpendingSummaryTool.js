@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { buildAssignedSpentSummary, formatMilliunits, toTopRollups } from "./financeToolUtils.js";
+import { buildAssignedSpentSummary, formatMilliunits, isWithinMonthRange, normalizeMonthRange, toTopRollups, } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_spending_summary";
 export const description = "Returns a compact spending summary with assigned versus spent totals and top spending rollups.";
@@ -9,13 +9,6 @@ export const inputSchema = {
     toMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).optional().describe("The last month in ISO format. Defaults to fromMonth."),
     topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of top rollups to include."),
 };
-function toMonthEnd(month) {
-    const [year, monthNumber] = month.split("-").map((value) => Number.parseInt(value, 10));
-    return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
-}
-function isWithinRange(date, fromMonth, toMonth) {
-    return date >= fromMonth && date <= toMonthEnd(toMonth);
-}
 function buildCategoryGroupLookup(categoryGroups) {
     return new Map(categoryGroups.flatMap((group) => group.categories
         .filter((category) => !category.deleted)
@@ -37,8 +30,7 @@ function addRollup(bucket, key, value) {
 }
 export async function execute(input, api) {
     try {
-        const fromMonth = input.fromMonth || "current";
-        const toMonth = input.toMonth || fromMonth;
+        const { fromMonth, toMonth } = normalizeMonthRange(input.fromMonth, input.toMonth);
         const topN = input.topN ?? 5;
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const [transactionsResponse, monthsResponse, categoriesResponse] = await Promise.all([
@@ -53,7 +45,7 @@ export async function execute(input, api) {
             const spendingTransactions = transactionsResponse.data.transactions.filter((transaction) => !transaction.deleted
                 && !transaction.transfer_account_id
                 && transaction.amount < 0
-                && isWithinRange(transaction.date, fromMonth, toMonth));
+                && isWithinMonthRange(transaction.date, fromMonth, toMonth));
             for (const transaction of spendingTransactions) {
                 const spendMilliunits = Math.abs(transaction.amount);
                 const categoryId = transaction.category_id ?? "uncategorized";

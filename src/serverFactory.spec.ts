@@ -4,7 +4,7 @@ import { PassThrough } from "node:stream";
 
 import { setLoggerDestinationForTests } from "./logger.js";
 import { runWithRequestContext } from "./requestContext.js";
-import { createServer, defineTool, registerServerTools } from "./server.js";
+import { createServer, defineTool, registerServerTools } from "./serverRuntime.js";
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
 import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
 
@@ -318,13 +318,13 @@ describe("createServer", () => {
     });
   });
 
-  it("defines an explicit tool registry through the shared builder", () => {
-    const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+  it("keeps the tool registry owned by serverRuntime while preserving the shared builder shape", () => {
+    const serverRuntimeSource = readFileSync(new URL("./serverRuntime.ts", import.meta.url), "utf8");
 
-    expect(source).toContain("function defineTool");
-    expect(source).toContain('defineTool("Get MCP Version", GetMcpVersionTool)');
-    expect(source).toContain('defineTool("Get Account", GetAccountTool)');
-    expect(source).not.toContain("name: GetMcpVersionTool.name");
+    expect(serverRuntimeSource).toContain("function defineTool");
+    expect(serverRuntimeSource).toContain('defineTool("Get MCP Version", GetMcpVersionTool)');
+    expect(serverRuntimeSource).toContain('defineTool("Get Account", GetAccountTool)');
+    expect(serverRuntimeSource).not.toContain("name: GetMcpVersionTool.name");
   });
 
   it("requires explicit config instead of reading the API token from environment", () => {

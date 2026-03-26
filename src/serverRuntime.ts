@@ -1,7 +1,11 @@
+/**
+ * Owns: top-level MCP server creation, tool metadata definitions, ordered tool registration, and the logging-wrapped registrar loop.
+ * Inputs/dependencies: validated YNAB config, YNAB API factory/runtime attachment, tool modules, request-context logging helpers, MCP registrar.
+ * Outputs/contracts: defineTool(...), registerServerTools(...), and createServer(...).
+ */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
-import * as ynab from "ynab";
+import type { API } from "ynab";
 
 import { assertYnabConfig, type YnabConfig } from "./config.js";
 import { logAppEvent } from "./logger.js";
@@ -73,18 +77,20 @@ type ToolModule = {
   title: string;
   name: string;
   description: string;
-  inputSchema: ZodRawShapeCompat;
-  execute: (input: unknown, api: ynab.API) => Promise<CallToolResult>;
+  inputSchema: unknown;
+  execute: (input: any, api: API) => Promise<CallToolResult>;
 };
 
 type ToolSource = Omit<ToolModule, "title">;
-type ToolRegistrar = Pick<McpServer, "registerTool">;
+type ToolRegistrar = {
+  registerTool: (...args: any[]) => unknown;
+};
 
-export function defineTool(title: string, tool: ToolSource): ToolModule {
+export function defineTool(title: string, tool: any): ToolModule {
   return {
     title,
     ...tool,
-  };
+  } as ToolModule;
 }
 
 const toolRegistrations: ToolModule[] = [
@@ -136,7 +142,7 @@ const toolRegistrations: ToolModule[] = [
   defineTool("Get 70/20/10 Summary", GetBudgetRatioSummaryTool),
 ];
 
-function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: ynab.API) {
+function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: API) {
   registrar.registerTool(
     tool.name,
     {
@@ -145,7 +151,7 @@ function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: ynab.API)
       inputSchema: tool.inputSchema,
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
-    async (input) => {
+    async (input: unknown) => {
       markToolCallStarted();
       logAppEvent("mcp", "tool.call.started", {
         ...getRequestLogFields(),
@@ -174,7 +180,7 @@ function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: ynab.API)
   );
 }
 
-export function registerServerTools(registrar: ToolRegistrar, api: ynab.API) {
+export function registerServerTools(registrar: ToolRegistrar, api: API) {
   const registeredToolNames: string[] = [];
 
   for (const tool of toolRegistrations) {
@@ -190,7 +196,7 @@ export function createServer(config: YnabConfig, api = createYnabApi(config)) {
   const server = new McpServer(SERVER_INFO);
   const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
 
-  registerServerTools(server, configuredApi);
+  registerServerTools(server as unknown as ToolRegistrar, configuredApi);
 
   return server;
 }

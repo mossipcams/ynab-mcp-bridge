@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { startHttpServer } from "./httpServer.js";
+import { startHttpServer } from "./httpTransport.js";
 import { resolveAppConfig } from "./config.js";
 import { startStdioServer } from "./stdioServer.js";
 import { logHttpServerStarted, logStartupFailure } from "./startupLogging.js";

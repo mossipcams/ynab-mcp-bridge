@@ -1,3 +1,8 @@
+/**
+ * Owns: OAuth client validation and all grant state transitions across consent, upstream authorization, authorization-code exchange, and refresh-token exchange.
+ * Inputs/dependencies: clock/id/token-exchange/mint dependencies plus the persistence contract.
+ * Outputs/contracts: createOAuthCore(...), PendingAuthorization, and PendingConsent consumed by the OAuth runtime.
+ */
 import {
   InvalidClientMetadataError,
   InvalidGrantError,

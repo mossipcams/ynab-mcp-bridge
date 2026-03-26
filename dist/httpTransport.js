@@ -5,14 +5,15 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
 import { logAppEvent } from "./logger.js";
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
-import { createMcpAuthModule } from "./mcpAuthServer.js";
-import { detectClientProfile, detectInitializeClientProfile, reconcileClientProfile, } from "./clientProfiles/detectClient.js";
+import { detectInitializeClientProfile, detectClientProfile, reconcileClientProfile, } from "./clientProfiles/detectClient.js";
 import { getClientProfile } from "./clientProfiles/index.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
-import { createServer } from "./server.js";
+import { createRequestContext, getCorrelationHeaderName, getRequestLogFields, hasToolCallStarted, runWithRequestContext, } from "./requestContext.js";
+import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
+import { createServer } from "./serverRuntime.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 function getRequestPath(req) {
@@ -137,6 +138,7 @@ function hasHeaderValue(value) {
 function getRequestDebugDetails(req, options = {}) {
     const authSubject = req.auth?.extra?.subject;
     return {
+        ...getRequestLogFields(),
         authMode: options.authMode,
         authClientId: req.auth?.clientId,
         authRequired: options.authRequired,
@@ -174,6 +176,27 @@ function getInitializeParams(parsedBody) {
         return undefined;
     }
     return request.params;
+}
+function getToolCallName(parsedBody) {
+    if (!parsedBody || typeof parsedBody !== "object") {
+        return undefined;
+    }
+    const request = parsedBody;
+    if (request.method !== "tools/call" || !request.params || typeof request.params !== "object") {
+        return undefined;
+    }
+    const name = request.params.name;
+    return typeof name === "string" ? name : undefined;
+}
+function getBodyStringValue(body, key) {
+    if (!body || typeof body !== "object") {
+        return undefined;
+    }
+    const value = body[key];
+    return typeof value === "string" ? value : undefined;
+}
+function getPersistedOAuthProfileReason(profileId) {
+    return `oauth-client-profile:${profileId}`;
 }
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
@@ -256,146 +279,8 @@ function allowsOpaqueNullOrigin(req, authMode) {
         req.method === "POST" &&
         getRequestPath(req) === "/authorize/consent";
 }
-export async function startHttpServer(options) {
-    const allowedHosts = options.allowedHosts ?? [];
-    const auth = options.auth ?? { deployment: "authless", mode: "none" };
-    const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
-    const host = options.host ?? "127.0.0.1";
-    const path = options.path ?? "/mcp";
-    const port = options.port ?? 3000;
-    const ynab = assertYnabConfig(options.ynab);
-    if (auth.mode === "oauth") {
-        allowedOrigins.add(new URL(auth.publicUrl).origin);
-    }
-    if (auth.mode === "oauth") {
-        validateCloudflareAccessOAuthSettings({
-            authorizationUrl: auth.authorizationUrl,
-            issuer: auth.issuer,
-            jwksUrl: auth.jwksUrl,
-            tokenUrl: auth.tokenUrl,
-        });
-    }
-    const mcpAuthModule = auth.mode === "oauth" ? createMcpAuthModule(auth) : undefined;
-    const cloudflareCompatibilityMiddleware = auth.mode === "oauth"
-        ? createCloudflareAccessCompatibilityMiddleware(auth)
-        : undefined;
-    const app = express();
-    const jsonParser = express.json();
-    function getRequestAuthDebugOptions(req) {
-        const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
-        return {
-            authMode: auth.mode,
-            authRequired: isProtectedMcpRequest || undefined,
-        };
-    }
-    app.disable("x-powered-by");
-    app.set("trust proxy", 1);
-    app.use((req, _res, next) => {
-        logHttpDebug("request.received", getRequestDebugDetails(req, getRequestAuthDebugOptions(req)));
-        next();
-    });
-    app.use((req, res, next) => {
-        const detectedProfile = detectClientProfile(toClientProfileRequestContext(req));
-        setResolvedClientProfile(res.locals, detectedProfile);
-        logClientProfileEvent("profile.detected", {
-            method: req.method ?? "GET",
-            path: getRequestPath(req),
-            profileId: detectedProfile.profileId,
-            reason: detectedProfile.reason,
-        });
-        next();
-    });
-    if (allowedHosts.length > 0) {
-        app.use(hostHeaderValidation(allowedHosts));
-    }
-    else if (isLoopbackHostname(host)) {
-        app.use(localhostHostValidation());
-    }
-    app.use((req, res, next) => {
-        const resolution = resolveOriginPolicy({
-            allowOpaqueNullOrigin: allowsOpaqueNullOrigin(req, auth.mode),
-            allowedOrigins,
-            headers: req.headers,
-        });
-        if (!resolution.allowed) {
-            logHttpDebug("request.rejected", {
-                ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-                reason: "forbidden-origin",
-            });
-            writeForbiddenOrigin(res);
-            return;
-        }
-        applyCorsHeaders(res, resolution.responseOrigin);
-        if (resolution.responseOrigin) {
-            installCorsGuard(res, resolution.responseOrigin);
-        }
-        next();
-    });
-    if (auth.mode === "oauth") {
-        app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
-            const resolvedProfile = getResolvedClientProfile(res.locals);
-            if (resolvedProfile?.profileId !== "chatgpt") {
-                next();
-                return;
-            }
-            res.status(200).json(mcpAuthModule.protectedResourceMetadata);
-        });
-        app.use((req, res, next) => {
-            const resolvedProfile = getResolvedClientProfile(res.locals);
-            const canonicalPath = getCanonicalOAuthDiscoveryPath(getRequestPath(req), resolvedProfile?.profileId ?? "generic");
-            if (canonicalPath) {
-                req.url = canonicalPath;
-            }
-            next();
-        });
-        app.use(mcpAuthModule.router);
-    }
-    app.use((req, res, next) => {
-        if (req.method === "OPTIONS") {
-            logHttpDebug("request.preflight", getRequestDebugDetails(req));
-            res.status(204).end();
-            return;
-        }
-        next();
-    });
-    app.use((req, res, next) => {
-        if (getRequestPath(req) === path && req.method === "POST") {
-            if (auth.mode === "oauth") {
-                cloudflareCompatibilityMiddleware(req, res, (error) => {
-                    if (error) {
-                        next(error);
-                        return;
-                    }
-                    jsonParser(req, res, next);
-                });
-                return;
-            }
-            jsonParser(req, res, next);
-            return;
-        }
-        next();
-    });
-    if (auth.mode === "oauth") {
-        app.use((req, res, next) => {
-            if (getRequestPath(req) !== path || req.method !== "POST") {
-                next();
-                return;
-            }
-            if (isDirectUpstreamBearerToken(req, auth)) {
-                delete req.headers.authorization;
-            }
-            res.once("finish", () => {
-                if (req.auth || (res.statusCode !== 401 && res.statusCode !== 403)) {
-                    return;
-                }
-                logHttpDebug("request.rejected", {
-                    ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-                    reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope",
-                });
-            });
-            mcpAuthModule.authMiddleware(req, res, next);
-        });
-    }
+export function installMcpPostRoute(options) {
+    const { app, createManagedRequest, getInitializeParams, getJsonRpcDebugDetails, getRequestAuthDebugOptions, getRequestDebugDetails, getRequestPath, getToolCallName, logHttpDebug, path, resolveRequest, writeMethodNotAllowed, writeRequestResolution, } = options;
     app.use(async (req, res, next) => {
         if (getRequestPath(req) !== path) {
             next();
@@ -410,11 +295,11 @@ export async function startHttpServer(options) {
             return;
         }
         const parsedBody = req.body;
-        const resolution = await resolveRequest(req, () => createManagedRequest(ynab));
-        if (resolution.status !== "ready") {
+        const resolution = await resolveRequest(req, createManagedRequest);
+        if (resolution.status === "invalid-session-header") {
             logHttpDebug("request.rejected", {
                 ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-                reason: resolution.status,
+                reason: "invalid-session-header",
             });
             writeRequestResolution(res, resolution);
             return;
@@ -468,11 +353,171 @@ export async function startHttpServer(options) {
                 profileReason: resolvedProfile?.reason,
             });
             await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
+            const toolName = getToolCallName(parsedBody);
+            if (toolName && !hasToolCallStarted()) {
+                logHttpDebug("tool.dispatch.absent", {
+                    ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                    ...getJsonRpcDebugDetails(parsedBody),
+                    toolName,
+                });
+            }
         }
         catch (error) {
             await cleanup();
             next(error);
         }
+    });
+}
+export async function startHttpServer(options) {
+    const allowedHosts = options.allowedHosts ?? [];
+    const auth = options.auth ?? { deployment: "authless", mode: "none" };
+    const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
+    const host = options.host ?? "127.0.0.1";
+    const path = options.path ?? "/mcp";
+    const port = options.port ?? 3000;
+    const ynab = assertYnabConfig(options.ynab);
+    if (auth.mode === "oauth") {
+        allowedOrigins.add(new URL(auth.publicUrl).origin);
+    }
+    if (auth.mode === "oauth") {
+        validateCloudflareAccessOAuthSettings({
+            authorizationUrl: auth.authorizationUrl,
+            issuer: auth.issuer,
+            jwksUrl: auth.jwksUrl,
+            tokenUrl: auth.tokenUrl,
+        });
+    }
+    const mcpAuthModule = auth.mode === "oauth" ? createMcpAuthModule(auth) : undefined;
+    const cloudflareCompatibilityMiddleware = auth.mode === "oauth"
+        ? createCloudflareAccessCompatibilityMiddleware(auth)
+        : undefined;
+    const app = express();
+    const jsonParser = express.json();
+    const urlencodedParser = express.urlencoded({ extended: false });
+    function getRequestAuthDebugOptions(req) {
+        const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
+        return {
+            authMode: auth.mode,
+            authRequired: isProtectedMcpRequest || undefined,
+        };
+    }
+    app.disable("x-powered-by");
+    app.set("trust proxy", 1);
+    app.use((req, res, next) => {
+        const requestContext = createRequestContext(req.headers);
+        runWithRequestContext(requestContext, () => {
+            res.setHeader(getCorrelationHeaderName(), requestContext.correlationId);
+            next();
+        });
+    });
+    app.use((req, _res, next) => {
+        logHttpDebug("request.received", getRequestDebugDetails(req, getRequestAuthDebugOptions(req)));
+        next();
+    });
+    app.use((req, res, next) => {
+        if (auth.mode === "oauth" && getRequestPath(req) === "/token" && req.method === "POST") {
+            urlencodedParser(req, res, next);
+            return;
+        }
+        next();
+    });
+    app.use((req, res, next) => {
+        const tokenClientId = auth.mode === "oauth" &&
+            getRequestPath(req) === "/token" &&
+            req.method === "POST"
+            ? getBodyStringValue(req.body, "client_id")
+            : undefined;
+        const persistedProfileId = auth.mode === "oauth" && tokenClientId
+            ? mcpAuthModule?.getClientCompatibilityProfile(tokenClientId)
+            : undefined;
+        const requestProfile = detectClientProfile(toClientProfileRequestContext(req));
+        const detectedProfile = persistedProfileId && requestProfile.profileId === "generic"
+            ? {
+                profileId: persistedProfileId,
+                reason: getPersistedOAuthProfileReason(persistedProfileId),
+            }
+            : requestProfile;
+        setResolvedClientProfile(res.locals, detectedProfile);
+        logClientProfileEvent("profile.detected", {
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+            profileId: detectedProfile.profileId,
+            reason: detectedProfile.reason,
+        });
+        next();
+    });
+    if (allowedHosts.length > 0) {
+        app.use(hostHeaderValidation(allowedHosts));
+    }
+    else if (isLoopbackHostname(host)) {
+        app.use(localhostHostValidation());
+    }
+    app.use((req, res, next) => {
+        const resolution = resolveOriginPolicy({
+            allowOpaqueNullOrigin: allowsOpaqueNullOrigin(req, auth.mode),
+            allowedOrigins,
+            headers: req.headers,
+        });
+        if (!resolution.allowed) {
+            logHttpDebug("request.rejected", {
+                ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                reason: "forbidden-origin",
+            });
+            writeForbiddenOrigin(res);
+            return;
+        }
+        applyCorsHeaders(res, resolution.responseOrigin);
+        if (resolution.responseOrigin) {
+            installCorsGuard(res, resolution.responseOrigin);
+        }
+        next();
+    });
+    if (auth.mode === "oauth") {
+        installOAuthRoutes({
+            app,
+            auth,
+            cloudflareCompatibilityMiddleware: cloudflareCompatibilityMiddleware,
+            getCanonicalOAuthDiscoveryPath,
+            getPersistedOAuthProfileReason,
+            getRequestAuthDebugOptions,
+            getRequestDebugDetails,
+            getRequestPath,
+            isDirectUpstreamBearerToken,
+            jsonParser,
+            logHttpDebug,
+            mcpAuthModule: mcpAuthModule,
+            path,
+        });
+    }
+    app.use((req, res, next) => {
+        if (req.method === "OPTIONS") {
+            logHttpDebug("request.preflight", getRequestDebugDetails(req));
+            res.status(204).end();
+            return;
+        }
+        next();
+    });
+    app.use((req, res, next) => {
+        if (auth.mode !== "oauth" && getRequestPath(req) === path && req.method === "POST") {
+            jsonParser(req, res, next);
+            return;
+        }
+        next();
+    });
+    installMcpPostRoute({
+        app,
+        createManagedRequest: () => createManagedRequest(ynab),
+        getInitializeParams,
+        getJsonRpcDebugDetails,
+        getRequestAuthDebugOptions,
+        getRequestDebugDetails,
+        getRequestPath,
+        getToolCallName,
+        logHttpDebug,
+        path,
+        resolveRequest,
+        writeMethodNotAllowed,
+        writeRequestResolution,
     });
     app.use((req, res) => {
         logHttpDebug("request.rejected", {

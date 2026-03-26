@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { compactObject, formatMilliunits } from "./financeToolUtils.js";
+import { compactObject, formatMilliunits, isWithinMonthRange, normalizeMonthInput, } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_budget_cleanup_summary";
 export const description = "Returns a compact cleanup punch-list for uncategorized, unapproved, uncleared, and overspent items.";
@@ -10,14 +10,14 @@ export const inputSchema = {
 };
 export async function execute(input, api) {
     try {
-        const month = input.month || "current";
+        const month = normalizeMonthInput(input.month);
         const topN = input.topN ?? 5;
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const [transactionsResponse, monthResponse] = await Promise.all([
                 api.transactions.getTransactions(planId, month, undefined, undefined),
                 api.months.getPlanMonth(planId, month),
             ]);
-            const transactions = transactionsResponse.data.transactions.filter((transaction) => !transaction.deleted);
+            const transactions = transactionsResponse.data.transactions.filter((transaction) => !transaction.deleted && isWithinMonthRange(transaction.date, month, month));
             const uncategorizedTransactions = transactions.filter((transaction) => !transaction.category_id);
             const unapprovedTransactions = transactions.filter((transaction) => !transaction.approved);
             const unclearedTransactions = transactions.filter((transaction) => transaction.cleared === "uncleared");
@@ -26,7 +26,7 @@ export async function execute(input, api) {
                 .sort((left, right) => left.balance - right.balance);
             const hiddenProblemCategories = monthResponse.data.month.categories.filter((category) => !category.deleted && category.hidden && (category.balance < 0 || (category.goal_under_funded ?? 0) > 0));
             return toTextResult({
-                month,
+                month: monthResponse.data.month.month,
                 uncategorized_transaction_count: uncategorizedTransactions.length,
                 unapproved_transaction_count: unapprovedTransactions.length,
                 uncleared_transaction_count: unclearedTransactions.length,

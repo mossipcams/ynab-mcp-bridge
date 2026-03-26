@@ -1,4 +1,5 @@
 import { genericProfile } from "./genericProfile.js";
+import { getRequestUserAgent } from "./requestContext.js";
 const CODEX_DISCOVERY_PATHS = new Set([
     "/.well-known/oauth-authorization-server/sse",
     "/sse/.well-known/oauth-authorization-server",
@@ -10,7 +11,22 @@ export const codexProfile = {
         initializeReason: "initialize:client-info",
         preAuthReason: "path:codex-oauth-probe",
     },
-    matchesPreAuth: (context) => CODEX_DISCOVERY_PATHS.has(context.path),
+    detectPreAuth: (context) => {
+        if (CODEX_DISCOVERY_PATHS.has(context.path)) {
+            return {
+                profileId: "codex",
+                reason: "path:codex-oauth-probe",
+            };
+        }
+        if (getRequestUserAgent(context)?.includes("codex")) {
+            return {
+                profileId: "codex",
+                reason: "user-agent:codex",
+            };
+        }
+        return undefined;
+    },
+    matchesPreAuth: (context) => Boolean(codexProfile.detectPreAuth?.(context)),
     matchesInitialize: (clientInfo) => (typeof clientInfo?.name === "string" &&
         clientInfo.name.toLowerCase().includes("codex")),
     oauth: {

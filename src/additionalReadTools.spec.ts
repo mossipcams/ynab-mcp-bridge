@@ -582,9 +582,9 @@ describe("additional read-only tools", () => {
     expect(parseText(result)).toEqual({
       transactions: [
         {
-          date: "2026-03-01",
-          amount: "-12.50",
-          payee_name: "Grocer",
+          date: "2026-03-03",
+          amount: "-2.50",
+          payee_name: "Transit",
         },
       ],
       transaction_count: 3,

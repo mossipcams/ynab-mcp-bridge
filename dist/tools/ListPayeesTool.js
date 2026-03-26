@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { hasCollectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
+import { hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_list_payees";
 export const description = "Lists payees for a YNAB plan with optional compact projections and pagination.";
@@ -24,9 +24,15 @@ export async function execute(input, api) {
             name: payee.name,
             transfer_account_id: payee.transfer_account_id,
         }));
-        if (!hasCollectionControls(input)) {
+        if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
             return toTextResult({
                 payees,
+                payee_count: payees.length,
+            });
+        }
+        if (!hasPaginationControls(input)) {
+            return toTextResult({
+                payees: payees.map((payee) => projectRecord(payee, payeeFields, input)),
                 payee_count: payees.length,
             });
         }

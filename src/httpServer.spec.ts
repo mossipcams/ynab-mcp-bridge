@@ -2,10 +2,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { readFileSync } from "node:fs";
 import { createServer as createNodeHttpServer, request as httpRequest } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { startHttpServer } from "./httpServer.js";
+import { startHttpServer } from "./httpTransport.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
@@ -1532,6 +1533,19 @@ describe("startHttpServer", () => {
       id: null,
     });
     expect(findLogCall(consoleErrorSpy, "request.error")).toBeUndefined();
+  });
+
+  it("routes request parsing, session handling, and top-level HTTP errors through httpTransport", () => {
+    const httpTransportSource = readFileSync(new URL("./httpTransport.ts", import.meta.url), "utf8");
+
+    expect(httpTransportSource).toContain("const jsonParser = express.json()");
+    expect(httpTransportSource).toContain("writeParseError(");
+    expect(httpTransportSource).toContain("writePayloadTooLarge(");
+    expect(httpTransportSource).toContain("writeInternalServerError(");
+    expect(httpTransportSource).toContain("const errorHandler: ErrorRequestHandler =");
+    expect(httpTransportSource).toContain("export function installMcpPostRoute");
+    expect(httpTransportSource).toContain('"transport.handoff"');
+    expect(httpTransportSource).toContain('reason: "invalid-session-header"');
   });
 
   it("allows the started HTTP server to be closed more than once", async () => {

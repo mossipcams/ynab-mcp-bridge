@@ -4,7 +4,7 @@ import * as ynab from "ynab";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 import {
   buildTransactionCollectionResult,
-  toTransactionRows,
+  toSortedTransactionRows,
   transactionFields,
 } from "./transactionQueryUtils.js";
 
@@ -39,7 +39,7 @@ export async function execute(
       undefined,
     ));
 
-    return toTextResult(buildTransactionCollectionResult(toTransactionRows(response.data.transactions), input));
+    return toTextResult(buildTransactionCollectionResult(toSortedTransactionRows(response.data.transactions), input));
   } catch (error) {
     return toErrorResult(error);
   }

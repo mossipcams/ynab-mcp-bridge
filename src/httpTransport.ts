@@ -1,3 +1,8 @@
+/**
+ * Owns: Express app assembly for MCP HTTP transport, request parsing, request/session validation, JSON-RPC response writers, CORS/origin enforcement, MCP POST handoff, and top-level HTTP error handling.
+ * Inputs/dependencies: auth config, YNAB config, serverRuntime, header helpers, request-context helpers, origin-policy helpers, clientProfiles/, and oauthRuntime.
+ * Outputs/contracts: startHttpServer(...) plus explicit helper interfaces consumed by route-local wiring.
+ */
 import type { Server as NodeHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -17,9 +22,10 @@ import {
 } from "./config.js";
 import { logAppEvent } from "./logger.js";
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
-import { createMcpAuthModule } from "./mcpAuthServer.js";
 import {
+  detectInitializeClientProfile,
   detectClientProfile,
+  reconcileClientProfile,
 } from "./clientProfiles/detectClient.js";
 import { getClientProfile } from "./clientProfiles/index.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
@@ -31,11 +37,11 @@ import {
   createRequestContext,
   getCorrelationHeaderName,
   getRequestLogFields,
+  hasToolCallStarted,
   runWithRequestContext,
 } from "./requestContext.js";
-import { installMcpPostRoute } from "./httpServerMcpRoute.js";
-import { installOAuthRoutes } from "./httpServerOAuthRoutes.js";
-import { createServer } from "./server.js";
+import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
+import { createServer } from "./serverRuntime.js";
 
 type HttpServerOptions = {
   allowedHosts?: string[];
@@ -84,6 +90,22 @@ type InitializeParamsLike = {
   clientInfo?: unknown;
 };
 
+type InstallMcpPostRouteOptions = {
+  app: express.Express;
+  createManagedRequest: () => Promise<ManagedRequest>;
+  getInitializeParams: (parsedBody: unknown) => { capabilities?: unknown; clientInfo?: unknown } | undefined;
+  getJsonRpcDebugDetails: (parsedBody: unknown) => Record<string, unknown>;
+  getRequestAuthDebugOptions: (req: Pick<Request, "path" | "url">) => { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean };
+  getRequestDebugDetails: (req: Request, options?: { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean }) => Record<string, unknown>;
+  getRequestPath: (req: Pick<Request, "path" | "url">) => string;
+  getToolCallName: (parsedBody: unknown) => string | undefined;
+  logHttpDebug: (event: string, details: Record<string, unknown>) => void;
+  path: string;
+  resolveRequest: (req: Request, createRequest: () => Promise<ManagedRequest>) => Promise<RequestResolution>;
+  writeMethodNotAllowed: (res: Response, allowedMethods: readonly string[]) => void;
+  writeRequestResolution: (res: Response, resolution: Exclude<RequestResolution, { cleanup?: () => Promise<void>; managedRequest: ManagedRequest; status: "ready" }>) => void;
+};
+
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 
 function getRequestPath(req: Pick<Request, "path" | "url">) {
@@ -122,7 +144,6 @@ function getCanonicalOAuthDiscoveryPath(pathname: string, profileId: ClientProfi
     ? canonicalPath
     : undefined;
 }
-
 
 function getBearerToken(authorizationHeader: string | undefined) {
   if (!authorizationHeader?.startsWith("Bearer ")) {
@@ -242,7 +263,7 @@ function hasHeaderValue(value: string | string[] | undefined) {
 function getRequestDebugDetails(
   req: Request,
   options: {
-    authMode?: RuntimeAuthConfig["mode"];
+    authMode?: "http" | "stdio" | "oauth" | "none";
     authRequired?: boolean;
   } = {},
 ): HttpDebugDetails {
@@ -434,6 +455,126 @@ function allowsOpaqueNullOrigin(req: Pick<Request, "method" | "path" | "url">, a
     getRequestPath(req) === "/authorize/consent";
 }
 
+export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
+  const {
+    app,
+    createManagedRequest,
+    getInitializeParams,
+    getJsonRpcDebugDetails,
+    getRequestAuthDebugOptions,
+    getRequestDebugDetails,
+    getRequestPath,
+    getToolCallName,
+    logHttpDebug,
+    path,
+    resolveRequest,
+    writeMethodNotAllowed,
+    writeRequestResolution,
+  } = options;
+
+  app.use(async (req, res, next) => {
+    if (getRequestPath(req) !== path) {
+      next();
+      return;
+    }
+
+    if (req.method !== "POST") {
+      logHttpDebug("request.rejected", {
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+        reason: "method-not-allowed",
+      });
+      writeMethodNotAllowed(res, HTTP_ALLOWED_METHODS);
+      return;
+    }
+
+    const parsedBody: unknown = req.body;
+    const resolution = await resolveRequest(
+      req,
+      createManagedRequest,
+    );
+
+    if (resolution.status === "invalid-session-header") {
+      logHttpDebug("request.rejected", {
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+        reason: "invalid-session-header",
+      });
+      writeRequestResolution(res, resolution);
+      return;
+    }
+
+    let cleanedUp = false;
+    const cleanup = async () => {
+      if (cleanedUp) {
+        return;
+      }
+
+      cleanedUp = true;
+      await resolution.cleanup?.();
+    };
+
+    try {
+      res.once("close", () => {
+        void cleanup();
+      });
+
+      const provisionalProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+      const initializeParams = getInitializeParams(parsedBody);
+
+      if (provisionalProfile && initializeParams) {
+        const confirmedProfile = detectInitializeClientProfile({
+          capabilities: initializeParams.capabilities,
+          clientInfo: initializeParams.clientInfo,
+        });
+        const reconciliation = reconcileClientProfile(provisionalProfile, confirmedProfile);
+
+        setResolvedClientProfile(res.locals as Record<string, unknown>, reconciliation.profile);
+
+        if (!reconciliation.mismatch && confirmedProfile) {
+          logClientProfileEvent("profile.detected", {
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+            profileId: confirmedProfile.profileId,
+            reason: confirmedProfile.reason,
+          });
+        } else if (reconciliation.mismatch && confirmedProfile) {
+          logClientProfileEvent("profile.reconciled", {
+            confirmedProfileId: confirmedProfile.profileId,
+            method: req.method ?? "GET",
+            path: getRequestPath(req),
+            profileId: reconciliation.profile.profileId,
+            provisionalProfileId: provisionalProfile.profileId,
+            reason: reconciliation.profile.reason,
+          });
+        }
+      }
+
+      const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+
+      logHttpDebug("transport.handoff", {
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+        ...getJsonRpcDebugDetails(parsedBody),
+        cleanup: Boolean(resolution.cleanup),
+        profileId: resolvedProfile?.profileId,
+        profileReason: resolvedProfile?.reason,
+      });
+      await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
+
+      const toolName = getToolCallName(parsedBody);
+
+      if (toolName && !hasToolCallStarted()) {
+        logHttpDebug("tool.dispatch.absent", {
+          ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+          ...getJsonRpcDebugDetails(parsedBody),
+          toolName,
+        });
+      }
+    } catch (error) {
+      await cleanup();
+      next(error);
+    }
+  });
+}
+
 export async function startHttpServer(options: HttpServerOptions): Promise<StartedHttpServer> {
   const allowedHosts = options.allowedHosts ?? [];
   const auth = options.auth ?? { deployment: "authless", mode: "none" };
@@ -465,7 +606,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const jsonParser = express.json();
   const urlencodedParser = express.urlencoded({ extended: false });
 
-  function getRequestAuthDebugOptions(req: Pick<Request, "path" | "url">) {
+  function getRequestAuthDebugOptions(
+    req: Pick<Request, "path" | "url">,
+  ): { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean } {
     const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
 
     return {

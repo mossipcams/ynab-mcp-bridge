@@ -10,24 +10,10 @@ function _getPlanId(inputPlanId, configuredPlanId) {
 function getApiConfiguredPlanId(api) {
     return getYnabApiRuntimeContext(api)?.config.planId?.trim();
 }
-function getRuntimePlanIdOverride(api) {
-    return getYnabApiRuntimeContext(api)?.runtimePlanIdOverride?.trim();
-}
-function setRuntimePlanIdOverride(api, planId) {
-    const runtimeContext = getYnabApiRuntimeContext(api);
-    if (!runtimeContext) {
-        return;
-    }
-    runtimeContext.runtimePlanIdOverride = planId;
-}
 function getConfiguredPlanId(inputPlanId, api, options) {
     const explicitPlanId = inputPlanId?.trim();
     if (explicitPlanId) {
         return explicitPlanId;
-    }
-    const runtimePlanIdOverride = getRuntimePlanIdOverride(api);
-    if (!options.ignoreRuntimePlanIdOverride && runtimePlanIdOverride) {
-        return runtimePlanIdOverride;
     }
     if (!options.ignoreConfiguredPlanId) {
         return getApiConfiguredPlanId(api) ?? "";
@@ -44,11 +30,6 @@ function pickResolvedPlanId(plans, defaultPlanId, excludedPlanIds) {
     }
     return undefined;
 }
-function rememberRuntimePlanId(api, planId, inputPlanId) {
-    if (!inputPlanId) {
-        setRuntimePlanIdOverride(api, planId);
-    }
-}
 function isMissingPlanError(error) {
     const message = getErrorMessage(error).toLowerCase();
     return message.includes("not found") || message.includes("no entity was found");
@@ -62,7 +43,6 @@ async function resolvePlanId(inputPlanId, api, options = {}) {
     const response = await api.plans.getPlans();
     const resolvedPlanId = pickResolvedPlanId(response.data.plans, response.data.default_plan?.id, excludedPlanIds);
     if (resolvedPlanId) {
-        rememberRuntimePlanId(api, resolvedPlanId, inputPlanId);
         return resolvedPlanId;
     }
     throw new Error("No plan ID provided. Please provide a plan ID, set YNAB_PLAN_ID, or configure a default YNAB plan.");
@@ -79,9 +59,7 @@ export async function withResolvedPlan(inputPlanId, api, operation) {
         const recoveredPlanId = await resolvePlanId(undefined, api, {
             excludePlanIds: [planId],
             ignoreConfiguredPlanId: true,
-            ignoreRuntimePlanIdOverride: true,
         });
-        rememberRuntimePlanId(api, recoveredPlanId);
         return operation(recoveredPlanId);
     }
 }

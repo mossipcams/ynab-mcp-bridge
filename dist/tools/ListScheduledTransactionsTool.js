@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { formatAmountMilliunits, hasCollectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
+import { formatAmountMilliunits, hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_list_scheduled_transactions";
 export const description = "Lists scheduled transactions for a YNAB plan with optional compact projections and pagination.";
@@ -32,9 +32,15 @@ export async function execute(input, api) {
             category_name: transaction.category_name,
             account_name: transaction.account_name,
         }));
-        if (!hasCollectionControls(input)) {
+        if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
             return toTextResult({
                 scheduled_transactions: scheduledTransactions,
+                scheduled_transaction_count: scheduledTransactions.length,
+            });
+        }
+        if (!hasPaginationControls(input)) {
+            return toTextResult({
+                scheduled_transactions: scheduledTransactions.map((transaction) => projectRecord(transaction, scheduledTransactionFields, input)),
                 scheduled_transaction_count: scheduledTransactions.length,
             });
         }

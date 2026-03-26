@@ -8,12 +8,7 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "preserveSymlinks": true,
-    "baseUrl": "./src",
-    "paths": {
-      "/*": ["./*"]
-    }
+    "forceConsistentCasingInFileNames": true
   },
   "include": [
     "src/**/*"

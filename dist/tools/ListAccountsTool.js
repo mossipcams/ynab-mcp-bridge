@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { formatAmountMilliunits, hasCollectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
+import { formatAmountMilliunits, hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_list_accounts";
 export const description = "Lists accounts for a YNAB plan with optional compact projections and pagination.";
@@ -28,9 +28,15 @@ export async function execute(input, api) {
             closed: account.closed,
             balance: formatAmountMilliunits(account.balance),
         }));
-        if (!hasCollectionControls(input)) {
+        if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
             return toTextResult({
                 accounts,
+                account_count: accounts.length,
+            });
+        }
+        if (!hasPaginationControls(input)) {
+            return toTextResult({
+                accounts: accounts.map((account) => projectRecord(account, accountFields, input)),
                 account_count: accounts.length,
             });
         }
