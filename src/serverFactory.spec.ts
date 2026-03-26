@@ -4,9 +4,10 @@ import { PassThrough } from "node:stream";
 
 import { setLoggerDestinationForTests } from "./logger.js";
 import { runWithRequestContext } from "./requestContext.js";
-import { createServer, defineTool, registerServerTools } from "./server.js";
+import { createServer, registerServerTools } from "./server.js";
+import { defineReadOnlyTool, registerDefinedTools } from "./toolDefinition.js";
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
-import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
+import * as ListTransactionsTool from "./tools/ListTransactionsTool.js";
 
 describe("createServer", () => {
   const originalEnv = process.env;
@@ -47,7 +48,7 @@ describe("createServer", () => {
     });
     const registeredTools = Object.keys((server as any)._registeredTools);
 
-    expect(registeredTools).toHaveLength(46);
+    expect(registeredTools).toHaveLength(47);
     expect(registeredTools).toEqual(
       expect.arrayContaining([
         "ynab_get_mcp_version",
@@ -81,6 +82,8 @@ describe("createServer", () => {
         "ynab_get_money_movement_groups",
         "ynab_get_money_movement_groups_by_month",
         "ynab_get_financial_snapshot",
+        "ynab_get_net_worth_trajectory",
+        "ynab_get_monthly_review",
         "ynab_get_financial_health_check",
         "ynab_get_spending_summary",
         "ynab_get_spending_anomalies",
@@ -95,9 +98,9 @@ describe("createServer", () => {
         "ynab_get_debt_summary",
         "ynab_get_recurring_expense_summary",
         "ynab_get_category_trend_summary",
-        "ynab_get_70_20_10_summary",
       ]),
     );
+    expect(registeredTools).not.toContain("ynab_get_70_20_10_summary");
   });
 
   it("registers the toolset through a reusable SDK-native registrar", () => {
@@ -110,7 +113,7 @@ describe("createServer", () => {
       {} as any,
     );
 
-    expect(registeredToolNames).toHaveLength(46);
+    expect(registeredToolNames).toHaveLength(47);
     expect(registeredToolNames).toEqual([
       "ynab_get_mcp_version",
       "ynab_get_user",
@@ -143,6 +146,8 @@ describe("createServer", () => {
       "ynab_get_money_movement_groups",
       "ynab_get_money_movement_groups_by_month",
       "ynab_get_financial_snapshot",
+      "ynab_get_net_worth_trajectory",
+      "ynab_get_monthly_review",
       "ynab_get_financial_health_check",
       "ynab_get_spending_summary",
       "ynab_get_spending_anomalies",
@@ -157,9 +162,8 @@ describe("createServer", () => {
       "ynab_get_debt_summary",
       "ynab_get_recurring_expense_summary",
       "ynab_get_category_trend_summary",
-      "ynab_get_70_20_10_summary",
     ]);
-    expect(registerTool).toHaveBeenCalledTimes(46);
+    expect(registerTool).toHaveBeenCalledTimes(47);
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_mcp_version",
       expect.objectContaining({
@@ -175,10 +179,16 @@ describe("createServer", () => {
       }),
       expect.any(Function),
     );
-    expect(registerTool).toHaveBeenCalledWith(
+    expect(registerTool).not.toHaveBeenCalledWith(
       "ynab_get_70_20_10_summary",
+      expect.anything(),
+      expect.any(Function),
+    );
+    expect(registerTool).toHaveBeenCalledWith(
+      "ynab_get_net_worth_trajectory",
       expect.objectContaining({
-        title: "Get 70/20/10 Summary",
+        title: "Get Net Worth Trajectory",
+        description: expect.any(String),
         annotations: {
           readOnlyHint: true,
           destructiveHint: false,
@@ -188,6 +198,60 @@ describe("createServer", () => {
       }),
       expect.any(Function),
     );
+    expect(registerTool).toHaveBeenCalledWith(
+      "ynab_get_monthly_review",
+      expect.objectContaining({
+        title: "Get Monthly Review",
+        description: expect.any(String),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("supports reusable read-only tool definitions outside the main server module", () => {
+    const registerTool = vi.fn();
+    const definitions = [
+      defineReadOnlyTool("List Transactions", ListTransactionsTool),
+    ];
+
+    const registeredToolNames = registerDefinedTools(
+      {
+        registerTool,
+      },
+      {} as any,
+      definitions,
+    );
+
+    expect(registeredToolNames).toEqual(["ynab_list_transactions"]);
+    expect(registerTool).toHaveBeenCalledWith(
+      "ynab_list_transactions",
+      expect.objectContaining({
+        title: "List Transactions",
+        description: ListTransactionsTool.description,
+        inputSchema: ListTransactionsTool.inputSchema,
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("sources server registrations from shared tool definitions instead of manual per-tool wrappers", () => {
+    const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("defineReadOnlyTool(");
+    expect(source).toContain("registerDefinedTools(");
+    expect(source).not.toContain("register: (registrar, api) =>");
   });
 
   it("logs tool lifecycle events with request correlation for success and failure", async () => {
@@ -308,23 +372,160 @@ describe("createServer", () => {
     });
   });
 
-  it("builds reusable tool definitions from tool modules", () => {
-    expect(defineTool("Get MCP Version", GetMcpVersionTool)).toEqual({
-      description: GetMcpVersionTool.description,
-      execute: GetMcpVersionTool.execute,
-      inputSchema: GetMcpVersionTool.inputSchema,
-      name: GetMcpVersionTool.name,
-      title: "Get MCP Version",
-    });
+  it("documents assigned_vs_spent as buffering and timing behavior in finance tool descriptions", () => {
+    const registerTool = vi.fn();
+
+    registerServerTools(
+      {
+        registerTool,
+      },
+      {} as any,
+    );
+
+    const descriptions = new Map(
+      registerTool.mock.calls.map(([toolName, registration]) => [
+        toolName,
+        (registration as { description?: string }).description ?? "",
+      ]),
+    );
+
+    expect(descriptions.get("ynab_get_financial_snapshot")).toContain("buffering");
+    expect(descriptions.get("ynab_get_financial_snapshot")).toContain("timing");
+    expect(descriptions.get("ynab_get_budget_health_summary")).toContain("buffering");
+    expect(descriptions.get("ynab_get_budget_health_summary")).toContain("not a discipline score");
+    expect(descriptions.get("ynab_get_cash_flow_summary")).toContain("timing");
+    expect(descriptions.get("ynab_get_cash_flow_summary")).toContain("not a discipline score");
+    expect(descriptions.get("ynab_get_monthly_review")).toContain("buffering");
+    expect(descriptions.get("ynab_get_monthly_review")).toContain("timing");
   });
 
-  it("defines an explicit tool registry through the shared builder", () => {
+  it("documents how to choose between transaction browse tools", () => {
+    const registerTool = vi.fn();
+
+    registerServerTools(
+      {
+        registerTool,
+      },
+      {} as any,
+    );
+
+    const descriptions = new Map(
+      registerTool.mock.calls.map(([toolName, registration]) => [
+        toolName,
+        (registration as { description?: string }).description ?? "",
+      ]),
+    );
+
+    expect(descriptions.get("ynab_list_transactions")).toContain("overview");
+    expect(descriptions.get("ynab_list_transactions")).toContain("prefer ynab_search_transactions");
+    expect(descriptions.get("ynab_search_transactions")).toContain("filters");
+    expect(descriptions.get("ynab_search_transactions")).toContain("drill-down");
+    expect(descriptions.get("ynab_get_transactions_by_account")).toContain("already know the account ID");
+    expect(descriptions.get("ynab_get_transactions_by_category")).toContain("already know the category ID");
+    expect(descriptions.get("ynab_get_transactions_by_month")).toContain("already know the exact month");
+    expect(descriptions.get("ynab_get_transactions_by_payee")).toContain("already know the payee ID");
+  });
+
+  it("registers finance tool descriptions that clarify timing and classification semantics", () => {
+    const registerTool = vi.fn();
+
+    registerServerTools(
+      {
+        registerTool,
+      },
+      {} as any,
+    );
+
+    const registrations = new Map(
+      registerTool.mock.calls.map(([toolName, registration]) => [toolName, registration]),
+    );
+
+    expect((registrations.get("ynab_get_financial_snapshot") as any).description).toContain("timing");
+    expect((registrations.get("ynab_get_financial_snapshot") as any).description).toContain("assigned_vs_spent");
+    expect((registrations.get("ynab_get_budget_health_summary") as any).description).toContain("timing");
+    expect((registrations.get("ynab_get_cash_flow_summary") as any).description).toContain("net cash flow");
+    expect((registrations.get("ynab_get_cash_flow_summary") as any).description).toContain("not savings");
+    expect((registrations.get("ynab_get_income_summary") as any).description).toContain("Inflow: Ready to Assign");
+    expect((registrations.get("ynab_get_upcoming_obligations") as any).description).toContain("due outflows");
+    expect((registrations.get("ynab_get_upcoming_obligations") as any).description).toContain("expected inflows");
+    expect((registrations.get("ynab_get_upcoming_obligations") as any).description).toContain("excluding transfers");
+  });
+
+  it("keeps registered MCP tool schemas serializable and their handlers callable through the registrar", async () => {
+    const registerTool = vi.fn();
+    const api = {
+      months: {
+        getPlanMonth: vi.fn(async (planId: string, month: string) => ({
+          data: {
+            month: {
+              month,
+              income: 120_000,
+              budgeted: 100_000,
+              activity: -90_000,
+              to_be_budgeted: 30_000,
+              age_of_money: 42,
+              categories: [{ id: "category-1" }],
+            },
+          },
+        })),
+      },
+      plans: {
+        getPlans: vi.fn(async () => ({
+          data: {
+            plans: [{ id: "plan-1" }],
+            default_plan: { id: "plan-1" },
+          },
+        })),
+      },
+    };
+
+    registerServerTools(
+      {
+        registerTool,
+      },
+      api as any,
+    );
+
+    const planMonthRegistration = registerTool.mock.calls.find(
+      ([toolName]) => toolName === "ynab_get_plan_month",
+    );
+
+    expect(planMonthRegistration).toBeDefined();
+
+    const [, registration, handler] = planMonthRegistration!;
+    expect(() => JSON.stringify(registration.inputSchema)).not.toThrow();
+
+    const result = await handler({
+      month: "2024-01-01",
+    });
+
+    expect(result).toEqual({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          month: {
+            month: "2024-01-01",
+            income: 120_000,
+            budgeted: 100_000,
+            activity: -90_000,
+            to_be_budgeted: 30_000,
+            age_of_money: 42,
+            category_count: 1,
+          },
+        }),
+      }],
+    });
+    expect(api.months.getPlanMonth).toHaveBeenCalledWith("plan-1", "2024-01-01");
+  });
+
+  it("defines an explicit tool registry instead of passing whole tool modules around", () => {
     const source = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
 
-    expect(source).toContain("function defineTool");
-    expect(source).toContain('defineTool("Get MCP Version", GetMcpVersionTool)');
-    expect(source).toContain('defineTool("Get Account", GetAccountTool)');
-    expect(source).not.toContain("name: GetMcpVersionTool.name");
+    expect(source).toContain('defineReadOnlyTool("Get MCP Version", GetMcpVersionTool)');
+    expect(source).toContain('defineReadOnlyTool("Get Account", GetAccountTool)');
+    expect(source).toContain("const toolDefinitions = [");
+    expect(source).not.toContain("module: GetAccountTool");
+    expect(source).not.toContain("module.execute");
   });
 
   it("requires explicit config instead of reading the API token from environment", () => {

@@ -1,12 +1,7 @@
-import type { Server as NodeHttpServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 
-import express, { type ErrorRequestHandler, type Request, type Response } from "express";
-import { decodeJwt } from "jose";
-import {
-  hostHeaderValidation,
-  localhostHostValidation,
-} from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
+import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import {
@@ -15,35 +10,23 @@ import {
   type RuntimeAuthConfig,
   type YnabConfig,
 } from "./config.js";
-import { logAppEvent } from "./logger.js";
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
 import { createMcpAuthModule } from "./mcpAuthServer.js";
-import {
-  detectClientProfile,
-} from "./clientProfiles/detectClient.js";
-import { getClientProfile } from "./clientProfiles/index.js";
-import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
-import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
-import type { ClientProfileId, RequestContext as ClientProfileRequestContext } from "./clientProfiles/types.js";
-import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
-import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
-import {
-  createRequestContext,
-  getCorrelationHeaderName,
-  getRequestLogFields,
-  runWithRequestContext,
-} from "./requestContext.js";
-import { installMcpPostRoute } from "./httpServerMcpRoute.js";
-import { installOAuthRoutes } from "./httpServerOAuthRoutes.js";
+import { closeNodeServer, getRequestPath, type ManagedRequest, type StatefulSessionEntry } from "./httpServerShared.js";
+import { registerHttpServerIngress } from "./httpServerIngress.js";
+import { registerOAuthHttpRoutes } from "./httpServerOAuthRoutes.js";
+import { registerMcpTransportRoutes } from "./httpServerTransportRoutes.js";
+import { normalizeOrigin } from "./originPolicy.js";
 import { createServer } from "./server.js";
 
 type HttpServerOptions = {
-  allowedHosts?: string[];
-  allowedOrigins?: string[];
-  auth?: RuntimeAuthConfig;
-  host?: string;
-  path?: string;
-  port?: number;
+  allowedHosts?: string[] | undefined;
+  allowedOrigins?: string[] | undefined;
+  auth?: RuntimeAuthConfig | undefined;
+  host?: string | undefined;
+  path?: string | undefined;
+  port?: number | undefined;
+  sessionIdleTimeoutMs?: number | undefined;
   ynab: YnabConfig;
 };
 
@@ -55,385 +38,6 @@ type StartedHttpServer = {
   url: string;
 };
 
-const HTTP_ALLOWED_METHODS = ["POST"] as const;
-type ManagedRequest = {
-  close: () => Promise<void>;
-  transport: StreamableHTTPServerTransport;
-};
-
-type RequestResolution =
-  | {
-      cleanup?: () => Promise<void>;
-      managedRequest: ManagedRequest;
-      status: "ready";
-    }
-  | {
-      status: "invalid-session-header";
-    };
-
-type HttpDebugDetails = Record<string, unknown>;
-
-type JsonRpcRequestLike = {
-  id?: unknown;
-  method?: unknown;
-  params?: unknown;
-};
-
-type InitializeParamsLike = {
-  capabilities?: unknown;
-  clientInfo?: unknown;
-};
-
-const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
-
-function getRequestPath(req: Pick<Request, "path" | "url">) {
-  if (typeof req.path === "string" && req.path.length > 0) {
-    return req.path;
-  }
-
-  if (!req.url) {
-    return "/";
-  }
-
-  return new URL(req.url, "http://127.0.0.1").pathname;
-}
-
-function toClientProfileRequestContext(req: Pick<Request, "headers" | "method" | "path" | "url">): ClientProfileRequestContext {
-  return {
-    headers: req.headers as Record<string, string | string[] | undefined>,
-    method: req.method ?? "GET",
-    path: getRequestPath(req),
-  };
-}
-
-function getCanonicalOAuthDiscoveryPath(pathname: string, profileId: ClientProfileId) {
-  if (profileId === "chatgpt") {
-    return undefined;
-  }
-
-  const profile = getClientProfile(profileId);
-  const canonicalPath = "/.well-known/oauth-authorization-server";
-
-  if (!profile.oauth.tolerateExtraDiscoveryProbes || pathname === canonicalPath) {
-    return undefined;
-  }
-
-  return profile.oauth.discoveryPathVariants.includes(pathname)
-    ? canonicalPath
-    : undefined;
-}
-
-
-function getBearerToken(authorizationHeader: string | undefined) {
-  if (!authorizationHeader?.startsWith("Bearer ")) {
-    return undefined;
-  }
-
-  return authorizationHeader.slice("Bearer ".length).trim();
-}
-
-function isDirectUpstreamBearerToken(req: Pick<Request, "headers">, auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
-  const authorizationSource = getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]);
-
-  if (authorizationSource === "cf-access-jwt-assertion") {
-    return false;
-  }
-
-  const token = getBearerToken(getFirstHeaderValue(req.headers.authorization));
-
-  if (!token) {
-    return false;
-  }
-
-  try {
-    return decodeJwt(token).iss === auth.issuer;
-  } catch {
-    return false;
-  }
-}
-
-function writeJson(res: Response, statusCode: number, body: unknown) {
-  res.status(statusCode);
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
-}
-
-function writeJsonRpcError(res: Response, statusCode: number, code: number, message: string) {
-  writeJson(res, statusCode, {
-    jsonrpc: "2.0",
-    error: {
-      code,
-      message,
-    },
-    id: null,
-  });
-}
-
-function writeMethodNotAllowed(res: Response, allowedMethods: readonly string[]) {
-  res.setHeader("allow", allowedMethods.join(", "));
-  writeJsonRpcError(res, 405, -32000, "Method not allowed.");
-}
-
-function writeNotFound(res: Response) {
-  writeJson(res, 404, {
-    error: "Not found",
-  });
-}
-
-function writeForbiddenOrigin(res: Response) {
-  writeJson(res, 403, {
-    error: "Forbidden origin",
-  });
-}
-
-function writeParseError(res: Response) {
-  writeJsonRpcError(res, 400, -32700, "Parse error");
-}
-
-function writePayloadTooLarge(res: Response) {
-  writeJsonRpcError(res, 413, -32000, "Payload too large");
-}
-
-function writeInternalServerError(res: Response) {
-  writeJsonRpcError(res, 500, -32603, "Internal server error");
-}
-
-function logHttpDebug(event: string, details: HttpDebugDetails) {
-  logAppEvent("http", event, details);
-}
-
-function getSessionId(req: Pick<Request, "headers">) {
-  const sessionId = req.headers["mcp-session-id"];
-
-  if (typeof sessionId !== "string") {
-    return undefined;
-  }
-
-  const values = sessionId
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  if (values.length !== 1) {
-    return undefined;
-  }
-
-  return values[0];
-}
-
-function getNormalizedUserAgent(req: Pick<Request, "headers">) {
-  const userAgent = getFirstHeaderValue(req.headers["user-agent"]);
-
-  if (!userAgent) {
-    return undefined;
-  }
-
-  if (userAgent.toLowerCase().startsWith("openai-mcp/")) {
-    return "chatgpt";
-  }
-
-  return userAgent;
-}
-
-function hasHeaderValue(value: string | string[] | undefined) {
-  return Boolean(getFirstHeaderValue(value));
-}
-
-function getRequestDebugDetails(
-  req: Request,
-  options: {
-    authMode?: RuntimeAuthConfig["mode"];
-    authRequired?: boolean;
-  } = {},
-): HttpDebugDetails {
-  const authSubject = req.auth?.extra?.subject;
-  return {
-    ...getRequestLogFields(),
-    authMode: options.authMode,
-    authClientId: req.auth?.clientId,
-    authRequired: options.authRequired,
-    authSubject: typeof authSubject === "string" ? authSubject : undefined,
-    hasAuthorizationHeader: hasHeaderValue(req.headers.authorization),
-    hasCfAccessJwtAssertion: hasHeaderValue(req.headers["cf-access-jwt-assertion"]),
-    method: req.method ?? "UNKNOWN",
-    origin: getFirstHeaderValue(req.headers.origin),
-    path: getRequestPath(req),
-    protocolVersion: getFirstHeaderValue(req.headers["mcp-protocol-version"]),
-    sessionId: getSessionId(req),
-    userAgent: getNormalizedUserAgent(req),
-  };
-}
-
-function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
-  if (!parsedBody || typeof parsedBody !== "object") {
-    return {};
-  }
-
-  const request = parsedBody as JsonRpcRequestLike;
-  const details: HttpDebugDetails = {};
-
-  if (typeof request.method === "string") {
-    details.jsonRpcMethod = request.method;
-  }
-
-  if ("id" in request) {
-    details.jsonRpcId = request.id;
-  }
-
-  return details;
-}
-
-function getInitializeParams(parsedBody: unknown) {
-  if (!parsedBody || typeof parsedBody !== "object") {
-    return undefined;
-  }
-
-  const request = parsedBody as JsonRpcRequestLike;
-
-  if (request.method !== "initialize" || !request.params || typeof request.params !== "object") {
-    return undefined;
-  }
-
-  return request.params as InitializeParamsLike;
-}
-
-function getToolCallName(parsedBody: unknown) {
-  if (!parsedBody || typeof parsedBody !== "object") {
-    return undefined;
-  }
-
-  const request = parsedBody as JsonRpcRequestLike;
-
-  if (request.method !== "tools/call" || !request.params || typeof request.params !== "object") {
-    return undefined;
-  }
-
-  const name = (request.params as { name?: unknown }).name;
-  return typeof name === "string" ? name : undefined;
-}
-
-function getBodyStringValue(body: unknown, key: string) {
-  if (!body || typeof body !== "object") {
-    return undefined;
-  }
-
-  const value = (body as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : undefined;
-}
-
-function getPersistedOAuthProfileReason(profileId: ClientProfileId) {
-  return `oauth-client-profile:${profileId}`;
-}
-
-function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">) {
-  const sessionId = req.headers["mcp-session-id"];
-
-  if (Array.isArray(sessionId)) {
-    return sessionId.length > 1 || sessionId.some((value) => value.includes(","));
-  }
-
-  if (typeof sessionId !== "string") {
-    return false;
-  }
-
-  return sessionId
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean).length > 1;
-}
-
-function isJsonParseError(error: unknown) {
-  return error instanceof SyntaxError || (
-    typeof error === "object" &&
-    error !== null &&
-    "type" in error &&
-    error.type === "entity.parse.failed"
-  );
-}
-
-function isPayloadTooLargeError(error: unknown) {
-  return typeof error === "object" &&
-    error !== null &&
-    (
-      ("type" in error && error.type === "entity.too.large") ||
-      ("status" in error && error.status === 413) ||
-      ("statusCode" in error && error.statusCode === 413)
-    );
-}
-
-async function createManagedRequest(config: YnabConfig) {
-  const mcpServer = createServer(config);
-  const transport = new StreamableHTTPServerTransport({
-    enableJsonResponse: true,
-    sessionIdGenerator: undefined,
-  });
-
-  await mcpServer.connect(transport);
-
-  return {
-    transport,
-    close: async () => {
-      await transport.close();
-      await mcpServer.close();
-    },
-  } satisfies ManagedRequest;
-}
-
-async function resolveRequest(
-  req: Request,
-  createRequest: () => Promise<ManagedRequest>,
-): Promise<RequestResolution> {
-  if (hasMultipleSessionHeaderValues(req)) {
-    return {
-      status: "invalid-session-header",
-    };
-  }
-
-  const managedRequest = await createRequest();
-
-  return {
-    cleanup: managedRequest.close,
-    managedRequest,
-    status: "ready",
-  };
-}
-
-function writeRequestResolution(res: Response, resolution: Exclude<RequestResolution, {
-  cleanup?: () => Promise<void>;
-  managedRequest: ManagedRequest;
-  status: "ready";
-}>) {
-  switch (resolution.status) {
-    case "invalid-session-header":
-      writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single value");
-      return;
-  }
-}
-
-async function closeNodeServer(server: NodeHttpServer) {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        if ((error as NodeJS.ErrnoException).code === "ERR_SERVER_NOT_RUNNING") {
-          resolve();
-          return;
-        }
-
-        reject(error);
-        return;
-      }
-
-      resolve();
-    });
-  });
-}
-
-function allowsOpaqueNullOrigin(req: Pick<Request, "method" | "path" | "url">, authMode: RuntimeAuthConfig["mode"]) {
-  return authMode === "oauth" &&
-    req.method === "POST" &&
-    getRequestPath(req) === "/authorize/consent";
-}
-
 export async function startHttpServer(options: HttpServerOptions): Promise<StartedHttpServer> {
   const allowedHosts = options.allowedHosts ?? [];
   const auth = options.auth ?? { deployment: "authless", mode: "none" };
@@ -441,13 +45,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const host = options.host ?? "127.0.0.1";
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
+  const sessionIdleTimeoutMs = options.sessionIdleTimeoutMs ?? 5 * 60_000;
   const ynab = assertYnabConfig(options.ynab);
 
   if (auth.mode === "oauth") {
     allowedOrigins.add(new URL(auth.publicUrl).origin);
-  }
-
-  if (auth.mode === "oauth") {
     validateCloudflareAccessOAuthSettings({
       authorizationUrl: auth.authorizationUrl,
       issuer: auth.issuer,
@@ -464,191 +66,176 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const app = express();
   const jsonParser = express.json();
   const urlencodedParser = express.urlencoded({ extended: false });
+  const managedSessions = new Map<string, StatefulSessionEntry>();
 
-  function getRequestAuthDebugOptions(req: Pick<Request, "path" | "url">) {
+  async function createManagedRequest(
+    config: YnabConfig,
+    requestOptions: {
+      onSessionClosed?: ((sessionId: string) => void | Promise<void>) | undefined;
+      onSessionInitialized?: ((sessionId: string, managedRequest: ManagedRequest) => void | Promise<void>) | undefined;
+      onTransportClosed?: ((managedRequest: ManagedRequest) => void | Promise<void>) | undefined;
+      stateful?: boolean | undefined;
+    } = {},
+  ) {
+    const mcpServer = createServer(config);
+    const transportOptions: ConstructorParameters<typeof StreamableHTTPServerTransport>[0] = {
+      enableJsonResponse: true,
+    };
+
+    if (requestOptions.stateful) {
+      transportOptions.onsessioninitialized = async (sessionId) => {
+        await requestOptions.onSessionInitialized?.(sessionId, managedRequest);
+      };
+      transportOptions.sessionIdGenerator = () => randomUUID();
+
+      if (requestOptions.onSessionClosed) {
+        transportOptions.onsessionclosed = requestOptions.onSessionClosed;
+      }
+    }
+
+    const nodeTransport = new StreamableHTTPServerTransport(transportOptions);
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore The MCP SDK transport implementation matches the runtime contract,
+    // but exactOptionalPropertyTypes rejects its optional callback fields.
+    await mcpServer.connect(nodeTransport);
+
+    let closed = false;
+    const managedRequest = {
+      transport: nodeTransport,
+      close: async () => {
+        if (closed) {
+          return;
+        }
+
+        closed = true;
+        await nodeTransport.close();
+        await mcpServer.close();
+      },
+    } satisfies ManagedRequest;
+
+    nodeTransport.onclose = () => {
+      void requestOptions.onTransportClosed?.(managedRequest);
+
+      if (!closed) {
+        closed = true;
+        void mcpServer.close();
+      }
+    };
+
+    return managedRequest;
+  }
+
+  function clearSessionIdleTimeout(entry: StatefulSessionEntry) {
+    if (entry.idleTimeout) {
+      clearTimeout(entry.idleTimeout);
+      entry.idleTimeout = undefined;
+    }
+  }
+
+  function removeManagedSession(sessionId: string) {
+    const entry = managedSessions.get(sessionId);
+
+    if (!entry) {
+      return undefined;
+    }
+
+    clearSessionIdleTimeout(entry);
+    managedSessions.delete(sessionId);
+    return entry;
+  }
+
+  async function closeManagedSession(sessionId: string) {
+    const entry = removeManagedSession(sessionId);
+
+    if (!entry) {
+      return;
+    }
+
+    await entry.managedRequest.close();
+  }
+
+  function touchManagedSession(sessionId: string) {
+    const entry = managedSessions.get(sessionId);
+
+    if (!entry) {
+      return;
+    }
+
+    clearSessionIdleTimeout(entry);
+
+    if (sessionIdleTimeoutMs <= 0) {
+      return;
+    }
+
+    entry.idleTimeout = setTimeout(() => {
+      void closeManagedSession(sessionId);
+    }, sessionIdleTimeoutMs);
+    entry.idleTimeout.unref?.();
+  }
+
+  function getRequestAuthDebugOptions(req: Pick<express.Request, "path" | "url">) {
     const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
 
-    return {
-      authMode: auth.mode,
-      authRequired: isProtectedMcpRequest || undefined,
-    };
+    return isProtectedMcpRequest
+      ? { authMode: auth.mode, authRequired: true }
+      : { authMode: auth.mode };
   }
 
-  app.disable("x-powered-by");
-  app.set("trust proxy", 1);
-
-  app.use((req, res, next) => {
-    const requestContext = createRequestContext(req.headers as Record<string, string | string[] | undefined>);
-
-    runWithRequestContext(requestContext, () => {
-      res.setHeader(getCorrelationHeaderName(), requestContext.correlationId);
-      next();
-    });
+  registerHttpServerIngress({
+    allowedHosts,
+    allowedOrigins,
+    app,
+    auth,
+    cloudflareCompatibilityMiddleware,
+    getRequestAuthDebugOptions,
+    host,
+    mcpAuthModule,
+    path,
+    jsonParser,
+    urlencodedParser,
   });
 
-  app.use((req, _res, next) => {
-    logHttpDebug("request.received", getRequestDebugDetails(req, getRequestAuthDebugOptions(req)));
-    next();
-  });
-
-  app.use((req, res, next) => {
-    if (auth.mode === "oauth" && getRequestPath(req) === "/token" && req.method === "POST") {
-      urlencodedParser(req, res, next);
-      return;
-    }
-
-    next();
-  });
-
-  app.use((req, res, next) => {
-    const tokenClientId = auth.mode === "oauth" &&
-      getRequestPath(req) === "/token" &&
-      req.method === "POST"
-      ? getBodyStringValue(req.body as unknown, "client_id")
-      : undefined;
-    const persistedProfileId = auth.mode === "oauth" && tokenClientId
-      ? mcpAuthModule?.getClientCompatibilityProfile(tokenClientId)
-      : undefined;
-    const requestProfile = detectClientProfile(toClientProfileRequestContext(req));
-    const detectedProfile = persistedProfileId && requestProfile.profileId === "generic"
-      ? {
-          profileId: persistedProfileId,
-          reason: getPersistedOAuthProfileReason(persistedProfileId),
-        }
-      : requestProfile;
-
-    setResolvedClientProfile(res.locals as Record<string, unknown>, detectedProfile);
-    logClientProfileEvent("profile.detected", {
-      method: req.method ?? "GET",
-      path: getRequestPath(req),
-      profileId: detectedProfile.profileId,
-      reason: detectedProfile.reason,
-    });
-
-    next();
-  });
-
-  if (allowedHosts.length > 0) {
-    app.use(hostHeaderValidation(allowedHosts));
-  } else if (isLoopbackHostname(host)) {
-    app.use(localhostHostValidation());
-  }
-
-  app.use((req, res, next) => {
-    const resolution = resolveOriginPolicy({
-      allowOpaqueNullOrigin: allowsOpaqueNullOrigin(req, auth.mode),
-      allowedOrigins,
-      headers: req.headers,
-    });
-
-    if (!resolution.allowed) {
-      logHttpDebug("request.rejected", {
-        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-        reason: "forbidden-origin",
-      });
-      writeForbiddenOrigin(res);
-      return;
-    }
-
-    applyCorsHeaders(res, resolution.responseOrigin);
-
-    if (resolution.responseOrigin) {
-      installCorsGuard(res, resolution.responseOrigin);
-    }
-
-    next();
-  });
-
-  if (auth.mode === "oauth") {
-    installOAuthRoutes({
+  if (auth.mode === "oauth" && mcpAuthModule) {
+    registerOAuthHttpRoutes({
       app,
       auth,
-      cloudflareCompatibilityMiddleware: cloudflareCompatibilityMiddleware!,
-      getCanonicalOAuthDiscoveryPath,
-      getPersistedOAuthProfileReason,
       getRequestAuthDebugOptions,
-      getRequestDebugDetails,
-      getRequestPath,
-      isDirectUpstreamBearerToken,
-      jsonParser,
-      logHttpDebug,
-      mcpAuthModule: mcpAuthModule!,
+      mcpAuthModule,
       path,
     });
   }
 
-  app.use((req, res, next) => {
-    if (req.method === "OPTIONS") {
-      logHttpDebug("request.preflight", getRequestDebugDetails(req));
-      res.status(204).end();
-      return;
-    }
-
-    next();
-  });
-
-  app.use((req, res, next) => {
-    if (auth.mode !== "oauth" && getRequestPath(req) === path && req.method === "POST") {
-      jsonParser(req, res, next);
-      return;
-    }
-
-    next();
-  });
-
-  installMcpPostRoute({
+  registerMcpTransportRoutes({
     app,
-    createManagedRequest: () => createManagedRequest(ynab),
-    getInitializeParams,
-    getJsonRpcDebugDetails,
+    createStatefulRequest: async (config, sessions) => createManagedRequest(config, {
+      onSessionClosed: async (sessionId) => {
+        removeManagedSession(sessionId);
+      },
+      onSessionInitialized: async (sessionId, managedRequest) => {
+        sessions.set(sessionId, {
+          idleTimeout: undefined,
+          managedRequest,
+        });
+        touchManagedSession(sessionId);
+      },
+      onTransportClosed: (managedRequest) => {
+        const sessionId = managedRequest.transport.sessionId;
+
+        if (!sessionId) {
+          return;
+        }
+
+        removeManagedSession(sessionId);
+      },
+      stateful: true,
+    }),
+    createStatelessRequest: async (config) => createManagedRequest(config),
     getRequestAuthDebugOptions,
-    getRequestDebugDetails,
-    getRequestPath,
-    getToolCallName,
-    logHttpDebug,
+    managedSessions,
     path,
-    resolveRequest,
-    writeMethodNotAllowed,
-    writeRequestResolution,
+    touchManagedSession,
+    ynab,
   });
-
-  app.use((req, res) => {
-    logHttpDebug("request.rejected", {
-      ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-      reason: "path-not-found",
-    });
-    writeNotFound(res);
-  });
-
-  const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
-    const requestError: unknown = error;
-
-    if (res.headersSent) {
-      next(error);
-      return;
-    }
-
-    if (isJsonParseError(error)) {
-      logHttpDebug("request.parse_error", getRequestDebugDetails(req));
-      writeParseError(res);
-      return;
-    }
-
-    if (isPayloadTooLargeError(error)) {
-      logHttpDebug("request.payload_too_large", getRequestDebugDetails(req));
-      writePayloadTooLarge(res);
-      return;
-    }
-
-    logAppEvent("http", "request.error", {
-      ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-      error: requestError,
-    });
-
-    writeInternalServerError(res);
-  };
-
-  app.use(errorHandler);
 
   const server = app.listen(port, host);
 
@@ -666,7 +253,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     throw new Error("HTTP server did not expose a TCP address");
   }
 
-  const resolvedAddress = address as AddressInfo;
+  const resolvedAddress: AddressInfo = address;
   let closed = false;
 
   return {
@@ -680,6 +267,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
       }
 
       closed = true;
+      await Promise.all(Array.from(managedSessions.keys(), async (sessionId) => {
+        await closeManagedSession(sessionId);
+      }));
       await closeNodeServer(server);
     },
   };

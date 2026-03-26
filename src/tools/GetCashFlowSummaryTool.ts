@@ -12,7 +12,7 @@ import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.j
 
 export const name = "ynab_get_cash_flow_summary";
 export const description =
-  "Returns a compact cash flow summary with inflow, outflow, net flow, and monthly assigned versus spent trends.";
+  "Returns a compact cash flow summary with inflow, outflow, and net cash flow. `net_flow` is cash movement, not savings, and `assigned_vs_spent` reflects budget timing and buffering, not a discipline score.";
 export const inputSchema = {
   planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
   fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe(
@@ -22,7 +22,6 @@ export const inputSchema = {
     "The last month in ISO format. Defaults to fromMonth.",
   ),
 };
-
 function toMonthKey(date: string) {
   return `${date.slice(0, 7)}-01`;
 }

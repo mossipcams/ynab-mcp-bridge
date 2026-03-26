@@ -1,52 +1,40 @@
-import type { Express, Request, RequestHandler } from "express";
+import type { RequestHandler, Router } from "express";
+import type express from "express";
 
-import type { ClientProfileId, DetectedClientProfile } from "./clientProfiles/types.js";
+import type { RuntimeAuthConfig } from "./config.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
-import { createMcpAuthModule } from "./mcpAuthServer.js";
-import type { RuntimeAuthConfig } from "./config.js";
+import type { ClientProfileId } from "./clientProfiles/types.js";
+import {
+  getCanonicalOAuthDiscoveryPath,
+  getPersistedOAuthProfileReason,
+  getRequestDebugDetails,
+  getRequestPath,
+  isDirectUpstreamBearerToken,
+  logHttpDebug,
+} from "./httpServerShared.js";
 
-type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
-type AuthDebugOptions = {
-  authMode?: RuntimeAuthConfig["mode"];
-  authRequired?: boolean;
+type OAuthMcpAuthModule = {
+  authMiddleware: RequestHandler;
+  getClientCompatibilityProfile: (clientId: string) => ClientProfileId | undefined;
+  protectedResourceMetadata: unknown;
+  router: Router;
 };
 
-type InstallOAuthRoutesOptions = {
-  app: Express;
-  auth: OAuthAuthConfig;
-  cloudflareCompatibilityMiddleware: RequestHandler;
-  getCanonicalOAuthDiscoveryPath: (pathname: string, profileId: ClientProfileId) => string | undefined;
-  getPersistedOAuthProfileReason: (profileId: ClientProfileId) => string;
-  getRequestAuthDebugOptions: (req: Pick<Request, "path" | "url">) => AuthDebugOptions;
-  getRequestDebugDetails: (req: Request, options?: AuthDebugOptions) => Record<string, unknown>;
-  getRequestPath: (req: Pick<Request, "path" | "url">) => string;
-  isDirectUpstreamBearerToken: (req: Pick<Request, "headers">, auth: OAuthAuthConfig) => boolean;
-  jsonParser: RequestHandler;
-  logHttpDebug: (event: string, details: Record<string, unknown>) => void;
-  mcpAuthModule: ReturnType<typeof createMcpAuthModule>;
+export function registerOAuthHttpRoutes(options: {
+  app: express.Express;
+  auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>;
+  getRequestAuthDebugOptions: (req: Parameters<typeof getRequestDebugDetails>[0]) => {
+    authMode?: RuntimeAuthConfig["mode"] | undefined;
+    authRequired?: boolean | undefined;
+  };
+  mcpAuthModule: OAuthMcpAuthModule;
   path: string;
-};
-
-export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
-  const {
-    app,
-    auth,
-    cloudflareCompatibilityMiddleware,
-    getCanonicalOAuthDiscoveryPath,
-    getPersistedOAuthProfileReason,
-    getRequestAuthDebugOptions,
-    getRequestDebugDetails,
-    getRequestPath,
-    isDirectUpstreamBearerToken,
-    jsonParser,
-    logHttpDebug,
-    mcpAuthModule,
-    path,
-  } = options;
+}) {
+  const { app, auth, getRequestAuthDebugOptions, mcpAuthModule, path } = options;
 
   app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
-    const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+    const resolvedProfile = getResolvedClientProfile(res.locals);
 
     if (resolvedProfile?.profileId !== "chatgpt") {
       next();
@@ -57,7 +45,7 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
   });
 
   app.use((req, res, next) => {
-    const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+    const resolvedProfile = getResolvedClientProfile(res.locals);
     const canonicalPath = getCanonicalOAuthDiscoveryPath(
       getRequestPath(req),
       resolvedProfile?.profileId ?? "generic",
@@ -73,23 +61,7 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
   app.use(mcpAuthModule.router);
 
   app.use((req, res, next) => {
-    if (getRequestPath(req) === path && req.method === "POST") {
-      cloudflareCompatibilityMiddleware(req, res, (error?: unknown) => {
-        if (error) {
-          next(error);
-          return;
-        }
-
-        jsonParser(req, res, next);
-      });
-      return;
-    }
-
-    next();
-  });
-
-  app.use((req, res, next) => {
-    if (getRequestPath(req) !== path || req.method !== "POST") {
+    if (getRequestPath(req) !== path || (req.method !== "POST" && req.method !== "DELETE")) {
       next();
       return;
     }
@@ -125,17 +97,17 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
       return;
     }
 
-    const persistedProfile: DetectedClientProfile = {
+    const persistedProfile = {
       profileId: persistedProfileId,
       reason: getPersistedOAuthProfileReason(persistedProfileId),
     };
-    const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+    const resolvedProfile = getResolvedClientProfile(res.locals);
 
     if (
       resolvedProfile?.profileId !== persistedProfile.profileId ||
       resolvedProfile.reason !== persistedProfile.reason
     ) {
-      setResolvedClientProfile(res.locals as Record<string, unknown>, persistedProfile);
+      setResolvedClientProfile(res.locals, persistedProfile);
       logClientProfileEvent("profile.detected", {
         method: req.method ?? "GET",
         path: getRequestPath(req),

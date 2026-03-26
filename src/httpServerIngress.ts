@@ -22,6 +22,7 @@ import {
   writeForbiddenOrigin,
 } from "./httpServerShared.js";
 import { applyCorsHeaders, installCorsGuard, resolveOriginPolicy } from "./originPolicy.js";
+import { createRequestContext, getCorrelationHeaderName, runWithRequestContext } from "./requestContext.js";
 
 type McpAuthModuleLike = {
   getClientCompatibilityProfile: (clientId: string) => ClientProfileId | undefined;
@@ -60,6 +61,15 @@ export function registerHttpServerIngress(options: {
 
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
+
+  app.use((req, res, next) => {
+    const requestContext = createRequestContext(req.headers as Record<string, string | string[] | undefined>);
+
+    runWithRequestContext(requestContext, () => {
+      res.setHeader(getCorrelationHeaderName(), requestContext.correlationId);
+      next();
+    });
+  });
 
   app.use((req, _res, next) => {
     logHttpDebug("request.received", getRequestDebugDetails(req, getRequestAuthDebugOptions(req)));

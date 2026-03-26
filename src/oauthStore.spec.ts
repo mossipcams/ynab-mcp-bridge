@@ -172,17 +172,12 @@ describe("oauth store", () => {
     });
 
     const persistedState = JSON.parse(await readFile(storePath, "utf8")) as {
-      grants: Record<string, { upstreamTokens?: Record<string, unknown> }>;
+      grants: Record<string, unknown>;
       version: number;
     };
 
     expect(persistedState.version).toBe(2);
     expect(Object.keys(persistedState.grants)).toEqual(["grant-1"]);
-    expect(persistedState.grants["grant-1"]?.upstreamTokens).toMatchObject({
-      refresh_token: "upstream-refresh-token",
-      token_type: "Bearer",
-    });
-    expect(persistedState.grants["grant-1"]?.upstreamTokens).not.toHaveProperty("access_token");
   });
 
   it("normalizes legacy subject fields into a grant principal identity", async () => {
@@ -217,7 +212,7 @@ describe("oauth store", () => {
     expect(store.getGrant("grant-1")).not.toHaveProperty("subject");
   });
 
-  it("drops legacy OAuth state on load and falls back to a clean re-auth path", async () => {
+  it("migrates legacy OAuth state into the grant model on load", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
     const storePath = path.join(tempDir, "oauth-store.json");
     cleanups.push(async () => {
@@ -296,34 +291,33 @@ describe("oauth store", () => {
 
     const store = createOAuthStore(storePath);
 
-    expect(store.getPendingConsentGrant("consent-1")).toBeUndefined();
-    expect(store.getPendingAuthorizationGrant("state-1")).toBeUndefined();
-    expect(store.getAuthorizationCodeGrant("code-1")).toBeUndefined();
-    expect(store.getRefreshTokenGrant("refresh-1")).toBeUndefined();
-
-    store.saveGrant({
-      grantId: "grant-1",
+    expect(store.getPendingConsentGrant("consent-1")).toMatchObject({
       clientId: "client-1",
-      codeChallenge: "challenge",
-      redirectUri: "https://claude.ai/oauth/callback",
-      resource: "https://mcp.example.com/mcp",
-      scopes: ["openid", "profile"],
       consent: {
-        challenge: "consent-2",
-        expiresAt: Date.now() + 60_000,
+        challenge: "consent-1",
       },
     });
-
-    expect(store.getPendingConsentGrant("consent-2")).toMatchObject({
+    expect(store.getPendingAuthorizationGrant("state-1")).toMatchObject({
       clientId: "client-1",
-      consent: {
-        challenge: "consent-2",
+      pendingAuthorization: {
+        stateId: "state-1",
+      },
+    });
+    expect(store.getAuthorizationCodeGrant("code-1")).toMatchObject({
+      clientId: "client-1",
+      authorizationCode: {
+        code: "code-1",
+      },
+    });
+    expect(store.getRefreshTokenGrant("refresh-1")).toMatchObject({
+      clientId: "client-1",
+      refreshToken: {
+        token: "refresh-1",
       },
     });
 
     const persistedState = JSON.parse(await readFile(storePath, "utf8")) as {
       authorizationCodes?: unknown;
-      clients?: Record<string, unknown>;
       grants: Record<string, unknown>;
       pendingAuthorizations?: unknown;
       pendingConsents?: unknown;
@@ -336,70 +330,7 @@ describe("oauth store", () => {
     expect(persistedState.pendingAuthorizations).toBeUndefined();
     expect(persistedState.authorizationCodes).toBeUndefined();
     expect(persistedState.refreshTokens).toBeUndefined();
-    expect(persistedState.clients).toEqual({});
-    expect(Object.keys(persistedState.grants)).toEqual(["grant-1"]);
-  });
-
-  it("persists compatibility profiles for oauth clients and grants across reload", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
-    const storePath = path.join(tempDir, "oauth-store.json");
-    cleanups.push(async () => {
-      await rm(tempDir, { force: true, recursive: true });
-    });
-
-    const store = createOAuthStore(storePath);
-    store.saveClient({
-      client_id: "client-1",
-      client_id_issued_at: 1_700_000_000,
-      client_name: "ChatGPT Web",
-      grant_types: ["authorization_code", "refresh_token"],
-      redirect_uris: ["https://chatgpt.com/oauth/callback"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-    });
-    store.saveClientCompatibilityProfile("client-1", "chatgpt");
-
-    const grant: OAuthGrant & { compatibilityProfileId: "chatgpt" } = {
-      authorizationCode: {
-        code: "code-1",
-        expiresAt: Date.now() + 60_000,
-      },
-      clientId: "client-1",
-      codeChallenge: "challenge",
-      compatibilityProfileId: "chatgpt",
-      grantId: "grant-1",
-      principalId: "client-1",
-      redirectUri: "https://chatgpt.com/oauth/callback",
-      resource: "https://mcp.example.com/mcp",
-      scopes: ["openid", "profile"],
-      upstreamTokens: {
-        access_token: "upstream-token",
-        refresh_token: "upstream-refresh-token",
-        token_type: "Bearer",
-      },
-    };
-
-    store.saveGrant(grant);
-
-    const reloadedStore = createOAuthStore(storePath);
-
-    expect(reloadedStore.getClientCompatibilityProfile("client-1")).toBe("chatgpt");
-    expect(reloadedStore.getGrant("grant-1")).toMatchObject({
-      compatibilityProfileId: "chatgpt",
-    });
-    expect(reloadedStore.getAuthorizationCodeGrant("code-1")).toMatchObject({
-      compatibilityProfileId: "chatgpt",
-    });
-
-    const persistedState = JSON.parse(await readFile(storePath, "utf8")) as {
-      clientProfiles?: Record<string, unknown>;
-      grants: Record<string, { compatibilityProfileId?: unknown }>;
-    };
-
-    expect(persistedState.clientProfiles).toEqual({
-      "client-1": "chatgpt",
-    });
-    expect(persistedState.grants["grant-1"]?.compatibilityProfileId).toBe("chatgpt");
+    expect(Object.keys(persistedState.grants)).toHaveLength(4);
   });
 
   it("persists compatibility profiles for oauth clients and grants across reload", async () => {
