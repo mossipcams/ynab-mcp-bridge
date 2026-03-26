@@ -472,7 +472,7 @@ Close the remaining Task 12 blockers, get the modular-monolith branch to a clean
   Run `npx vitest run`, `npm run build`, and grep for retired shim imports.
   Then inspect `git diff --stat` and draft the PR summary/title from the verified changes.
 
-- [ ] Task 6: Create the PR
+- [x] Task 6: Create the PR
   Test to write:
   No new tests. This is a Git/GitHub workflow step.
   Code to implement:
@@ -491,3 +491,4 @@ Close the remaining Task 12 blockers, get the modular-monolith branch to a clean
   - All 44 Vitest files passed.
   - Build and typecheck both passed with the updated TypeScript invocation and narrower compile-time surface in the extracted runtime modules.
   - No retired shim imports remain outside `dist/`.
+  - PR created: `https://github.com/mossipcams/ynab-mcp-bridge/pull/167`
