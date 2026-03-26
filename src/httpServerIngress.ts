@@ -63,7 +63,7 @@ export function registerHttpServerIngress(options: {
   app.set("trust proxy", 1);
 
   app.use((req, res, next) => {
-    const requestContext = createRequestContext(req.headers as Record<string, string | string[] | undefined>);
+    const requestContext = createRequestContext(req.headers);
 
     runWithRequestContext(requestContext, () => {
       res.setHeader(getCorrelationHeaderName(), requestContext.correlationId);

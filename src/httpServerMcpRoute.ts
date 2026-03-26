@@ -1,12 +1,6 @@
 import type { Express, Request, Response } from "express";
-
-import {
-  detectInitializeClientProfile,
-  reconcileClientProfile,
-} from "./clientProfiles/detectClient.js";
-import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
-import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import { hasToolCallStarted } from "./requestContext.js";
+import { reconcileResolvedProfile } from "./httpServerShared.js";
 
 type ManagedRequest = {
   close: () => Promise<void>;
@@ -28,7 +22,6 @@ type RequestResolution =
 type InstallMcpPostRouteOptions = {
   app: Express;
   createManagedRequest: () => Promise<ManagedRequest>;
-  getInitializeParams: (parsedBody: unknown) => { capabilities?: unknown; clientInfo?: unknown } | undefined;
   getJsonRpcDebugDetails: (parsedBody: unknown) => Record<string, unknown>;
   getRequestAuthDebugOptions: (req: Pick<Request, "path" | "url">) => { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean };
   getRequestDebugDetails: (req: Request, options?: { authMode?: string; authRequired?: boolean }) => Record<string, unknown>;
@@ -47,7 +40,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
   const {
     app,
     createManagedRequest,
-    getInitializeParams,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
     getRequestDebugDetails,
@@ -105,38 +97,7 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
         void cleanup();
       });
 
-      const provisionalProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
-      const initializeParams = getInitializeParams(parsedBody);
-
-      if (provisionalProfile && initializeParams) {
-        const confirmedProfile = detectInitializeClientProfile({
-          capabilities: initializeParams.capabilities,
-          clientInfo: initializeParams.clientInfo,
-        });
-        const reconciliation = reconcileClientProfile(provisionalProfile, confirmedProfile);
-
-        setResolvedClientProfile(res.locals as Record<string, unknown>, reconciliation.profile);
-
-        if (!reconciliation.mismatch && confirmedProfile) {
-          logClientProfileEvent("profile.detected", {
-            method: req.method ?? "GET",
-            path: getRequestPath(req),
-            profileId: confirmedProfile.profileId,
-            reason: confirmedProfile.reason,
-          });
-        } else if (reconciliation.mismatch && confirmedProfile) {
-          logClientProfileEvent("profile.reconciled", {
-            confirmedProfileId: confirmedProfile.profileId,
-            method: req.method ?? "GET",
-            path: getRequestPath(req),
-            profileId: reconciliation.profile.profileId,
-            provisionalProfileId: provisionalProfile.profileId,
-            reason: reconciliation.profile.reason,
-          });
-        }
-      }
-
-      const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+      const resolvedProfile = reconcileResolvedProfile(req, res.locals, parsedBody);
 
       logHttpDebug("transport.handoff", {
         ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),

@@ -23,23 +23,18 @@ import {
   writePayloadTooLarge,
   writeRequestResolution,
 } from "./httpServerShared.js";
+import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 
 function getToolCallName(parsedBody: unknown) {
-  if (!parsedBody || typeof parsedBody !== "object") {
+  if (!isRecord(parsedBody)) {
     return undefined;
   }
 
-  const request = parsedBody as {
-    method?: unknown;
-    params?: unknown;
-  };
-
-  if (request.method !== "tools/call" || !request.params || typeof request.params !== "object") {
+  if (getStringValue(parsedBody, "method") !== "tools/call") {
     return undefined;
   }
 
-  const name = (request.params as { name?: unknown }).name;
-  return typeof name === "string" ? name : undefined;
+  return getStringValue(getRecordValueIfObject(parsedBody, "params") ?? {}, "name");
 }
 
 export function registerMcpTransportRoutes(options: {

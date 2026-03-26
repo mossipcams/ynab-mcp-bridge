@@ -1,7 +1,6 @@
 import { resolveRuntimeConfig, type RuntimeConfig } from "./runtimeConfig.js";
 import {
   assertBackendEnvironment,
-  assertYnabConfig,
   readYnabConfig,
   type YnabConfig,
 } from "./ynabConfig.js";

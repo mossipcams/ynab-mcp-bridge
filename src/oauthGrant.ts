@@ -2,38 +2,42 @@ import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import type { ClientProfileId } from "./clientProfiles/types.js";
 
+export type OAuthGrantUpstreamTokens = Omit<OAuthTokens, "access_token"> & {
+  access_token?: string;
+};
+
 export type OAuthGrant = {
   authorizationCode?: {
     code: string;
     expiresAt: number;
-  };
+  } | undefined;
   clientId: string;
-  clientName?: string;
-  compatibilityProfileId?: ClientProfileId;
+  clientName?: string | undefined;
+  compatibilityProfileId?: ClientProfileId | undefined;
   codeChallenge: string;
   consent?: {
     challenge: string;
     expiresAt: number;
-  };
+  } | undefined;
   grantId: string;
   pendingAuthorization?: {
     expiresAt: number;
     stateId: string;
-  };
+  } | undefined;
   redirectUri: string;
   refreshToken?: {
     expiresAt: number;
     token: string;
-  };
+  } | undefined;
   resource: string;
   scopes: string[];
-  state?: string;
-  principalId?: string;
-  upstreamTokens?: OAuthTokens;
+  state?: string | undefined;
+  principalId?: string | undefined;
+  upstreamTokens?: OAuthGrantUpstreamTokens | undefined;
 };
 
 export type OAuthGrantInput = OAuthGrant & {
-  subject?: string;
+  subject?: string | undefined;
 };
 
 export function normalizeScopes(scopes: string[]) {

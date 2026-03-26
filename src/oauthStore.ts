@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/consistent-type-assertions --
+   Legacy OAuth store compatibility parsing still relies on structural casts while
+   preserving support for older persisted payload shapes. */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
-import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
-
 import type { ClientProfileId } from "./clientProfiles/types.js";
 import {
   getGrantExpiry,
@@ -12,6 +13,7 @@ import {
   normalizeScopes,
   type OAuthGrant,
   type OAuthGrantInput,
+  type OAuthGrantUpstreamTokens,
 } from "./oauthGrant.js";
 
 type ApprovalRecord = {
@@ -22,20 +24,20 @@ type ApprovalRecord = {
 
 type PendingConsentRecord = {
   clientId: string;
-  clientName?: string;
+  clientName?: string | undefined;
   codeChallenge: string;
   expiresAt: number;
   redirectUri: string;
   resource: string;
   scopes: string[];
-  state?: string;
+  state?: string | undefined;
 };
 
 type PendingAuthorizationRecord = Omit<PendingConsentRecord, "clientName">;
 
 type AuthorizationCodeRecord = PendingAuthorizationRecord & {
   principalId: string;
-  upstreamTokens: OAuthTokens;
+  upstreamTokens: OAuthGrantUpstreamTokens;
 };
 
 type RefreshTokenRecord = {
@@ -44,7 +46,7 @@ type RefreshTokenRecord = {
   principalId: string;
   resource: string;
   scopes: string[];
-  upstreamTokens: OAuthTokens;
+  upstreamTokens: OAuthGrantUpstreamTokens;
 };
 
 type LegacyPersistedOAuthState = {
@@ -74,9 +76,9 @@ function isApprovalRecord(value: unknown): value is ApprovalRecord {
     return false;
   }
 
-  return typeof value.clientId === "string" &&
-    typeof value.resource === "string" &&
-    Array.isArray(value.scopes);
+  return typeof value["clientId"] === "string" &&
+    typeof value["resource"] === "string" &&
+    Array.isArray(value["scopes"]);
 }
 
 function normalizeApprovalRecord(record: ApprovalRecord) {
@@ -191,6 +193,7 @@ function parseGrants(value: unknown) {
   );
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- legacy persisted formats are intentionally normalized in one place
 function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthState {
   const grants: Record<string, OAuthGrant> = {};
 
@@ -287,7 +290,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
           scopes: authorizationCode.scopes,
           state: authorizationCode.state,
           principalId: authorizationCode.principalId ?? authorizationCode.subject,
-          upstreamTokens: authorizationCode.upstreamTokens as OAuthTokens,
+          upstreamTokens: authorizationCode.upstreamTokens,
         });
       }
     }
@@ -320,7 +323,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
           resource: refreshToken.resource,
           scopes: refreshToken.scopes,
           principalId: refreshToken.principalId ?? refreshToken.subject,
-          upstreamTokens: refreshToken.upstreamTokens as OAuthTokens,
+          upstreamTokens: refreshToken.upstreamTokens,
         });
       }
     }
@@ -392,13 +395,13 @@ function toPendingConsentRecord(grant: OAuthGrant): PendingConsentRecord | undef
 
   return {
     clientId: grant.clientId,
-    clientName: grant.clientName,
+    ...(grant.clientName ? { clientName: grant.clientName } : {}),
     codeChallenge: grant.codeChallenge,
     expiresAt: grant.consent.expiresAt,
     redirectUri: grant.redirectUri,
     resource: grant.resource,
     scopes: grant.scopes,
-    state: grant.state,
+    ...(grant.state ? { state: grant.state } : {}),
   };
 }
 
@@ -414,7 +417,7 @@ function toPendingAuthorizationRecord(grant: OAuthGrant): PendingAuthorizationRe
     redirectUri: grant.redirectUri,
     resource: grant.resource,
     scopes: grant.scopes,
-    state: grant.state,
+    ...(grant.state ? { state: grant.state } : {}),
   };
 }
 
@@ -430,7 +433,7 @@ function toAuthorizationCodeRecord(grant: OAuthGrant): AuthorizationCodeRecord |
     redirectUri: grant.redirectUri,
     resource: grant.resource,
     scopes: grant.scopes,
-    state: grant.state,
+    ...(grant.state ? { state: grant.state } : {}),
     principalId: grant.principalId,
     upstreamTokens: grant.upstreamTokens,
   };
@@ -451,7 +454,7 @@ function toRefreshTokenRecord(grant: OAuthGrant): RefreshTokenRecord | undefined
   };
 }
 
-function sanitizePersistedUpstreamTokens(tokens: OAuthTokens | undefined) {
+function sanitizePersistedUpstreamTokens(tokens: OAuthGrantUpstreamTokens | undefined) {
   if (!tokens) {
     return tokens;
   }
@@ -461,17 +464,23 @@ function sanitizePersistedUpstreamTokens(tokens: OAuthTokens | undefined) {
   }
 
   const { access_token: _accessToken, ...persistedTokens } = tokens;
-  return persistedTokens as OAuthTokens;
+  return persistedTokens;
+}
+
+function createPersistedGrantSnapshot(grant: OAuthGrant): OAuthGrant {
+  const persistedUpstreamTokens = sanitizePersistedUpstreamTokens(grant.upstreamTokens);
+
+  return {
+    ...grant,
+    ...(persistedUpstreamTokens ? { upstreamTokens: persistedUpstreamTokens } : {}),
+  };
 }
 
 function createPersistedStateSnapshot(state: PersistedOAuthState): PersistedOAuthState {
   return {
     ...state,
     grants: Object.fromEntries(
-      Object.entries(state.grants).map(([grantId, grant]) => [grantId, {
-        ...grant,
-        upstreamTokens: sanitizePersistedUpstreamTokens(grant.upstreamTokens),
-      } satisfies OAuthGrant]),
+      Object.entries(state.grants).map(([grantId, grant]) => [grantId, createPersistedGrantSnapshot(grant)]),
     ),
   };
 }

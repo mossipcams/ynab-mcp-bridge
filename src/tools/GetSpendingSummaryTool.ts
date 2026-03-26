@@ -33,9 +33,9 @@ function buildCategoryGroupLookup(categoryGroups: ynab.CategoryGroupWithCategori
 }
 
 function addRollup(
-  bucket: Map<string, { id?: string; name: string; amountMilliunits: number; transactionCount: number }>,
+  bucket: Map<string, { id?: string | undefined; name: string; amountMilliunits: number; transactionCount: number }>,
   key: string,
-  value: { id?: string; name: string; amountMilliunits: number },
+  value: { id?: string | undefined; name: string; amountMilliunits: number },
 ) {
   const current = bucket.get(key);
 

@@ -13,6 +13,7 @@ import { logAppEvent } from "./logger.js";
 import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
 import { getRequestLogFields } from "./requestContext.js";
+import { getStringValue, isRecord } from "./typeUtils.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
@@ -103,12 +104,48 @@ function getTokenResponseDebugDetails(tokens: OAuthTokens) {
   };
 }
 function getBodyStringValue(body: unknown, key: string) {
-  if (!body || typeof body !== "object") {
+  if (!isRecord(body)) {
     return undefined;
   }
 
-  const value = (body as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : undefined;
+  return getStringValue(body, key);
+}
+
+function getQueryStringValue(query: unknown, key: string) {
+  if (!isRecord(query)) {
+    return undefined;
+  }
+
+  return getStringValue(query, key);
+}
+
+function getCallbackRequestDetails(query: unknown) {
+  const upstreamState = getQueryStringValue(query, "state");
+  const upstreamError = getQueryStringValue(query, "error");
+  const upstreamErrorDescription = getQueryStringValue(query, "error_description");
+  const code = getQueryStringValue(query, "code");
+
+  return {
+    code,
+    upstreamError,
+    upstreamErrorDescription,
+    upstreamState,
+  };
+}
+
+async function exchangeAuthorizationCodeWithLogging(args: {
+  authorizationCode: string;
+  client: Parameters<OAuthServerProvider["exchangeAuthorizationCode"]>[0];
+  core: Pick<ReturnType<typeof createOAuthCore>, "exchangeAuthorizationCode">;
+  redirectUri: string | undefined;
+  resource: URL | undefined;
+}) {
+  return await args.core.exchangeAuthorizationCode(
+    args.client,
+    args.authorizationCode,
+    args.redirectUri,
+    args.resource,
+  );
 }
 
 export function createOAuthBroker(config: OAuthAuthConfig): {
@@ -257,9 +294,17 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     async challengeForAuthorizationCode(client, authorizationCode) {
       return await core.getAuthorizationCodeChallenge(client, authorizationCode);
     },
-    async exchangeAuthorizationCode(client, authorizationCode, _codeVerifier, redirectUri, resource) {
+    async exchangeAuthorizationCode(...args) {
+      const [client, authorizationCode, _codeVerifier, redirectUri, resource] = args;
+
       try {
-        const tokens = await core.exchangeAuthorizationCode(client, authorizationCode, redirectUri, resource);
+        const tokens = await exchangeAuthorizationCodeWithLogging({
+          authorizationCode,
+          client,
+          core,
+          redirectUri,
+          resource,
+        });
         logOAuthDebug("token.exchange.succeeded", {
           clientId: client.client_id,
           grantType: "authorization_code",
@@ -312,8 +357,8 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
 
   const handleConsent: RequestHandler = async (req, res, next) => {
     try {
-      const consentChallenge = getBodyStringValue(req.body as unknown, "consent_challenge");
-      const action = getBodyStringValue(req.body as unknown, "action");
+      const consentChallenge = getBodyStringValue(req.body, "consent_challenge");
+      const action = getBodyStringValue(req.body, "action");
       logOAuthDebug("consent.received", {
         action,
         hasConsentChallenge: Boolean(consentChallenge),
@@ -342,12 +387,13 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
 
   const handleCallback: RequestHandler = async (req, res, next) => {
     try {
-      const upstreamState = typeof req.query.state === "string" ? req.query.state : undefined;
-      const upstreamError = typeof req.query.error === "string" ? req.query.error : undefined;
-      const upstreamErrorDescription = typeof req.query.error_description === "string"
-        ? req.query.error_description
-        : undefined;
-      const hasCode = typeof req.query.code === "string" && req.query.code.length > 0;
+      const {
+        code,
+        upstreamError,
+        upstreamErrorDescription,
+        upstreamState,
+      } = getCallbackRequestDetails(req.query);
+      const hasCode = typeof code === "string" && code.length > 0;
       const hasError = typeof upstreamError === "string";
       const hasState = typeof upstreamState === "string" && upstreamState.length > 0;
 
@@ -362,7 +408,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       }
 
       const result = await core.handleCallback({
-        code: typeof req.query.code === "string" && req.query.code.length > 0 ? req.query.code : undefined,
+        code: hasCode ? code : undefined,
         error: upstreamError,
         errorDescription: upstreamErrorDescription,
         upstreamState,

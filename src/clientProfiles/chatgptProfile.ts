@@ -1,5 +1,6 @@
 import { genericProfile } from "./genericProfile.js";
 import { getRequestUserAgent } from "./requestContext.js";
+import { getStringValue, isRecord } from "../typeUtils.js";
 import type { ClientProfile } from "./types.js";
 
 const CHATGPT_DISCOVERY_PATHS = new Set([
@@ -39,8 +40,8 @@ export const chatgptProfile: ClientProfile = {
   },
   matchesPreAuth: (context) => Boolean(chatgptProfile.detectPreAuth?.(context)),
   matchesInitialize: (clientInfo) => {
-    const name = typeof (clientInfo as { name?: unknown } | undefined)?.name === "string"
-      ? (clientInfo as { name: string }).name.toLowerCase()
+    const name = isRecord(clientInfo)
+      ? getStringValue(clientInfo, "name")?.toLowerCase()
       : undefined;
 
     return Boolean(name && (name.includes("chatgpt") || name.includes("openai-mcp")));
