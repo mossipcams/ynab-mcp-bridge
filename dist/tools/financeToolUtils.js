@@ -8,8 +8,126 @@ export function buildAssignedSpentSummary(assignedMilliunits, spentMilliunits) {
         assigned_vs_spent: formatMilliunits(assignedMilliunits - spentMilliunits),
     };
 }
+function sortDescendingByAmount(entries) {
+    return entries
+        .slice()
+        .sort((left, right) => {
+        const difference = right.amountMilliunits - left.amountMilliunits;
+        if (difference !== 0) {
+            return difference;
+        }
+        return left.name.localeCompare(right.name);
+    });
+}
 export function toSpentMilliunits(activityMilliunits) {
-    return Math.abs(activityMilliunits);
+    return activityMilliunits < 0 ? Math.abs(activityMilliunits) : 0;
+}
+export function buildBudgetHealthMonthSummary(monthDetail) {
+    const categories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden);
+    const overspentCategories = sortDescendingByAmount(categories
+        .filter((category) => category.balance < 0)
+        .map((category) => ({
+        id: category.id,
+        name: category.name,
+        categoryGroupName: category.category_group_name,
+        amountMilliunits: Math.abs(category.balance),
+    })));
+    const underfundedCategories = sortDescendingByAmount(categories
+        .filter((category) => (category.goal_under_funded ?? 0) > 0)
+        .map((category) => ({
+        id: category.id,
+        name: category.name,
+        categoryGroupName: category.category_group_name,
+        amountMilliunits: category.goal_under_funded ?? 0,
+    })));
+    return {
+        ready_to_assign: formatMilliunits(monthDetail.to_be_budgeted),
+        available_total: formatMilliunits(categories
+            .filter((category) => category.balance > 0)
+            .reduce((sum, category) => sum + category.balance, 0)),
+        overspent_total: formatMilliunits(overspentCategories.reduce((sum, category) => sum + category.amountMilliunits, 0)),
+        underfunded_total: formatMilliunits(underfundedCategories.reduce((sum, category) => sum + category.amountMilliunits, 0)),
+        ...buildAssignedSpentSummary(monthDetail.budgeted, toSpentMilliunits(monthDetail.activity)),
+        overspent_category_count: overspentCategories.length,
+        underfunded_category_count: underfundedCategories.length,
+        overspent_categories: overspentCategories,
+        underfunded_categories: underfundedCategories,
+    };
+}
+export function isCreditCardPaymentCategoryName(categoryGroupName) {
+    return typeof categoryGroupName === "string"
+        && categoryGroupName.trim().toLowerCase() === "credit card payments";
+}
+export function isReadyToAssignInflowCategory(categoryName) {
+    return categoryName === "Inflow: Ready to Assign";
+}
+export function isTransferTransaction(transaction) {
+    return !!transaction.transfer_account_id;
+}
+function addDays(date, days) {
+    const next = new Date(date.getTime());
+    next.setUTCDate(next.getUTCDate() + days);
+    return next;
+}
+function addMonths(date, months) {
+    const next = new Date(date.getTime());
+    next.setUTCMonth(next.getUTCMonth() + months);
+    return next;
+}
+function toIsoDate(date) {
+    return date.toISOString().slice(0, 10);
+}
+function incrementScheduledDate(date, frequency) {
+    switch (frequency ?? "never") {
+        case "never":
+            return null;
+        case "daily":
+            return addDays(date, 1);
+        case "weekly":
+            return addDays(date, 7);
+        case "everyOtherWeek":
+            return addDays(date, 14);
+        case "twiceAMonth":
+            return addDays(date, 15);
+        case "every4Weeks":
+            return addDays(date, 28);
+        case "monthly":
+            return addMonths(date, 1);
+        case "everyOtherMonth":
+            return addMonths(date, 2);
+        case "every3Months":
+            return addMonths(date, 3);
+        case "every4Months":
+            return addMonths(date, 4);
+        case "twiceAYear":
+            return addMonths(date, 6);
+        case "yearly":
+            return addMonths(date, 12);
+        case "everyOtherYear":
+            return addMonths(date, 24);
+    }
+}
+export function expandScheduledOccurrences(transactions, asOfDate, windowDays) {
+    const windowEnd = addDays(new Date(`${asOfDate}T00:00:00.000Z`), windowDays);
+    return transactions.flatMap((transaction) => {
+        if (isTransferTransaction(transaction)) {
+            return [];
+        }
+        const occurrences = [];
+        let cursor = new Date(`${transaction.date_next}T00:00:00.000Z`);
+        while (cursor && cursor <= windowEnd) {
+            const occurrenceDate = toIsoDate(cursor);
+            if (occurrenceDate >= asOfDate) {
+                occurrences.push({
+                    ...transaction,
+                    occurrence_date: occurrenceDate,
+                    days_until_due: Math.floor((cursor.getTime() - new Date(`${asOfDate}T00:00:00.000Z`).getTime()) / 86_400_000),
+                });
+            }
+            cursor = incrementScheduledDate(cursor, transaction.frequency ?? undefined);
+        }
+        return occurrences;
+    });
 }
 export function getCurrentMonthStartIsoDate() {
     const now = new Date();
@@ -27,7 +145,12 @@ export function normalizeMonthRange(fromMonth, toMonth) {
     };
 }
 export function toMonthEnd(month) {
-    const [year, monthNumber] = month.split("-").map((value) => Number.parseInt(value, 10));
+    const [yearValue, monthValue] = month.split("-");
+    const year = Number.parseInt(yearValue ?? "", 10);
+    const monthNumber = Number.parseInt(monthValue ?? "", 10);
+    if (!Number.isInteger(year) || !Number.isInteger(monthNumber)) {
+        throw new Error(`Invalid month value: ${month}`);
+    }
     return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
 }
 export function isWithinMonthRange(date, fromMonth, toMonth) {
@@ -60,6 +183,59 @@ export function buildUpcomingWindowSummary(inflowMilliunits, outflowMilliunits) 
         upcoming_outflows: formatMilliunits(normalizedOutflow),
         net_upcoming: formatMilliunits(inflowMilliunits - normalizedOutflow),
     };
+}
+export function liquidCashMilliunits(accounts) {
+    return accounts
+        .filter((account) => !account.deleted && account.on_budget && account.balance > 0)
+        .reduce((sum, account) => sum + account.balance, 0);
+}
+export function debtMilliunits(accounts) {
+    return accounts
+        .filter((account) => !account.deleted && account.balance < 0)
+        .reduce((sum, account) => sum + Math.abs(account.balance), 0);
+}
+export function netWorthMilliunits(accounts) {
+    return accounts
+        .filter((account) => !account.deleted)
+        .reduce((sum, account) => sum + account.balance, 0);
+}
+export function reconstructHistoricalAccountBalances(accounts, transactions, months) {
+    const balances = new Map(accounts
+        .filter((account) => !account.deleted)
+        .map((account) => [account.id, account.balance]));
+    const snapshots = new Map();
+    const transactionsDescending = transactions
+        .filter((transaction) => !transaction.deleted && typeof transaction.account_id === "string" && balances.has(transaction.account_id))
+        .slice()
+        .sort((left, right) => right.date.localeCompare(left.date));
+    let transactionIndex = 0;
+    const sortedMonths = months.slice().sort((left, right) => right.localeCompare(left));
+    for (const month of sortedMonths) {
+        const monthEnd = toMonthEnd(month);
+        while (transactionIndex < transactionsDescending.length) {
+            const transaction = transactionsDescending[transactionIndex];
+            if (!transaction || transaction.date <= monthEnd) {
+                break;
+            }
+            const accountId = transaction.account_id;
+            if (!accountId) {
+                transactionIndex += 1;
+                continue;
+            }
+            const currentBalance = balances.get(accountId);
+            if (typeof currentBalance === "number") {
+                balances.set(accountId, currentBalance - transaction.amount);
+            }
+            transactionIndex += 1;
+        }
+        snapshots.set(month, accounts
+            .filter((account) => !account.deleted)
+            .map((account) => ({
+            ...account,
+            balance: balances.get(account.id) ?? account.balance,
+        })));
+    }
+    return snapshots;
 }
 export function compactObject(input) {
     return Object.fromEntries(Object.entries(input).filter(([, value]) => {

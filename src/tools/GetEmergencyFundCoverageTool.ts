@@ -19,6 +19,26 @@ export const inputSchema = {
   monthsBack: z.number().int().min(1).max(12).default(3).describe("How many trailing months to average."),
 };
 
+function getCoverageStatus(coverageMonths: number | null): "critical" | "no_spending" | "solid" | "strong" | "thin" {
+  if (coverageMonths === null) {
+    return "no_spending";
+  }
+
+  if (coverageMonths >= 6) {
+    return "strong";
+  }
+
+  if (coverageMonths >= 3) {
+    return "solid";
+  }
+
+  if (coverageMonths >= 1) {
+    return "thin";
+  }
+
+  return "critical";
+}
+
 export async function execute(
   input: { planId?: string; asOfMonth: string; monthsBack?: number },
   api: ynab.API,
@@ -36,7 +56,7 @@ export async function execute(
       const averageMonthlySpending = averageMonthlySpendingMilliunits(months);
       const noSpending = averageMonthlySpending === 0;
       const coverageMonths = noSpending ? null : liquidCash / averageMonthlySpending;
-      const status = noSpending ? "no_spending" : coverageMonths! >= 6 ? "strong" : coverageMonths! >= 3 ? "solid" : coverageMonths! >= 1 ? "thin" : "critical";
+      const status = getCoverageStatus(coverageMonths);
 
       return toTextResult(compactObject({
         as_of_month: input.asOfMonth,

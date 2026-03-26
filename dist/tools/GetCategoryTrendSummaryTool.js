@@ -45,7 +45,7 @@ export async function execute(input, api) {
                 to_month: toMonth,
                 scope: input.categoryId
                     ? { type: "category", id: input.categoryId }
-                    : { type: "category_group", name: input.categoryGroupName },
+                    : { type: "category_group", name: input.categoryGroupName, match_basis: "category_group_name" },
                 average_spent: formatMilliunits(Math.round(totalSpentMilliunits / Math.max(periods.length, 1))),
                 peak_month: peakPeriod?.month,
                 spent_change: formatMilliunits((periods[periods.length - 1]?.spentMilliunits ?? 0) - (periods[0]?.spentMilliunits ?? 0)),

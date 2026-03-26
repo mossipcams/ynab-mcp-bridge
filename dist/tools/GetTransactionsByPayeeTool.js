@@ -1,22 +1,8 @@
 import { z } from "zod";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { buildTransactionCollectionResult, toSortedTransactionRows, transactionFields, } from "./transactionQueryUtils.js";
+import { buildTransactionCollectionInputSchema, createIdFilteredTransactionCollectionExecutor, } from "./transactionCollectionToolUtils.js";
 export const name = "ynab_get_transactions_by_payee";
-export const description = "Gets transactions for a single payee.";
-export const inputSchema = {
-    planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
+export const description = "Gets transactions for a single payee when you already know the payee ID.";
+export const inputSchema = buildTransactionCollectionInputSchema({
     payeeId: z.string().describe("The payee ID to filter by."),
-    limit: z.number().int().min(1).max(500).optional().describe("Maximum number of transactions to return."),
-    offset: z.number().int().min(0).optional().describe("Number of transactions to skip before returning results."),
-    includeIds: z.boolean().optional().describe("When false, omits transaction ids from the output."),
-    fields: z.array(z.enum(transactionFields)).optional().describe("Optional transaction fields to include in each row."),
-};
-export async function execute(input, api) {
-    try {
-        const response = await withResolvedPlan(input.planId, api, async (planId) => api.transactions.getTransactionsByPayee(planId, input.payeeId, undefined, undefined, undefined));
-        return toTextResult(buildTransactionCollectionResult(toSortedTransactionRows(response.data.transactions), input));
-    }
-    catch (error) {
-        return toErrorResult(error);
-    }
-}
+});
+export const execute = createIdFilteredTransactionCollectionExecutor(async (transactions, planId, payeeId) => (await transactions.getTransactionsByPayee(planId, payeeId, undefined, undefined, undefined)).data.transactions, "payeeId");

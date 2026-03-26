@@ -13,9 +13,9 @@ function isApprovalRecord(value) {
     if (!isRecord(value)) {
         return false;
     }
-    return typeof value.clientId === "string" &&
-        typeof value.resource === "string" &&
-        Array.isArray(value.scopes);
+    return typeof value["clientId"] === "string" &&
+        typeof value["resource"] === "string" &&
+        Array.isArray(value["scopes"]);
 }
 function normalizeApprovalRecord(record) {
     return {

@@ -6,8 +6,8 @@ function hasValue(value) {
     return readOptionalValue(value) !== undefined;
 }
 function getBackendReadiness(env) {
-    const ynabApiToken = hasValue(env.YNAB_API_TOKEN);
-    const ynabPlanIdConfigured = hasValue(env.YNAB_PLAN_ID);
+    const ynabApiToken = hasValue(env["YNAB_API_TOKEN"]);
+    const ynabPlanIdConfigured = hasValue(env["YNAB_PLAN_ID"]);
     return {
         status: ynabApiToken ? "ok" : "misconfigured",
         planResolution: ynabPlanIdConfigured ? "configured" : "dynamic",
@@ -26,8 +26,8 @@ export function assertBackendEnvironment(env) {
 }
 export function readYnabConfig(env) {
     return {
-        apiToken: readOptionalValue(env.YNAB_API_TOKEN) ?? "",
-        planId: readOptionalValue(env.YNAB_PLAN_ID),
+        apiToken: readOptionalValue(env["YNAB_API_TOKEN"]) ?? "",
+        ...(readOptionalValue(env["YNAB_PLAN_ID"]) ? { planId: readOptionalValue(env["YNAB_PLAN_ID"]) } : {}),
     };
 }
 export function assertYnabConfig(config) {
@@ -37,6 +37,6 @@ export function assertYnabConfig(config) {
     }
     return {
         apiToken,
-        planId: readOptionalValue(config?.planId),
+        ...(readOptionalValue(config?.planId) ? { planId: readOptionalValue(config?.planId) } : {}),
     };
 }

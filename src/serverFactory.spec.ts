@@ -47,7 +47,7 @@ describe("createServer", () => {
     });
     const registeredTools = Object.keys((server as any)._registeredTools);
 
-    expect(registeredTools).toHaveLength(46);
+    expect(registeredTools).toHaveLength(47);
     expect(registeredTools).toEqual(
       expect.arrayContaining([
         "ynab_get_mcp_version",
@@ -80,6 +80,8 @@ describe("createServer", () => {
         "ynab_get_money_movements_by_month",
         "ynab_get_money_movement_groups",
         "ynab_get_money_movement_groups_by_month",
+        "ynab_get_monthly_review",
+        "ynab_get_net_worth_trajectory",
         "ynab_get_financial_snapshot",
         "ynab_get_financial_health_check",
         "ynab_get_spending_summary",
@@ -95,7 +97,6 @@ describe("createServer", () => {
         "ynab_get_debt_summary",
         "ynab_get_recurring_expense_summary",
         "ynab_get_category_trend_summary",
-        "ynab_get_70_20_10_summary",
       ]),
     );
   });
@@ -110,7 +111,7 @@ describe("createServer", () => {
       {} as any,
     );
 
-    expect(registeredToolNames).toHaveLength(46);
+    expect(registeredToolNames).toHaveLength(47);
     expect(registeredToolNames).toEqual([
       "ynab_get_mcp_version",
       "ynab_get_user",
@@ -142,6 +143,8 @@ describe("createServer", () => {
       "ynab_get_money_movements_by_month",
       "ynab_get_money_movement_groups",
       "ynab_get_money_movement_groups_by_month",
+      "ynab_get_monthly_review",
+      "ynab_get_net_worth_trajectory",
       "ynab_get_financial_snapshot",
       "ynab_get_financial_health_check",
       "ynab_get_spending_summary",
@@ -157,28 +160,14 @@ describe("createServer", () => {
       "ynab_get_debt_summary",
       "ynab_get_recurring_expense_summary",
       "ynab_get_category_trend_summary",
-      "ynab_get_70_20_10_summary",
     ]);
-    expect(registerTool).toHaveBeenCalledTimes(46);
+    expect(registerTool).toHaveBeenCalledTimes(47);
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_mcp_version",
       expect.objectContaining({
         title: "Get MCP Version",
         description: expect.any(String),
         inputSchema: expect.any(Object),
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-          openWorldHint: true,
-        },
-      }),
-      expect.any(Function),
-    );
-    expect(registerTool).toHaveBeenCalledWith(
-      "ynab_get_70_20_10_summary",
-      expect.objectContaining({
-        title: "Get 70/20/10 Summary",
         annotations: {
           readOnlyHint: true,
           destructiveHint: false,

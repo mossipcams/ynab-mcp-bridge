@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/consistent-type-assertions --
+   The YNAB SDK exposes configuration and generated API internals through
+   protected/private-ish shapes, so we need narrow structural casts at this boundary. */
 import * as ynab from "ynab";
 
 import { assertYnabConfig, type YnabConfig } from "./config.js";
@@ -21,13 +24,11 @@ const DEFAULT_RETRY_LIMIT = 1;
 const sharedRateLimiter = createYnabRateLimiter();
 const runtimeContextSymbol = Symbol("ynabRuntimeContext");
 
-type YnabSdkConfiguration = {
-  config?: Record<string, unknown>;
-  configuration: Record<string, unknown>;
-};
-
 type YnabApiWithInternals = {
-  _configuration: YnabSdkConfiguration;
+  _configuration: {
+    config?: Record<string, unknown> | undefined;
+    configuration: ynab.ConfigurationParameters;
+  };
 };
 
 type YnabApiRuntimeContext = {
@@ -48,7 +49,7 @@ function normalizeYnabConfig(configOrToken: YnabConfig | string | undefined): Yn
   return assertYnabConfig(configOrToken);
 }
 
-function getSdkConfiguration(api: ynab.API): YnabSdkConfiguration {
+function getSdkConfiguration(api: ynab.API): YnabApiWithInternals["_configuration"] {
   return (api as unknown as YnabApiWithInternals)._configuration;
 }
 

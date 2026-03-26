@@ -1,6 +1,6 @@
 export type YnabConfig = {
   apiToken: string;
-  planId?: string;
+  planId?: string | undefined;
 };
 
 type EnvConfig = Record<string, string | undefined>;
@@ -24,8 +24,8 @@ function hasValue(value: string | undefined) {
 }
 
 function getBackendReadiness(env: EnvConfig): BackendReadiness {
-  const ynabApiToken = hasValue(env.YNAB_API_TOKEN);
-  const ynabPlanIdConfigured = hasValue(env.YNAB_PLAN_ID);
+  const ynabApiToken = hasValue(env["YNAB_API_TOKEN"]);
+  const ynabPlanIdConfigured = hasValue(env["YNAB_PLAN_ID"]);
 
   return {
     status: ynabApiToken ? "ok" : "misconfigured",
@@ -49,8 +49,8 @@ export function assertBackendEnvironment(env: EnvConfig) {
 
 export function readYnabConfig(env: EnvConfig): YnabConfig {
   return {
-    apiToken: readOptionalValue(env.YNAB_API_TOKEN) ?? "",
-    planId: readOptionalValue(env.YNAB_PLAN_ID),
+    apiToken: readOptionalValue(env["YNAB_API_TOKEN"]) ?? "",
+    ...(readOptionalValue(env["YNAB_PLAN_ID"]) ? { planId: readOptionalValue(env["YNAB_PLAN_ID"]) } : {}),
   };
 }
 
@@ -63,6 +63,6 @@ export function assertYnabConfig(config: YnabConfig | undefined): YnabConfig {
 
   return {
     apiToken,
-    planId: readOptionalValue(config?.planId),
+    ...(readOptionalValue(config?.planId) ? { planId: readOptionalValue(config?.planId) } : {}),
   };
 }

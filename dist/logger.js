@@ -47,8 +47,12 @@ function sanitizeLogValue(value) {
     const sanitizedEntries = Object.entries(value).map(([key, entryValue]) => ([key, isSensitiveKey(key) ? REDACTED_VALUE : sanitizeLogValue(entryValue)]));
     return Object.fromEntries(sanitizedEntries);
 }
+function sanitizeLogRecord(details) {
+    const sanitizedDetails = sanitizeLogValue(details);
+    return isRecord(sanitizedDetails) ? sanitizedDetails : {};
+}
 function getDefaultDestination() {
-    return {
+    const destination = {
         write(chunk) {
             const line = typeof chunk === "string"
                 ? chunk.trimEnd()
@@ -57,10 +61,11 @@ function getDefaultDestination() {
             return true;
         },
     };
+    return destination;
 }
 export function createLogger(options = {}) {
     return pino({
-        base: undefined,
+        base: null,
     }, options.destination ?? getDefaultDestination());
 }
 let appLogger = createLogger();
@@ -73,8 +78,9 @@ export function setLoggerDestinationForTests(destination) {
     });
 }
 export function logEvent(logger, scope, event, details = {}) {
+    const sanitizedDetails = sanitizeLogRecord(details);
     logger.info({
-        ...sanitizeLogValue(details),
+        ...sanitizedDetails,
         event,
         scope,
     }, event);

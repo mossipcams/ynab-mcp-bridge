@@ -46,6 +46,9 @@ export class SlidingWindowRateLimiter {
         }
 
         const oldestTimestamp = state.timestamps[0];
+        if (oldestTimestamp === undefined) {
+          continue;
+        }
         const waitMs = Math.max(oldestTimestamp + this.windowMs - Date.now(), 1);
         await this.sleep(waitMs);
       }
@@ -85,8 +88,13 @@ export class SlidingWindowRateLimiter {
 
   private pruneExpiredTimestamps(timestamps: number[]) {
     const cutoff = Date.now() - this.windowMs;
+    while (timestamps.length > 0) {
+      const oldestTimestamp = timestamps[0];
 
-    while (timestamps.length > 0 && timestamps[0] <= cutoff) {
+      if (oldestTimestamp === undefined || oldestTimestamp > cutoff) {
+        return;
+      }
+
       timestamps.shift();
     }
   }

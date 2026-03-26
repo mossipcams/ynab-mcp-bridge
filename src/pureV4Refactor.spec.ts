@@ -11,7 +11,6 @@ describe("pure v4 refactor", () => {
       "GetAccountTool.ts",
       "GetBudgetCleanupSummaryTool.ts",
       "GetBudgetHealthSummaryTool.ts",
-      "GetBudgetRatioSummaryTool.ts",
       "GetCashFlowSummaryTool.ts",
       "GetCashRunwayTool.ts",
       "GetCategoryTool.ts",
@@ -28,6 +27,8 @@ describe("pure v4 refactor", () => {
       "GetMoneyMovementsByMonthTool.ts",
       "GetMoneyMovementsTool.ts",
       "GetMonthCategoryTool.ts",
+      "GetMonthlyReviewTool.ts",
+      "GetNetWorthTrajectoryTool.ts",
       "GetPayeeLocationTool.ts",
       "GetPayeeLocationsByPayeeTool.ts",
       "GetPayeeTool.ts",
@@ -59,7 +60,9 @@ describe("pure v4 refactor", () => {
       "financeToolUtils.ts",
       "financialDiagnosticsUtils.ts",
       "planToolUtils.ts",
+      "transactionCollectionToolUtils.ts",
       "transactionQueryUtils.ts",
+      "transactionToolUtils.ts",
     ]);
   });
 

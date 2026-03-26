@@ -1,6 +1,6 @@
 {
   "name": "ynab-mcp-bridge",
-  "version": "0.14.2",
+  "version": "0.14.3",
   "description": "ynab-mcp-bridge MCP server",
   "author": "Matt",
   "repository": {
@@ -19,17 +19,29 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && node --max-old-space-size=6144 ./node_modules/typescript/bin/tsc && chmod +x dist/index.js",
-    "lint": "eslint . --max-warnings=0",
+    "build": "rm -rf dist && node --max-old-space-size=12288 ./node_modules/typescript/bin/tsc && chmod +x dist/index.js",
+    "lint": "npm run lint:repo && npm run lint:specs",
+    "lint:repo": "npm run lint:repo:fast && npm run lint:repo:typed:core && npm run lint:repo:typed:client-profiles",
+    "lint:repo:fast": "node --max-old-space-size=4096 ./node_modules/eslint/bin/eslint.js src/tools/**/*.ts src/serverRuntime.ts src/httpTransport.ts src/oauthRuntime.ts src/grantPersistence.ts src/grantLifecycle.ts src/stdioServer.ts src/index.ts eslint.config.mjs .dependency-cruiser.js debugging/*.js --max-warnings=0 --ignore-pattern 'src/**/*.spec.ts' --ignore-pattern 'src/**/*.contract.ts' --ignore-pattern 'artifacts/**'",
+    "lint:repo:typed:core": "node --max-old-space-size=4096 ./node_modules/eslint/bin/eslint.js src/*.ts --max-warnings=0 --no-warn-ignored --ignore-pattern 'src/**/*.spec.ts' --ignore-pattern 'src/**/*.contract.ts' --ignore-pattern 'src/index.ts' --ignore-pattern 'src/serverRuntime.ts' --ignore-pattern 'src/httpTransport.ts' --ignore-pattern 'src/oauthRuntime.ts' --ignore-pattern 'src/grantPersistence.ts' --ignore-pattern 'src/grantLifecycle.ts' --ignore-pattern 'src/stdioServer.ts'",
+    "lint:repo:typed:client-profiles": "node --max-old-space-size=4096 ./node_modules/eslint/bin/eslint.js src/clientProfiles/**/*.ts --max-warnings=0",
+    "lint:specs": "node --max-old-space-size=8192 ./node_modules/eslint/bin/eslint.js src/**/*.spec.ts --max-warnings=0",
+    "lint:oxlint": "oxlint --type-aware -c .oxlintrc.json src",
     "lint:deps": "dependency-cruiser --config .dependency-cruiser.js src",
     "lint:unused": "knip --config knip.json --production --exclude dependencies",
-    "typecheck": "node --max-old-space-size=6144 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json && node --max-old-space-size=6144 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.test.json",
+    "lint:duplicates": "jscpd --config .jscpd.json .",
+    "typecheck": "node --max-old-space-size=12288 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+    "typecheck:tests": "node --max-old-space-size=12288 ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.test.json",
+    "typecheck:all": "npm run typecheck && npm run typecheck:tests",
     "prepare": "npm run build",
-    "watch": "node --max-old-space-size=6144 ./node_modules/typescript/bin/tsc --watch",
+    "watch": "node --max-old-space-size=12288 ./node_modules/typescript/bin/tsc --watch",
     "start": "node dist/index.js",
     "start:http": "node dist/index.js --transport http",
     "start:stdio": "node dist/index.js --transport stdio",
+    "reliability:http": "npm run build && node dist/reliabilityHttpCli.js",
+    "reliability:load": "npm run build && node dist/reliabilityLoadCli.js",
     "debug": "npm run build && npx @modelcontextprotocol/inspector dist/index.js",
+    "tech-debt:report": "node ./scripts/tech-debt-report.mjs",
     "test": "vitest",
     "test:ci": "mkdir -p artifacts/test-results && vitest run --reporter=default --reporter=junit --outputFile.junit=./artifacts/test-results/vitest-junit.xml",
     "test:watch": "vitest watch",
@@ -42,7 +54,7 @@
     "jose": "^6.2.1",
     "pino": "^10.3.1",
     "ynab": "^4.0.0",
-    "zod": "^3.23.8"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
@@ -54,9 +66,16 @@
     "@vitest/coverage-v8": "^3.2.4",
     "dependency-cruiser": "^16.10.4",
     "eslint": "^9.39.4",
+    "eslint-plugin-security": "^4.0.0",
+    "eslint-plugin-sonarjs": "^4.0.2",
+    "fast-check": "^4.6.0",
     "globals": "^17.4.0",
+    "jscpd": "^4.0.8",
     "knip": "^5.88.0",
-    "typescript": "^5.3.3",
+    "npm-check-updates": "^19.6.5",
+    "oxlint": "^1.56.0",
+    "oxlint-tsgolint": "^0.17.1",
+    "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }
 }

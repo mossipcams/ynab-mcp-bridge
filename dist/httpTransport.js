@@ -136,7 +136,7 @@ function hasHeaderValue(value) {
     return Boolean(getFirstHeaderValue(value));
 }
 function getRequestDebugDetails(req, options = {}) {
-    const authSubject = req.auth?.extra?.subject;
+    const authSubject = req.auth?.extra?.["subject"];
     return {
         ...getRequestLogFields(),
         authMode: options.authMode,
@@ -160,10 +160,10 @@ function getJsonRpcDebugDetails(parsedBody) {
     const request = parsedBody;
     const details = {};
     if (typeof request.method === "string") {
-        details.jsonRpcMethod = request.method;
+        details["jsonRpcMethod"] = request.method;
     }
     if ("id" in request) {
-        details.jsonRpcId = request.id;
+        details["jsonRpcId"] = request.id;
     }
     return details;
 }
@@ -228,8 +228,9 @@ async function createManagedRequest(config) {
     const mcpServer = createServer(config);
     const transport = new StreamableHTTPServerTransport({
         enableJsonResponse: true,
-        sessionIdGenerator: undefined,
     });
+    // The SDK transport matches the runtime contract, but exact optional typing is narrower here.
+    // @ts-ignore transport optional callbacks are runtime-compatible with McpServer.connect
     await mcpServer.connect(transport);
     return {
         transport,
@@ -398,7 +399,7 @@ export async function startHttpServer(options) {
         const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
         return {
             authMode: auth.mode,
-            authRequired: isProtectedMcpRequest || undefined,
+            ...(isProtectedMcpRequest ? { authRequired: true } : {}),
         };
     }
     app.disable("x-powered-by");

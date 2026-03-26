@@ -373,12 +373,12 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
 
   const handleCallback: RequestHandler = async (req, res, next) => {
     try {
-      const upstreamState = typeof req.query.state === "string" ? req.query.state : undefined;
-      const upstreamError = typeof req.query.error === "string" ? req.query.error : undefined;
-      const upstreamErrorDescription = typeof req.query.error_description === "string"
-        ? req.query.error_description
+      const upstreamState = typeof req.query["state"] === "string" ? req.query["state"] : undefined;
+      const upstreamError = typeof req.query["error"] === "string" ? req.query["error"] : undefined;
+      const upstreamErrorDescription = typeof req.query["error_description"] === "string"
+        ? req.query["error_description"]
         : undefined;
-      const hasCode = typeof req.query.code === "string" && req.query.code.length > 0;
+      const hasCode = typeof req.query["code"] === "string" && req.query["code"].length > 0;
       const hasError = typeof upstreamError === "string";
       const hasState = typeof upstreamState === "string" && upstreamState.length > 0;
 
@@ -393,7 +393,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       }
 
       const result = await core.handleCallback({
-        code: typeof req.query.code === "string" && req.query.code.length > 0 ? req.query.code : undefined,
+        code: typeof req.query["code"] === "string" && req.query["code"].length > 0 ? req.query["code"] : undefined,
         error: upstreamError,
         errorDescription: upstreamErrorDescription,
         upstreamState,

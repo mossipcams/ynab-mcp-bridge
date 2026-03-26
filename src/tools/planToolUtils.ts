@@ -55,7 +55,7 @@ function pickResolvedPlanId(
   const remainingPlans = plans.filter((plan) => !excludedPlanIds.has(plan.id));
 
   if (remainingPlans.length === 1) {
-    return remainingPlans[0].id;
+    return remainingPlans[0]?.id;
   }
 
   return undefined;

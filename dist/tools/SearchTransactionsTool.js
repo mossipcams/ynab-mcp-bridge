@@ -1,8 +1,14 @@
 import { z } from "zod";
-import { formatAmountMilliunits } from "./collectionToolUtils.js";
+import { formatAmountMilliunits, renderCollectionResult, } from "./collectionToolUtils.js";
 import { compactObject } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { buildPagedTransactionCollectionResult, toSortedTransactionRows, transactionFields, transactionSortValues, } from "./transactionQueryUtils.js";
+import { toDisplayTransactions, transactionFields } from "./transactionToolUtils.js";
+const sortableValues = [
+    "date_asc",
+    "date_desc",
+    "amount_asc",
+    "amount_desc",
+];
 export const name = "ynab_search_transactions";
 export const description = "Searches transactions with compact filters, projections, and pagination for AI-friendly drill-down.";
 export const inputSchema = {
@@ -21,48 +27,45 @@ export const inputSchema = {
     offset: z.number().int().min(0).default(0).describe("Number of matching transactions to skip."),
     includeIds: z.boolean().optional().describe("When false, omits transaction ids from the output."),
     fields: z.array(z.enum(transactionFields)).optional().describe("Optional transaction fields to include in each row."),
-    sort: z.enum(transactionSortValues).default("date_desc").describe("Sort order for matching transactions."),
+    sort: z.enum(sortableValues).default("date_desc").describe("Sort order for matching transactions."),
 };
 function matchesFilters(transaction, input) {
-    if (input.includeTransfers === false && transaction.transfer_account_id) {
-        return false;
+    return [
+        input.includeTransfers !== false || !transaction.transfer_account_id,
+        !input.toDate || transaction.date <= input.toDate,
+        !input.payeeId || transaction.payee_id === input.payeeId,
+        !input.accountId || transaction.account_id === input.accountId,
+        !input.categoryId || transaction.category_id === input.categoryId,
+        input.approved === undefined || transaction.approved === input.approved,
+        !input.cleared || transaction.cleared === input.cleared,
+        input.minAmount === undefined || transaction.amount >= input.minAmount,
+        input.maxAmount === undefined || transaction.amount <= input.maxAmount,
+    ].every(Boolean);
+}
+function compareTransactions(left, right, sort) {
+    switch (sort) {
+        case "date_asc":
+            return left.date.localeCompare(right.date) || left.id.localeCompare(right.id);
+        case "date_desc":
+            return right.date.localeCompare(left.date) || left.id.localeCompare(right.id);
+        case "amount_asc":
+            return left.amount - right.amount || right.date.localeCompare(left.date);
+        case "amount_desc":
+            return right.amount - left.amount || right.date.localeCompare(left.date);
     }
-    if (input.toDate && transaction.date > input.toDate) {
-        return false;
-    }
-    if (input.payeeId && transaction.payee_id !== input.payeeId) {
-        return false;
-    }
-    if (input.accountId && transaction.account_id !== input.accountId) {
-        return false;
-    }
-    if (input.categoryId && transaction.category_id !== input.categoryId) {
-        return false;
-    }
-    if (input.approved !== undefined && transaction.approved !== input.approved) {
-        return false;
-    }
-    if (input.cleared && transaction.cleared !== input.cleared) {
-        return false;
-    }
-    if (input.minAmount !== undefined && transaction.amount < input.minAmount) {
-        return false;
-    }
-    if (input.maxAmount !== undefined && transaction.amount > input.maxAmount) {
-        return false;
-    }
-    return true;
 }
 export async function execute(input, api) {
     try {
         const fromDate = input.fromDate;
         const sort = input.sort ?? "date_desc";
         const response = await withResolvedPlan(input.planId, api, async (planId) => api.transactions.getTransactions(planId, fromDate, undefined, undefined));
-        const transactions = toSortedTransactionRows(response.data.transactions
+        const matchingTransactions = response.data.transactions
             .filter((transaction) => !transaction.deleted)
-            .filter((transaction) => matchesFilters(transaction, input)), sort);
+            .filter((transaction) => matchesFilters(transaction, input))
+            .sort((left, right) => compareTransactions(left, right, sort));
+        const transactions = toDisplayTransactions(matchingTransactions);
         return toTextResult({
-            ...buildPagedTransactionCollectionResult(transactions, input),
+            ...renderCollectionResult(transactions, transactionFields, input, "transactions", "match_count"),
             filters: compactObject({
                 from_date: input.fromDate,
                 to_date: input.toDate,

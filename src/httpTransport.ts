@@ -267,7 +267,7 @@ function getRequestDebugDetails(
     authRequired?: boolean;
   } = {},
 ): HttpDebugDetails {
-  const authSubject = req.auth?.extra?.subject;
+  const authSubject = req.auth?.extra?.["subject"];
   return {
     ...getRequestLogFields(),
     authMode: options.authMode,
@@ -294,11 +294,11 @@ function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
   const details: HttpDebugDetails = {};
 
   if (typeof request.method === "string") {
-    details.jsonRpcMethod = request.method;
+    details["jsonRpcMethod"] = request.method;
   }
 
   if ("id" in request) {
-    details.jsonRpcId = request.id;
+    details["jsonRpcId"] = request.id;
   }
 
   return details;
@@ -386,9 +386,10 @@ async function createManagedRequest(config: YnabConfig) {
   const mcpServer = createServer(config);
   const transport = new StreamableHTTPServerTransport({
     enableJsonResponse: true,
-    sessionIdGenerator: undefined,
   });
 
+  // The SDK transport matches the runtime contract, but exact optional typing is narrower here.
+  // @ts-ignore transport optional callbacks are runtime-compatible with McpServer.connect
   await mcpServer.connect(transport);
 
   return {
@@ -613,7 +614,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
 
     return {
       authMode: auth.mode,
-      authRequired: isProtectedMcpRequest || undefined,
+      ...(isProtectedMcpRequest ? { authRequired: true } : {}),
     };
   }
 

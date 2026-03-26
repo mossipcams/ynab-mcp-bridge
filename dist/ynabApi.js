@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/consistent-type-assertions --
+   The YNAB SDK exposes configuration and generated API internals through
+   protected/private-ish shapes, so we need narrow structural casts at this boundary. */
 import * as ynab from "ynab";
 import { assertYnabConfig } from "./config.js";
 import { createYnabRateLimiter } from "./ynabRateLimiter.js";

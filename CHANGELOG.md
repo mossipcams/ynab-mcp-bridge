@@ -5,6 +5,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.2...ynab-mcp-bridge-v0.14.3) (2026-03-26)
+
+
+### Bug Fixes
+
+* harden oauth and split runtime seams ([#165](https://github.com/mossipcams/ynab-mcp-bridge/issues/165)) ([74dcf81](https://github.com/mossipcams/ynab-mcp-bridge/commit/74dcf81a2bf8044baac9ff539c45e9b80cf46117))
+
+## [0.14.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.1...ynab-mcp-bridge-v0.14.2) (2026-03-25)
+
+
+### Bug Fixes
+
+* reduce duplicate feature and oauth code ([4502450](https://github.com/mossipcams/ynab-mcp-bridge/commit/45024504f8984b17b4685895bc0f922e423cb168))
+* reduce duplicate feature and oauth code ([27da691](https://github.com/mossipcams/ynab-mcp-bridge/commit/27da691693be800171d01668994e779de5fd8072))
+* resolve duplicate remediation CI regressions ([5d5e3cb](https://github.com/mossipcams/ynab-mcp-bridge/commit/5d5e3cbe6a44fe800f5856c2bb6752bbf5f176a5))
+
+## [0.14.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.0...ynab-mcp-bridge-v0.14.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* add tech debt reporting to ci ([93b1315](https://github.com/mossipcams/ynab-mcp-bridge/commit/93b1315b8bfd7098b2436c7029fbfdcf3b49fd75))
+* complete tech debt remediation roadmap ([c6be124](https://github.com/mossipcams/ynab-mcp-bridge/commit/c6be124bccac6cec5566ecca8e1a1f1a6617efce))
+* persist oauth client compatibility profiles ([72ab56e](https://github.com/mossipcams/ynab-mcp-bridge/commit/72ab56e882927e463228d57e608c0debf0973d30))
+* reduce duplication and overhaul debt reporting ([fddb553](https://github.com/mossipcams/ynab-mcp-bridge/commit/fddb553c004dd3fab3f048d9999930decc166881))
+* remove http server lint assertion ([548826b](https://github.com/mossipcams/ynab-mcp-bridge/commit/548826b2b0aba407efe1eb9d5b5ef67c7c58825b))
+* widen debt reporting to whole codebase ([59f2437](https://github.com/mossipcams/ynab-mcp-bridge/commit/59f2437679773f891eb9b44df34bc9d651a14174))
+
+## [0.14.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.13.0...ynab-mcp-bridge-v0.14.0) (2026-03-24)
+
+
+### Features
+
+* add reliability tooling and HTTP session reuse ([#158](https://github.com/mossipcams/ynab-mcp-bridge/issues/158)) ([6f91736](https://github.com/mossipcams/ynab-mcp-bridge/commit/6f9173600426fd2998c125ff8fbc5ede232a1b62))
+
+## [0.13.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.12.1...ynab-mcp-bridge-v0.13.0) (2026-03-24)
+
+
+### Features
+
+* add finance trajectory and monthly review tools ([#154](https://github.com/mossipcams/ynab-mcp-bridge/issues/154)) ([8965fee](https://github.com/mossipcams/ynab-mcp-bridge/commit/8965fee7c4237baa49a08e76cd30bc1593d22c52))
+
+
+### Bug Fixes
+
+* correct finance tool calculation semantics ([#156](https://github.com/mossipcams/ynab-mcp-bridge/issues/156)) ([dd7d681](https://github.com/mossipcams/ynab-mcp-bridge/commit/dd7d6810897b98a5b6183ddbe09f88213a9d04f3))
+* normalize tool month and projection behavior ([#153](https://github.com/mossipcams/ynab-mcp-bridge/issues/153)) ([07275a7](https://github.com/mossipcams/ynab-mcp-bridge/commit/07275a7c406a7fe606eb5090bbf08f8f799ed42b))
+* require PR cleanup for local worktrees ([#157](https://github.com/mossipcams/ynab-mcp-bridge/issues/157)) ([855d204](https://github.com/mossipcams/ynab-mcp-bridge/commit/855d20450ddf0bb514ca457d2c9cb59503e6916c))
+
+## [0.12.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.12.0...ynab-mcp-bridge-v0.12.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* remove 70/20/10 summary tool ([#149](https://github.com/mossipcams/ynab-mcp-bridge/issues/149)) ([5cfb1da](https://github.com/mossipcams/ynab-mcp-bridge/commit/5cfb1daf98bd07d46b59ee56b3984d7c207ab5ee))
+
+## [0.12.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.11.0...ynab-mcp-bridge-v0.12.0) (2026-03-20)
+
+
+### Features
+
+* add branded type guardrails ([#145](https://github.com/mossipcams/ynab-mcp-bridge/issues/145)) ([5e844b2](https://github.com/mossipcams/ynab-mcp-bridge/commit/5e844b255b4cfefebdb96331e55f78999b9a8a1a))
+
+## [0.11.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.6...ynab-mcp-bridge-v0.11.0) (2026-03-20)
+
+
+### Features
+
+* complete quality stack and add oxlint pilot ([#147](https://github.com/mossipcams/ynab-mcp-bridge/issues/147)) ([ab4bff4](https://github.com/mossipcams/ynab-mcp-bridge/commit/ab4bff4011fbf2191e896a2940335a3c34e8063f))
+
+
+### Bug Fixes
+
+* align agent workflow docs with planning and TDD ([#144](https://github.com/mossipcams/ynab-mcp-bridge/issues/144)) ([7938c84](https://github.com/mossipcams/ynab-mcp-bridge/commit/7938c8488571c43ce819729f372121bad7fca507))
+
 ## [0.10.6](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.10.5...ynab-mcp-bridge-v0.10.6) (2026-03-19)
 
 

@@ -46,11 +46,11 @@ type TransactionSummaryRow = {
   id: string;
   date: string;
   amount: string;
-  payee_name?: string | null;
-  category_name?: string | null;
-  account_name?: string | null;
-  approved?: boolean | null;
-  cleared?: string | null;
+  payee_name?: string | null | undefined;
+  category_name?: string | null | undefined;
+  account_name?: string | null | undefined;
+  approved?: boolean | null | undefined;
+  cleared?: string | null | undefined;
 };
 
 function compareTransactions(

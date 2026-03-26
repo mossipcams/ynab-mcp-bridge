@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { formatMilliunits, isWithinMonthRange, listMonthsInRange, normalizeMonthRange, toTopRollups, } from "./financeToolUtils.js";
+import { formatMilliunits, isReadyToAssignInflowCategory, isWithinMonthRange, listMonthsInRange, normalizeMonthRange, toTopRollups, } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_income_summary";
-export const description = "Returns a compact monthly income summary with totals, stability metrics, and top income sources.";
+export const description = "Returns a compact monthly income summary using positive transactions categorized to `Inflow: Ready to Assign`, with totals, stability metrics, and top income sources.";
 export const inputSchema = {
     planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
     fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("The first month in ISO format or the string 'current'."),
@@ -21,6 +21,7 @@ export async function execute(input, api) {
             const transactions = response.data.transactions.filter((transaction) => !transaction.deleted
                 && !transaction.transfer_account_id
                 && transaction.amount > 0
+                && isReadyToAssignInflowCategory(transaction.category_name)
                 && isWithinMonthRange(transaction.date, fromMonth, toMonth));
             const incomeByMonth = new Map(listMonthsInRange(fromMonth, toMonth).map((month) => [month, 0]));
             const incomeByPayee = new Map();
@@ -50,8 +51,8 @@ export async function execute(input, api) {
             const medianIncome = sortedIncomeValues.length === 0
                 ? 0
                 : sortedIncomeValues.length % 2 === 1
-                    ? sortedIncomeValues[(sortedIncomeValues.length - 1) / 2]
-                    : (sortedIncomeValues[(sortedIncomeValues.length / 2) - 1] + sortedIncomeValues[sortedIncomeValues.length / 2]) / 2;
+                    ? (sortedIncomeValues[(sortedIncomeValues.length - 1) / 2] ?? 0)
+                    : (((sortedIncomeValues[(sortedIncomeValues.length / 2) - 1] ?? 0) + (sortedIncomeValues[sortedIncomeValues.length / 2] ?? 0)) / 2);
             const minIncome = sortedIncomeValues[0] ?? 0;
             const maxIncome = sortedIncomeValues[sortedIncomeValues.length - 1] ?? 0;
             const volatilityPercent = averageIncome === 0 ? 0 : ((maxIncome - minIncome) / averageIncome) * 100;

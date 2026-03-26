@@ -37,8 +37,8 @@ export function createCloudflareAccessCompatibilityMiddleware(config) {
         }
         try {
             const upstreamAuth = await upstreamVerifier.verifyAccessToken(assertion);
-            const subject = typeof upstreamAuth.extra?.subject === "string"
-                ? upstreamAuth.extra.subject
+            const subject = typeof upstreamAuth.extra?.["subject"] === "string"
+                ? upstreamAuth.extra["subject"]
                 : upstreamAuth.clientId;
             const localToken = await localTokenService.mintAccessToken({
                 clientId: upstreamAuth.clientId,

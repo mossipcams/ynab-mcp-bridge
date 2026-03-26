@@ -340,4 +340,10 @@ describe("resolveRuntimeConfig", () => {
       status: "ok",
     });
   });
+
+  it("keeps runtimeConfig as a real module instead of a pure re-export facade", () => {
+    const source = readFileSync(new URL("./runtimeConfig.ts", import.meta.url), "utf8");
+
+    expect(source.trim()).not.toBe('export { assertBackendEnvironment, resolveRuntimeConfig } from "./config.js";');
+  });
 });

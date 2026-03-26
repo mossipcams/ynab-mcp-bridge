@@ -20,13 +20,13 @@ export async function execute(input, api) {
         const response = await withResolvedPlan(input.planId, api, async (planId) => api.categories.getCategories(planId));
         const groups = response.data.category_groups
             .filter((group) => !group.deleted && !group.hidden)
-            .map((group) => compactObject({
-            id: input.includeIds === false ? undefined : group.id,
+            .map((group) => ({
+            ...(input.includeIds === false ? {} : { id: group.id }),
             name: group.name,
             categories: group.categories
                 .filter((category) => !category.deleted && !category.hidden)
-                .map((category) => compactObject({
-                id: input.includeIds === false ? undefined : category.id,
+                .map((category) => ({
+                ...(input.includeIds === false ? {} : { id: category.id }),
                 name: category.name,
             })),
         }));
@@ -39,7 +39,7 @@ export async function execute(input, api) {
         if (!hasPaginationControls(input)) {
             return toTextResult({
                 category_groups: groups.map((group) => compactObject({
-                    id: input.includeIds === false ? undefined : group.id,
+                    ...(input.includeIds === false || group.id === undefined ? {} : { id: group.id }),
                     name: requestedFields.has("name") ? group.name : undefined,
                     categories: requestedFields.has("categories") ? group.categories : undefined,
                 })),
@@ -49,7 +49,7 @@ export async function execute(input, api) {
         const pagedGroups = paginateEntries(groups, input);
         return toTextResult({
             category_groups: pagedGroups.entries.map((group) => compactObject({
-                id: input.includeIds === false ? undefined : group.id,
+                ...(input.includeIds === false || group.id === undefined ? {} : { id: group.id }),
                 name: requestedFields.has("name") ? group.name : undefined,
                 categories: requestedFields.has("categories") ? group.categories : undefined,
             })),

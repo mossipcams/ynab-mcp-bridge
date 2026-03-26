@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { formatAmount, formatPercent, previousMonths } from "./financialDiagnosticsUtils.js";
-import { toSpentMilliunits } from "./financeToolUtils.js";
+import { isCreditCardPaymentCategoryName, toSpentMilliunits } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_spending_anomalies";
 export const description = "Flags category spending spikes in a month against a trailing monthly baseline.";
@@ -26,7 +26,12 @@ export async function execute(input, api) {
             ]);
             const baselineResponses = responses.slice(0, baselineMonthIds.length);
             const latestResponse = responses[responses.length - 1];
-            const latestCategories = latestResponse.data.month.categories.filter((category) => !category.deleted && !category.hidden);
+            if (!latestResponse) {
+                throw new Error("Latest month response was not returned.");
+            }
+            const latestCategories = latestResponse.data.month.categories.filter((category) => (!category.deleted
+                && !category.hidden
+                && !isCreditCardPaymentCategoryName(category.category_group_name)));
             const anomalies = latestCategories
                 .map((category) => {
                 const latestSpent = toSpentMilliunits(category.activity);

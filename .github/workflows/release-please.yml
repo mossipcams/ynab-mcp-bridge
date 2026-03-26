@@ -6,7 +6,6 @@ on:
       - main
 
 permissions:
-  actions: write
   contents: write
   pull-requests: write
 
@@ -20,32 +19,3 @@ jobs:
         with:
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
-
-      - name: Trigger Release Please PR checks
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_PRS: ${{ steps.release.outputs.prs }}
-        run: |
-          mapfile -t release_branches < <(
-            node -e '
-              const prs = JSON.parse(process.env.RELEASE_PRS ?? "[]");
-              for (const pr of prs) {
-                if (typeof pr.headBranchName === "string" && pr.headBranchName.length > 0) {
-                  console.log(pr.headBranchName);
-                }
-              }
-            '
-          )
-
-          if [ "${#release_branches[@]}" -eq 0 ]; then
-            echo "release-please reported PR creation but returned no PR branches to dispatch."
-            exit 1
-          fi
-
-          for branch in "${release_branches[@]}"; do
-            echo "Dispatching release-please-pr-checks.yml for ${branch}"
-            gh workflow run release-please-pr-checks.yml \
-              --repo "${GITHUB_REPOSITORY}" \
-              --ref "${branch}"
-          done

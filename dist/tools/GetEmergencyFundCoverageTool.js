@@ -9,6 +9,21 @@ export const inputSchema = {
     asOfMonth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("The month to anchor coverage calculations."),
     monthsBack: z.number().int().min(1).max(12).default(3).describe("How many trailing months to average."),
 };
+function getCoverageStatus(coverageMonths) {
+    if (coverageMonths === null) {
+        return "no_spending";
+    }
+    if (coverageMonths >= 6) {
+        return "strong";
+    }
+    if (coverageMonths >= 3) {
+        return "solid";
+    }
+    if (coverageMonths >= 1) {
+        return "thin";
+    }
+    return "critical";
+}
 export async function execute(input, api) {
     try {
         const monthsBack = input.monthsBack ?? 3;
@@ -22,7 +37,7 @@ export async function execute(input, api) {
             const averageMonthlySpending = averageMonthlySpendingMilliunits(months);
             const noSpending = averageMonthlySpending === 0;
             const coverageMonths = noSpending ? null : liquidCash / averageMonthlySpending;
-            const status = noSpending ? "no_spending" : coverageMonths >= 6 ? "strong" : coverageMonths >= 3 ? "solid" : coverageMonths >= 1 ? "thin" : "critical";
+            const status = getCoverageStatus(coverageMonths);
             return toTextResult(compactObject({
                 as_of_month: input.asOfMonth,
                 liquid_cash: formatAmount(liquidCash),

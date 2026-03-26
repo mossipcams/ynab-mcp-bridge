@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { IncomingHttpHeaders } from "node:http";
 
 import { getFirstHeaderValue } from "./headerUtils.js";
 
@@ -42,7 +43,7 @@ export function getCorrelationHeaderName() {
   return CORRELATION_HEADER;
 }
 
-export function createRequestContext(headers: Record<string, string | string[] | undefined>): RequestContext {
+export function createRequestContext(headers: IncomingHttpHeaders): RequestContext {
   const firstValue = getFirstHeaderValue(headers[CORRELATION_HEADER]);
 
   return {

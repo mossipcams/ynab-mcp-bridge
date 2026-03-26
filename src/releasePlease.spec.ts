@@ -63,12 +63,12 @@ describe("release-please automation", () => {
     expect(workflow).toContain("manifest-file: .release-please-manifest.json");
   });
 
-  it("dispatches release PR validations from release-please outputs without local git state", () => {
+  it("keeps the release-please workflow focused on creating releases without dispatching follow-up checks", () => {
     const workflow = readFileSync(new URL("../.github/workflows/release-please.yml", import.meta.url), "utf8");
 
-    expect(workflow).toContain("id: release");
-    expect(workflow).toContain("steps.release.outputs.prs_created");
-    expect(workflow).not.toContain("gh pr list");
+    expect(workflow).not.toContain("gh workflow run");
+    expect(workflow).not.toContain("steps.release.outputs.prs_created");
+    expect(workflow).not.toContain("workflow_dispatch");
   });
 
   it("defines a PR title validation workflow for releasable conventional commits", () => {
@@ -142,6 +142,8 @@ describe("release-please automation", () => {
 
     expect(workflow).toContain("uses: actions/checkout@v4");
     expect(workflow).toContain("fetch-depth: 0");
+    expect(workflow).toContain("strategy:");
+    expect(workflow).toContain("node-version: [22.x, 24.x]");
   });
 
   it("keeps the 0.8.0 changelog entry aligned with the cleaned release notes", () => {

@@ -37,6 +37,11 @@ npm run build
 npm run preflight
 ```
 
+Build artifact policy:
+
+- `dist/` remains tracked in this repository for now because the published package and CLI entrypoints resolve from built JavaScript under `dist/`.
+- When a source change affects runtime output, keep the generated `dist/` artifacts in sync with the source change rather than treating them as disposable local-only files.
+
 ### 2. Run the default local HTTP server
 
 ```bash
@@ -56,6 +61,25 @@ Defaults:
 export YNAB_API_TOKEN=your-token
 npm run start:stdio
 ```
+
+### Local CI Preflight
+
+Run this before pushing when you want one command that mirrors the required CI gates:
+
+```bash
+npm run preflight
+```
+
+`preflight` runs the required local checks from CI: `test:ci`, `test:coverage`, `lint:deps`, `lint`, `typecheck`, `lint:unused`, and `build`. It intentionally does not include the advisory-only `lint:oxlint` step because that CI job is non-blocking.
+
+For advisory quality reporting outside the blocking preflight gate, you can also run:
+
+```bash
+npm run lint:duplicates
+npm run tech-debt:report
+```
+
+`lint:duplicates` runs JSCPD across the whole codebase using the checked-in `.jscpd.json` settings and explicit exclusions for generated or non-code paths. `tech-debt:report` uses the same repo-owned code boundary and prints the current duplication, dead-export, suppression, debt-marker, and dependency-update counts.
 
 ### 4. Expose authless HTTP intentionally
 
@@ -179,6 +203,8 @@ The server exposes a read-only YNAB toolset across:
 - money movement and transfer summaries
 - higher-level financial summaries such as spending, cash flow, income, goal progress, obligations, and budget health
 
+For YNAB-style summaries, treat `assigned_vs_spent` as a timing and buffering signal, not a score for budget discipline. In buffered budgets it often reflects paycheck timing, category staging, or money reserved for future months rather than overspending or underspending by itself.
+
 ## CLI Examples
 
 Start with the default HTTP settings:
@@ -198,6 +224,64 @@ Start over HTTP explicitly:
 ```bash
 node dist/index.js --transport http --host 127.0.0.1 --port 3000 --path /mcp
 ```
+
+Run the local HTTP reliability probe:
+
+```bash
+npm run reliability:http -- --requests 10 --concurrency 2
+```
+
+The reliability command uses a bounded authless HTTP scenario that:
+
+- starts a local bridge unless you pass `--url`
+- runs `initialize`, `tools/list`, and `ynab_get_mcp_version`
+- prints attempts, failures, error rate, and latency percentiles
+- exits non-zero when the error rate is above `--max-error-rate`
+
+Useful flags:
+
+- `--requests <n>`: number of reliability sequences to run. Each sequence performs three MCP operations.
+- `--concurrency <n>`: number of sequences to run in parallel.
+- `--max-error-rate <0..1>`: fail the run if the observed error rate exceeds this threshold.
+- `--url <http-url>`: target an already running bridge instead of starting a local one.
+- `--host`, `--port`, `--path`: override the local server bind address when `--url` is not used.
+
+Write a machine-readable smoke artifact and compare against a prior run:
+
+```bash
+npm run reliability:http -- \
+  --requests 10 \
+  --concurrency 2 \
+  --json-out artifacts/reliability/smoke.json \
+  --baseline-artifact artifacts/reliability/baseline-smoke.json
+```
+
+Run the heavier reliability suite in dry-run mode:
+
+```bash
+npm run reliability:load -- \
+  --profile baseline \
+  --url http://127.0.0.1:3000/mcp \
+  --json-out artifacts/reliability/baseline.json \
+  --dry-run
+```
+
+The dedicated load suite is designed for named profiles instead of ad hoc request counts:
+
+- `smoke`: fast local regression check using the built-in Node probe
+- `baseline`: repeatable average-load run for comparisons
+- `stress`: higher sustained load to expose overload behavior
+- `spike`: sudden burst behavior
+- `soak`: longer steady-state run to catch degradation over time
+
+Recommended workflow:
+
+- run `smoke` on local changes
+- record `baseline` artifacts on a stable environment
+- run `stress` and `spike` before higher-risk releases
+- run `soak` on a scheduled cadence or before major rollout events
+
+Thresholds should be evaluated with error rate and latency percentiles such as `p95` and `p99`, not averages alone. The smoke command and artifact comparison flow already follow that model, and the load-suite dry run prints the exact thresholds that would be enforced by the heavier external runner.
 
 Allow specific browser origins:
 
@@ -273,4 +357,9 @@ YNAB documents a limit of 200 requests per rolling hour per access token. The br
 ```bash
 npm test
 npm run build
+npm run lint:duplicates
+npm run tech-debt:report
 ```
+
+`lint:duplicates` runs a JSCPD baseline for whole-codebase duplication. It covers maintained repo code, specs, contracts, Markdown, scripts, and tasks, and excludes only generated/vendor paths such as `.git`, `node_modules`, `dist`, `artifacts`, and `package-lock.json`.
+`tech-debt:report` prints the current whole-codebase duplicate-remediation baseline together with dead-export and suppression counts so local cleanup work has one repeatable snapshot command.

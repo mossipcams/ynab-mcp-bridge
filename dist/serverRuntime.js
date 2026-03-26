@@ -11,7 +11,6 @@ import { getRequestLogFields, markToolCallStarted } from "./requestContext.js";
 import { attachYnabApiRuntimeContext, createYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
 import * as GetBudgetCleanupSummaryTool from "./tools/GetBudgetCleanupSummaryTool.js";
-import * as GetBudgetRatioSummaryTool from "./tools/GetBudgetRatioSummaryTool.js";
 import * as GetBudgetHealthSummaryTool from "./tools/GetBudgetHealthSummaryTool.js";
 import * as GetCashRunwayTool from "./tools/GetCashRunwayTool.js";
 import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
@@ -29,6 +28,8 @@ import * as GetMoneyMovementGroupsByMonthTool from "./tools/GetMoneyMovementGrou
 import * as GetMoneyMovementsTool from "./tools/GetMoneyMovementsTool.js";
 import * as GetMoneyMovementsByMonthTool from "./tools/GetMoneyMovementsByMonthTool.js";
 import * as GetMonthCategoryTool from "./tools/GetMonthCategoryTool.js";
+import * as GetMonthlyReviewTool from "./tools/GetMonthlyReviewTool.js";
+import * as GetNetWorthTrajectoryTool from "./tools/GetNetWorthTrajectoryTool.js";
 import * as GetPayeeLocationTool from "./tools/GetPayeeLocationTool.js";
 import * as GetPayeeLocationsByPayeeTool from "./tools/GetPayeeLocationsByPayeeTool.js";
 import * as GetPayeeTool from "./tools/GetPayeeTool.js";
@@ -103,6 +104,8 @@ const toolRegistrations = [
     defineTool("Get Money Movements By Month", GetMoneyMovementsByMonthTool),
     defineTool("Get Money Movement Groups", GetMoneyMovementGroupsTool),
     defineTool("Get Money Movement Groups By Month", GetMoneyMovementGroupsByMonthTool),
+    defineTool("Get Monthly Review", GetMonthlyReviewTool),
+    defineTool("Get Net Worth Trajectory", GetNetWorthTrajectoryTool),
     defineTool("Get Financial Snapshot", GetFinancialSnapshotTool),
     defineTool("Get Financial Health Check", GetFinancialHealthCheckTool),
     defineTool("Get Spending Summary", GetSpendingSummaryTool),
@@ -118,7 +121,6 @@ const toolRegistrations = [
     defineTool("Get Debt Summary", GetDebtSummaryTool),
     defineTool("Get Recurring Expense Summary", GetRecurringExpenseSummaryTool),
     defineTool("Get Category Trend Summary", GetCategoryTrendSummaryTool),
-    defineTool("Get 70/20/10 Summary", GetBudgetRatioSummaryTool),
 ];
 function registerTool(registrar, tool, api) {
     registrar.registerTool(tool.name, {

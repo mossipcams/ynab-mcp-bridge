@@ -61,8 +61,13 @@ function sanitizeLogValue(value: unknown): unknown {
   return Object.fromEntries(sanitizedEntries);
 }
 
+function sanitizeLogRecord(details: Record<string, unknown>) {
+  const sanitizedDetails = sanitizeLogValue(details);
+  return isRecord(sanitizedDetails) ? sanitizedDetails : {};
+}
+
 function getDefaultDestination(): DestinationStream {
-  return {
+  const destination: DestinationStream = {
     write(chunk: string | Uint8Array) {
       const line = typeof chunk === "string"
         ? chunk.trimEnd()
@@ -71,14 +76,16 @@ function getDefaultDestination(): DestinationStream {
       console.error(line);
       return true;
     },
-  } as DestinationStream;
+  };
+
+  return destination;
 }
 
 export function createLogger(options: {
-  destination?: DestinationStream;
+  destination?: DestinationStream | undefined;
 } = {}): Logger {
   return pino({
-    base: undefined,
+    base: null,
   }, options.destination ?? getDefaultDestination());
 }
 
@@ -100,8 +107,10 @@ export function logEvent(
   event: string,
   details: Record<string, unknown> = {},
 ) {
+  const sanitizedDetails = sanitizeLogRecord(details);
+
   logger.info({
-    ...sanitizeLogValue(details) as Record<string, unknown>,
+    ...sanitizedDetails,
     event,
     scope,
   }, event);

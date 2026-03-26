@@ -1,3 +1,4 @@
+import { getStringValue, isRecord } from "../typeUtils.js";
 import type { DetectedClientProfile } from "./types.js";
 
 const RESOLVED_CLIENT_PROFILE_KEY = "resolvedClientProfile";
@@ -9,5 +10,26 @@ export function setResolvedClientProfile(locals: ProfileLocals, profile: Detecte
 }
 
 export function getResolvedClientProfile(locals: ProfileLocals) {
-  return locals[RESOLVED_CLIENT_PROFILE_KEY] as DetectedClientProfile | undefined;
+  const value = locals[RESOLVED_CLIENT_PROFILE_KEY];
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const profileId = getStringValue(value, "profileId");
+  const reason = getStringValue(value, "reason");
+
+  if (
+    (profileId === "chatgpt" || profileId === "claude" || profileId === "codex" || profileId === "generic")
+    && typeof reason === "string"
+  ) {
+    const detectedProfile: DetectedClientProfile = {
+      profileId,
+      reason,
+    };
+
+    return detectedProfile;
+  }
+
+  return undefined;
 }

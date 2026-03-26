@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/tests",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "**/*.contract.ts",
+    "src/httpTransport.ts",
+    "src/index.ts",
+    "src/serverRuntime.ts",
+    "src/oauthRuntime.ts",
+    "src/grantPersistence.ts",
+    "src/grantLifecycle.ts",
+    "src/stdioServer.ts"
+  ]
+}

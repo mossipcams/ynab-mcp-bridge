@@ -2,38 +2,57 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function getYnabApiErrorMessage(error: unknown): string | undefined {
+  if (!isRecord(error) || !isRecord(error["error"])) {
+    return undefined;
+  }
+
+  const errorRecord = error["error"];
+  const detail = errorRecord["detail"];
+  if (typeof detail === "string" && detail.length > 0) {
+    return detail;
+  }
+
+  const name = errorRecord["name"];
+  if (typeof name === "string" && name.length > 0) {
+    return name;
+  }
+
+  return undefined;
+}
+
+function safeStringify(value: unknown): string | undefined {
+  try {
+    const stringified = JSON.stringify(value);
+    return stringified !== "{}" ? stringified : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Extracts a meaningful error message from various error types,
  * including YNAB API error responses.
  */
 export function getErrorMessage(error: unknown): string {
-  // Handle standard Error objects
   if (error instanceof Error) {
-    return error.message;
-  }
-
-  // Handle YNAB API error responses which have the structure:
-  // { error: { id: '...', name: '...', detail: '...' } }
-  if (isRecord(error) && isRecord(error.error)) {
-    const detail = error.error.detail;
-    if (typeof detail === "string" && detail.length > 0) {
-      return detail;
-    }
-
-    const name = error.error.name;
-    if (typeof name === "string" && name.length > 0) {
-      return name;
+    if (error.message) {
+      return error.message;
     }
   }
 
-  // Fallback: try to stringify the error
-  try {
-    const stringified = JSON.stringify(error);
-    if (stringified !== '{}') {
-      return stringified;
-    }
-  } catch {
-    // Ignore stringify errors
+  if (typeof error === "string" && error.length > 0) {
+    return error;
+  }
+
+  const ynabApiMessage = getYnabApiErrorMessage(error);
+  if (ynabApiMessage) {
+    return ynabApiMessage;
+  }
+
+  const stringified = safeStringify(error);
+  if (stringified) {
+    return stringified;
   }
 
   return "Unknown error occurred";

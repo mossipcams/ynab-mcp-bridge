@@ -7,7 +7,6 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
-import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import type { ClientProfileId } from "./clientProfiles/types.js";
 import {
@@ -17,6 +16,7 @@ import {
   normalizeScopes,
   type OAuthGrant,
   type OAuthGrantInput,
+  type OAuthGrantUpstreamTokens,
 } from "./oauthGrant.js";
 
 type ApprovalRecord = {
@@ -27,20 +27,20 @@ type ApprovalRecord = {
 
 type PendingConsentRecord = {
   clientId: string;
-  clientName?: string;
+  clientName?: string | undefined;
   codeChallenge: string;
   expiresAt: number;
   redirectUri: string;
   resource: string;
   scopes: string[];
-  state?: string;
+  state?: string | undefined;
 };
 
 type PendingAuthorizationRecord = Omit<PendingConsentRecord, "clientName">;
 
 type AuthorizationCodeRecord = PendingAuthorizationRecord & {
   principalId: string;
-  upstreamTokens: OAuthTokens;
+  upstreamTokens: OAuthGrantUpstreamTokens;
 };
 
 type RefreshTokenRecord = {
@@ -49,7 +49,7 @@ type RefreshTokenRecord = {
   principalId: string;
   resource: string;
   scopes: string[];
-  upstreamTokens: OAuthTokens;
+  upstreamTokens: OAuthGrantUpstreamTokens;
 };
 
 type LegacyPersistedOAuthState = {
@@ -79,9 +79,9 @@ function isApprovalRecord(value: unknown): value is ApprovalRecord {
     return false;
   }
 
-  return typeof value.clientId === "string" &&
-    typeof value.resource === "string" &&
-    Array.isArray(value.scopes);
+  return typeof value["clientId"] === "string" &&
+    typeof value["resource"] === "string" &&
+    Array.isArray(value["scopes"]);
 }
 
 function normalizeApprovalRecord(record: ApprovalRecord) {
@@ -292,7 +292,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
           scopes: authorizationCode.scopes,
           state: authorizationCode.state,
           principalId: authorizationCode.principalId ?? authorizationCode.subject,
-          upstreamTokens: authorizationCode.upstreamTokens as OAuthTokens,
+          upstreamTokens: authorizationCode.upstreamTokens as OAuthGrantUpstreamTokens,
         });
       }
     }
@@ -325,7 +325,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
           resource: refreshToken.resource,
           scopes: refreshToken.scopes,
           principalId: refreshToken.principalId ?? refreshToken.subject,
-          upstreamTokens: refreshToken.upstreamTokens as OAuthTokens,
+          upstreamTokens: refreshToken.upstreamTokens as OAuthGrantUpstreamTokens,
         });
       }
     }
@@ -456,7 +456,7 @@ function toRefreshTokenRecord(grant: OAuthGrant): RefreshTokenRecord | undefined
   };
 }
 
-function sanitizePersistedUpstreamTokens(tokens: OAuthTokens | undefined) {
+function sanitizePersistedUpstreamTokens(tokens: OAuthGrantUpstreamTokens | undefined) {
   if (!tokens) {
     return tokens;
   }
@@ -466,7 +466,7 @@ function sanitizePersistedUpstreamTokens(tokens: OAuthTokens | undefined) {
   }
 
   const { access_token: _accessToken, ...persistedTokens } = tokens;
-  return persistedTokens as OAuthTokens;
+  return persistedTokens as OAuthGrantUpstreamTokens;
 }
 
 function createPersistedStateSnapshot(state: PersistedOAuthState): PersistedOAuthState {
