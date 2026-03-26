@@ -67,14 +67,18 @@ export function paginateEntries<Entry>(
   };
 }
 
-export function hasCollectionControls(input: {
+export function hasPaginationControls(input: {
   limit?: number;
   offset?: number;
+}) {
+  return input.limit !== undefined
+    || input.offset !== undefined;
+}
+
+export function hasProjectionControls(input: {
   includeIds?: boolean;
   fields?: unknown[];
 }) {
-  return input.limit !== undefined
-    || input.offset !== undefined
-    || input.includeIds !== undefined
+  return input.includeIds !== undefined
     || input.fields !== undefined;
 }

@@ -78,6 +78,8 @@ describe("additional read-only tools", () => {
             category: {
               id: "cat-1",
               name: "Rent",
+              balance: 225000,
+              goal_target: 900000,
             },
           },
         }),
@@ -91,6 +93,8 @@ describe("additional read-only tools", () => {
       category: {
         id: "cat-1",
         name: "Rent",
+        balance: "225.00",
+        goal_target: "900.00",
       },
     });
   });
@@ -104,6 +108,9 @@ describe("additional read-only tools", () => {
               id: "cat-1",
               name: "Rent",
               budgeted: 120000,
+              activity: -45000,
+              balance: 75000,
+              goal_under_funded: 15000,
             },
           },
         }),
@@ -120,7 +127,10 @@ describe("additional read-only tools", () => {
       category: {
         id: "cat-1",
         name: "Rent",
-        budgeted: 120000,
+        budgeted: "120.00",
+        activity: "-45.00",
+        balance: "75.00",
+        goal_under_funded: "15.00",
       },
     });
   });
@@ -133,6 +143,7 @@ describe("additional read-only tools", () => {
             account: {
               id: "acct-1",
               name: "Checking",
+              balance: 125000,
             },
           },
         }),
@@ -146,6 +157,7 @@ describe("additional read-only tools", () => {
       account: {
         id: "acct-1",
         name: "Checking",
+        balance: "125.00",
       },
     });
   });
@@ -219,6 +231,54 @@ describe("additional read-only tools", () => {
         },
       ],
       account_count: 1,
+    });
+  });
+
+  it("projects account fields without paginating when no limit or offset is provided", async () => {
+    const api = {
+      accounts: {
+        getAccounts: vi.fn().mockResolvedValue({
+          data: {
+            accounts: [
+              {
+                id: "acct-1",
+                name: "Checking",
+                type: "checking",
+                deleted: false,
+                closed: false,
+                balance: 125000,
+              },
+              {
+                id: "acct-2",
+                name: "Savings",
+                type: "savings",
+                deleted: false,
+                closed: false,
+                balance: 500000,
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await ListAccountsTool.execute(
+      { planId: "plan-1", includeIds: false, fields: ["name", "balance"] },
+      api as any,
+    );
+
+    expect(parseText(result as any)).toEqual({
+      accounts: [
+        {
+          name: "Checking",
+          balance: "125.00",
+        },
+        {
+          name: "Savings",
+          balance: "500.00",
+        },
+      ],
+      account_count: 2,
     });
   });
 
@@ -460,6 +520,79 @@ describe("additional read-only tools", () => {
         },
       ],
       transaction_count: 1,
+    });
+  });
+
+  it("supports bounded projected month transaction listings", async () => {
+    const api = {
+      transactions: {
+        getTransactionsByMonth: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "txn-1",
+                date: "2026-03-01",
+                amount: -12500,
+                payee_name: "Grocer",
+                category_name: "Food",
+                account_name: "Checking",
+                approved: true,
+                cleared: "cleared",
+                deleted: false,
+              },
+              {
+                id: "txn-2",
+                date: "2026-03-02",
+                amount: -5000,
+                payee_name: "Cafe",
+                category_name: "Dining",
+                account_name: "Checking",
+                approved: false,
+                cleared: "uncleared",
+                deleted: false,
+              },
+              {
+                id: "txn-3",
+                date: "2026-03-03",
+                amount: -2500,
+                payee_name: "Transit",
+                category_name: "Transport",
+                account_name: "Checking",
+                approved: true,
+                cleared: "cleared",
+                deleted: false,
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetTransactionsByMonthTool.execute(
+      {
+        planId: "plan-1",
+        month: "2026-03-01",
+        limit: 1,
+        includeIds: false,
+        fields: ["date", "amount", "payee_name"],
+      },
+      api as any,
+    );
+
+    expect(parseText(result)).toEqual({
+      transactions: [
+        {
+          date: "2026-03-01",
+          amount: "-12.50",
+          payee_name: "Grocer",
+        },
+      ],
+      transaction_count: 3,
+      returned_count: 1,
+      offset: 0,
+      limit: 1,
+      has_more: true,
+      next_offset: 1,
     });
   });
 

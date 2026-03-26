@@ -138,6 +138,44 @@ describe("oauth broker persistence", () => {
     ]));
   });
 
+  it("logs non-callback oauth events through the shared oauth logger", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
+
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        ...upstream,
+        tokenSigningSecret: "test-oauth-signing-secret",
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const response = await startAuthorization(httpServer.url, registration.client_id);
+
+    expect(response.status).toBe(200);
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        clientId: registration.client_id,
+        event: "authorize.started",
+        msg: "authorize.started",
+        scope: "oauth",
+      }),
+      expect.objectContaining({
+        clientId: registration.client_id,
+        event: "authorize.consent_required",
+        msg: "authorize.consent_required",
+        scope: "oauth",
+      }),
+    ]));
+  });
+
   it("keeps unapproved clients on the consent screen after restart", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
     const storePath = path.join(tempDir, "oauth-store.json");

@@ -1,5 +1,7 @@
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
+import type { ClientProfileId } from "./clientProfiles/types.js";
+
 export type OAuthGrant = {
   authorizationCode?: {
     code: string;
@@ -7,6 +9,7 @@ export type OAuthGrant = {
   };
   clientId: string;
   clientName?: string;
+  compatibilityProfileId?: ClientProfileId;
   codeChallenge: string;
   consent?: {
     challenge: string;

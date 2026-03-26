@@ -32,7 +32,6 @@ type YnabApiWithInternals = {
 
 type YnabApiRuntimeContext = {
   config: YnabConfig;
-  runtimePlanIdOverride?: string;
 };
 
 type YnabApiWithRuntimeContext = ynab.API & {
@@ -116,7 +115,6 @@ export function attachYnabApiRuntimeContext<T extends object>(api: T, config: Yn
     enumerable: false,
     value: {
       config,
-      runtimePlanIdOverride: undefined,
     } satisfies YnabApiRuntimeContext,
     writable: false,
   });

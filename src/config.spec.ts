@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -252,6 +253,15 @@ describe("config", () => {
     })).toThrow("MCP_DEPLOYMENT_MODE=authless is incompatible with MCP_AUTH_MODE=oauth.");
   });
 
+  it("keeps app config focused on composition instead of owning runtime resolution internals", () => {
+    const source = readFileSync(new URL("./config.ts", import.meta.url), "utf8");
+
+    expect(source).toContain('from "./runtimeConfig.js"');
+    expect(source).toContain('from "./ynabConfig.js"');
+    expect(source).not.toContain("export function resolveRuntimeConfig");
+    expect(source).not.toContain("export function assertBackendEnvironment");
+  });
+
   it("reads only YNAB settings from environment", () => {
     expect(readYnabConfig({
       YNAB_API_TOKEN: "  token-2  ",
@@ -264,5 +274,17 @@ describe("config", () => {
 
   it("fails fast when the API token is missing", () => {
     expect(() => resolveAppConfig([], {})).toThrow("YNAB_API_TOKEN is required.");
+  });
+
+  it("documents a local preflight command that matches the CI validation flow", () => {
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+
+    expect(packageJson.scripts?.preflight).toBe(
+      "npm run test:ci && npm run test:coverage && npm run lint:deps && npm run lint && npm run typecheck && npm run lint:unused && npm run build",
+    );
+    expect(readme).toContain("npm run preflight");
   });
 });

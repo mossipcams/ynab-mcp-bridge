@@ -352,4 +352,52 @@ describe("plan read tools", () => {
       month_count: 1,
     });
   });
+
+  it("projects plan month fields without paginating when no limit or offset is provided", async () => {
+    const api = {
+      months: {
+        getPlanMonths: vi.fn().mockResolvedValue({
+          data: {
+            months: [
+              {
+                month: "2026-03-01",
+                income: 100000,
+                budgeted: 40000,
+                activity: 30000,
+                to_be_budgeted: 60000,
+                deleted: false,
+              },
+              {
+                month: "2026-02-01",
+                income: 90000,
+                budgeted: 35000,
+                activity: 28000,
+                to_be_budgeted: 55000,
+                deleted: false,
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await ListPlanMonthsTool.execute(
+      { planId: "plan-1", fields: ["month", "income"] },
+      api as any,
+    );
+
+    expect(parseResponseText(result)).toEqual({
+      months: [
+        {
+          month: "2026-03-01",
+          income: 100000,
+        },
+        {
+          month: "2026-02-01",
+          income: 90000,
+        },
+      ],
+      month_count: 2,
+    });
+  });
 });

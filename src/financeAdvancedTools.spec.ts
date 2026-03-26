@@ -356,6 +356,99 @@ describe("advanced finance tools", () => {
     });
   });
 
+  it("limits budget cleanup transaction counts to the requested month", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-03-02",
+                amount: -20000,
+                deleted: false,
+                approved: false,
+                cleared: "uncleared",
+                category_id: null,
+                payee_name: "Unknown Store",
+                account_name: "Checking",
+              },
+              {
+                id: "tx-2",
+                date: "2026-04-02",
+                amount: -45000,
+                deleted: false,
+                approved: false,
+                cleared: "uncleared",
+                category_id: null,
+                payee_name: "April Store",
+                account_name: "Checking",
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              deleted: false,
+              categories: [
+                {
+                  id: "cat-1",
+                  name: "Dining Out",
+                  hidden: false,
+                  deleted: false,
+                  balance: -12000,
+                  goal_under_funded: 0,
+                },
+              ],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetBudgetCleanupSummaryTool.execute(
+      { planId: "plan-1", month: "2026-03-01", topN: 5 },
+      api as any,
+    );
+
+    expect(parseText(result as any)).toEqual({
+      month: "2026-03-01",
+      uncategorized_transaction_count: 1,
+      unapproved_transaction_count: 1,
+      uncleared_transaction_count: 1,
+      overspent_category_count: 1,
+      hidden_problem_category_count: 0,
+      top_uncategorized_transactions: [
+        {
+          id: "tx-1",
+          date: "2026-03-02",
+          payee_name: "Unknown Store",
+          account_name: "Checking",
+          amount: "20.00",
+        },
+      ],
+      top_unapproved_transactions: [
+        {
+          id: "tx-1",
+          date: "2026-03-02",
+          payee_name: "Unknown Store",
+          amount: "20.00",
+        },
+      ],
+      top_overspent_categories: [
+        {
+          id: "cat-1",
+          name: "Dining Out",
+          amount: "12.00",
+        },
+      ],
+    });
+  });
+
   it("builds a compact income summary across a month range", async () => {
     const api = {
       transactions: {
@@ -600,6 +693,67 @@ describe("advanced finance tools", () => {
         },
       ],
     });
+  });
+
+  it("defaults category trend month ranges to the current month before expanding the month list", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-24T12:00:00.000Z"));
+
+    try {
+      const api = {
+        months: {
+          getPlanMonth: vi.fn().mockResolvedValue({
+            data: {
+              month: {
+                month: "2026-03-01",
+                deleted: false,
+                categories: [
+                  {
+                    id: "cat-1",
+                    name: "Groceries",
+                    category_group_name: "Living",
+                    deleted: false,
+                    hidden: false,
+                    budgeted: 165000,
+                    activity: -150000,
+                    balance: 15000,
+                  },
+                ],
+              },
+            },
+          }),
+        },
+      };
+
+      const result = await GetCategoryTrendSummaryTool.execute(
+        { planId: "plan-1", categoryGroupName: "Living" },
+        api as any,
+      );
+
+      expect(api.months.getPlanMonth).toHaveBeenCalledTimes(1);
+      expect(api.months.getPlanMonth).toHaveBeenCalledWith("plan-1", "2026-03-01");
+      expect(parseText(result as any)).toEqual({
+        from_month: "2026-03-01",
+        to_month: "2026-03-01",
+        scope: {
+          type: "category_group",
+          name: "Living",
+        },
+        average_spent: "150.00",
+        peak_month: "2026-03-01",
+        spent_change: "0.00",
+        periods: [
+          {
+            month: "2026-03-01",
+            assigned: "165.00",
+            spent: "150.00",
+            available: "15.00",
+          },
+        ],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("builds a compact 70/20/10-style allocation summary", async () => {

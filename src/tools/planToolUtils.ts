@@ -23,25 +23,10 @@ type PlanResolverApi = {
 type ResolvePlanIdOptions = {
   excludePlanIds?: string[];
   ignoreConfiguredPlanId?: boolean;
-  ignoreRuntimePlanIdOverride?: boolean;
 };
 
 function getApiConfiguredPlanId(api: object) {
   return getYnabApiRuntimeContext(api)?.config.planId?.trim();
-}
-
-function getRuntimePlanIdOverride(api: object) {
-  return getYnabApiRuntimeContext(api)?.runtimePlanIdOverride?.trim();
-}
-
-function setRuntimePlanIdOverride(api: object, planId: string) {
-  const runtimeContext = getYnabApiRuntimeContext(api);
-
-  if (!runtimeContext) {
-    return;
-  }
-
-  runtimeContext.runtimePlanIdOverride = planId;
 }
 
 function getConfiguredPlanId(inputPlanId: string | undefined, api: object, options: ResolvePlanIdOptions) {
@@ -49,11 +34,6 @@ function getConfiguredPlanId(inputPlanId: string | undefined, api: object, optio
 
   if (explicitPlanId) {
     return explicitPlanId;
-  }
-
-  const runtimePlanIdOverride = getRuntimePlanIdOverride(api);
-  if (!options.ignoreRuntimePlanIdOverride && runtimePlanIdOverride) {
-    return runtimePlanIdOverride;
   }
 
   if (!options.ignoreConfiguredPlanId) {
@@ -81,12 +61,6 @@ function pickResolvedPlanId(
   return undefined;
 }
 
-function rememberRuntimePlanId(api: object, planId: string, inputPlanId?: string) {
-  if (!inputPlanId) {
-    setRuntimePlanIdOverride(api, planId);
-  }
-}
-
 function isMissingPlanError(error: unknown) {
   const message = getErrorMessage(error).toLowerCase();
   return message.includes("not found") || message.includes("no entity was found");
@@ -108,7 +82,6 @@ async function resolvePlanId(
   const resolvedPlanId = pickResolvedPlanId(response.data.plans, response.data.default_plan?.id, excludedPlanIds);
 
   if (resolvedPlanId) {
-    rememberRuntimePlanId(api, resolvedPlanId, inputPlanId);
     return resolvedPlanId;
   }
 
@@ -134,10 +107,8 @@ export async function withResolvedPlan<T>(
     const recoveredPlanId = await resolvePlanId(undefined, api, {
       excludePlanIds: [planId],
       ignoreConfiguredPlanId: true,
-      ignoreRuntimePlanIdOverride: true,
     });
 
-    rememberRuntimePlanId(api, recoveredPlanId);
     return operation(recoveredPlanId);
   }
 }

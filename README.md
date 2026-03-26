@@ -34,6 +34,7 @@ It gives MCP clients a shared YNAB backend over either:
 ```bash
 npm install
 npm run build
+npm run preflight
 ```
 
 ### 2. Run the default local HTTP server

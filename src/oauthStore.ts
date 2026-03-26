@@ -4,6 +4,7 @@ import path from "node:path";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
+import type { ClientProfileId } from "./clientProfiles/types.js";
 import {
   getGrantExpiry,
   hasActiveGrantStep,
@@ -59,6 +60,7 @@ type LegacyPersistedOAuthState = {
 type PersistedOAuthState = {
   approvals: ApprovalRecord[];
   clients: Record<string, OAuthClientInformationFull>;
+  clientProfiles: Record<string, ClientProfileId>;
   grants: Record<string, OAuthGrant>;
   version: 2;
 };
@@ -88,6 +90,7 @@ function createEmptyState(): PersistedOAuthState {
   return {
     approvals: [],
     clients: {},
+    clientProfiles: {},
     grants: {},
     version: 2,
   };
@@ -109,6 +112,20 @@ function parseClients(value: unknown) {
   }
 
   return value as Record<string, OAuthClientInformationFull>;
+}
+
+function parseClientProfiles(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, ClientProfileId] => (
+        typeof entry[0] === "string" &&
+        (entry[1] === "chatgpt" || entry[1] === "claude" || entry[1] === "codex" || entry[1] === "generic")
+      )),
+  );
 }
 
 function parseGrantRecord(value: unknown): OAuthGrant | undefined {
@@ -135,6 +152,7 @@ function parseGrantRecord(value: unknown): OAuthGrant | undefined {
     authorizationCode: grant.authorizationCode,
     clientId: grant.clientId,
     clientName: grant.clientName,
+    compatibilityProfileId: grant.compatibilityProfileId,
     codeChallenge: grant.codeChallenge,
     consent: grant.consent,
     grantId: grant.grantId,
@@ -311,6 +329,7 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
   return {
     approvals: parseApprovals(parsed.approvals),
     clients: parseClients(parsed.clients),
+    clientProfiles: {},
     grants,
     version: 2,
   };
@@ -350,6 +369,7 @@ function loadState(storePath: string | undefined): PersistedOAuthState {
       return {
         approvals: parseApprovals(parsed.approvals),
         clients: parseClients(parsed.clients),
+        clientProfiles: parseClientProfiles((parsed as { clientProfiles?: unknown }).clientProfiles),
         grants: parseGrants(parsed.grants),
         version: 2,
       };
@@ -431,6 +451,31 @@ function toRefreshTokenRecord(grant: OAuthGrant): RefreshTokenRecord | undefined
   };
 }
 
+function sanitizePersistedUpstreamTokens(tokens: OAuthTokens | undefined) {
+  if (!tokens) {
+    return tokens;
+  }
+
+  if (typeof tokens.refresh_token !== "string" || tokens.refresh_token.length === 0) {
+    return tokens;
+  }
+
+  const { access_token: _accessToken, ...persistedTokens } = tokens;
+  return persistedTokens as OAuthTokens;
+}
+
+function createPersistedStateSnapshot(state: PersistedOAuthState): PersistedOAuthState {
+  return {
+    ...state,
+    grants: Object.fromEntries(
+      Object.entries(state.grants).map(([grantId, grant]) => [grantId, {
+        ...grant,
+        upstreamTokens: sanitizePersistedUpstreamTokens(grant.upstreamTokens),
+      } satisfies OAuthGrant]),
+    ),
+  };
+}
+
 export function createOAuthStore(storePath: string | undefined) {
   let state = pruneExpiredEntries(loadState(storePath));
 
@@ -441,7 +486,7 @@ export function createOAuthStore(storePath: string | undefined) {
 
     mkdirSync(path.dirname(storePath), { recursive: true });
     const tempPath = `${storePath}.${process.pid}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(state, null, 2));
+    writeFileSync(tempPath, JSON.stringify(createPersistedStateSnapshot(state), null, 2));
     renameSync(tempPath, storePath);
   }
 
@@ -537,6 +582,9 @@ export function createOAuthStore(storePath: string | undefined) {
     getClient(clientId: string) {
       return state.clients[clientId];
     },
+    getClientCompatibilityProfile(clientId: string) {
+      return state.clientProfiles[clientId];
+    },
     getGrant(grantId: string) {
       const grant = state.grants[grantId];
 
@@ -613,6 +661,16 @@ export function createOAuthStore(storePath: string | undefined) {
         clients: {
           ...state.clients,
           [client.client_id]: client,
+        },
+      };
+      persist();
+    },
+    saveClientCompatibilityProfile(clientId: string, profileId: ClientProfileId) {
+      state = {
+        ...state,
+        clientProfiles: {
+          ...state.clientProfiles,
+          [clientId]: profileId,
         },
       };
       persist();

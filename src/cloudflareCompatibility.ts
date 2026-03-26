@@ -1,20 +1,13 @@
 import { type RequestHandler } from "express";
 
 import type { RuntimeAuthConfig } from "./config.js";
+import { getFirstHeaderValue } from "./headerUtils.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { createOAuthTokenVerifier } from "./oauthVerifier.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
 
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
-
-function getFirstHeaderValue(value: string | string[] | undefined) {
-  if (typeof value === "string") {
-    return value.split(",")[0]?.trim();
-  }
-
-  return value?.[0]?.split(",")[0]?.trim();
-}
 
 function clampExpiresIn(expiresAtSeconds: number | undefined) {
   if (expiresAtSeconds === undefined) {

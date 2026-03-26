@@ -14,10 +14,18 @@ describe("getFirstHeaderValue", () => {
   it("returns the first element from a string array", () => {
     expect(getFirstHeaderValue(["text/html", "application/json"])).toBe("text/html");
   });
+
+  it("returns the first comma-delimited value from a string array entry", () => {
+    expect(getFirstHeaderValue(["trace-123, trace-456"])).toBe("trace-123");
+  });
 });
 
 describe("isLoopbackHostname", () => {
   it("returns true for localhost", () => {
     expect(isLoopbackHostname("localhost")).toBe(true);
+  });
+
+  it("returns false for non-loopback hosts", () => {
+    expect(isLoopbackHostname("example.com")).toBe(false);
   });
 });

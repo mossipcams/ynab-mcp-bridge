@@ -2,7 +2,8 @@ import { z } from "zod";
 import * as ynab from "ynab";
 
 import {
-  hasCollectionControls,
+  hasPaginationControls,
+  hasProjectionControls,
   paginateEntries,
   projectRecord,
 } from "./collectionToolUtils.js";
@@ -43,9 +44,16 @@ export async function execute(
         transfer_account_id: payee.transfer_account_id,
       }));
 
-    if (!hasCollectionControls(input)) {
+    if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
       return toTextResult({
         payees,
+        payee_count: payees.length,
+      });
+    }
+
+    if (!hasPaginationControls(input)) {
+      return toTextResult({
+        payees: payees.map((payee) => projectRecord(payee, payeeFields, input)),
         payee_count: payees.length,
       });
     }

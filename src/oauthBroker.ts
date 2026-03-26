@@ -8,10 +8,11 @@ import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { getEffectiveOAuthScopes, type RuntimeAuthConfig } from "./config.js";
-import { logAppEvent } from "./logger.js";
 import { createLocalTokenService } from "./localTokenService.js";
+import { logAppEvent } from "./logger.js";
 import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
 import { createOAuthStore } from "./oauthStore.js";
+import { getRequestLogFields } from "./requestContext.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
@@ -29,7 +30,10 @@ function getConsentPageHeaders(authorizationUrl: string) {
 }
 
 function logOAuthDebug(event: string, details: Record<string, unknown>) {
-  console.error("[oauth]", event, details);
+  logAppEvent("oauth", event, {
+    ...getRequestLogFields(),
+    ...details,
+  });
 }
 
 function getErrorDetails(error: unknown) {
@@ -110,6 +114,7 @@ function getBodyStringValue(body: unknown, key: string) {
 export function createOAuthBroker(config: OAuthAuthConfig): {
   callbackPath: string;
   callbackUrl: string;
+  getClientCompatibilityProfile: (clientId: string) => ReturnType<typeof core.getClientCompatibilityProfile>;
   getIssuerUrl: () => URL;
   handleConsent: RequestHandler;
   provider: OAuthServerProvider;
@@ -371,6 +376,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       res.redirect(302, result.location);
     } catch (error) {
       logAppEvent("oauth", "callback.failed", {
+        ...getRequestLogFields(),
         ...getErrorDetails(error),
         path: req.path,
       });
@@ -386,6 +392,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
   return {
     callbackPath: config.callbackPath,
     callbackUrl,
+    getClientCompatibilityProfile: core.getClientCompatibilityProfile,
     getIssuerUrl: () => new URL(issuerUrl.href),
     handleConsent,
     provider,

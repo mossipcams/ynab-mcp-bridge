@@ -2,14 +2,18 @@ import { InvalidGrantError, InvalidRequestError } from "@modelcontextprotocol/sd
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { describe, expect, it } from "vitest";
 
+import type { ClientProfileId } from "./clientProfiles/types.js";
 import { createOAuthCore } from "./oauthCore.js";
 import type { OAuthGrant } from "./oauthGrant.js";
 
 describe("createOAuthCore", () => {
   function createStore() {
     const clients = new Map<string, OAuthClientInformationFull>();
+    const clientProfiles = new Map<string, ClientProfileId>();
     const approvals: Array<{ clientId: string; resource: string; scopes: string[] }> = [];
+    const deletedGrantIds: string[] = [];
     const grants = new Map<string, OAuthGrant>();
+    let failNextSaveGrant = false;
 
     function findGrant(matcher: (grant: OAuthGrant) => boolean) {
       return Array.from(grants.values()).find(matcher);
@@ -23,6 +27,7 @@ describe("createOAuthCore", () => {
         });
       },
       deleteGrant(grantId: string) {
+        deletedGrantIds.push(grantId);
         grants.delete(grantId);
       },
       getAuthorizationCodeGrant(code: string) {
@@ -30,6 +35,9 @@ describe("createOAuthCore", () => {
       },
       getClient(clientId: string) {
         return clients.get(clientId);
+      },
+      getClientCompatibilityProfile(clientId: string) {
+        return clientProfiles.get(clientId);
       },
       getPendingAuthorizationGrant(stateId: string) {
         return findGrant((grant) => grant.pendingAuthorization?.stateId === stateId);
@@ -50,12 +58,24 @@ describe("createOAuthCore", () => {
       saveClient(client: OAuthClientInformationFull) {
         clients.set(client.client_id, client);
       },
+      saveClientCompatibilityProfile(clientId: string, profileId: ClientProfileId) {
+        clientProfiles.set(clientId, profileId);
+      },
       saveGrant(grant: OAuthGrant) {
+        if (failNextSaveGrant) {
+          failNextSaveGrant = false;
+          throw new Error("saveGrant failed");
+        }
         grants.set(grant.grantId, grant);
+      },
+      failNextGrantSave() {
+        failNextSaveGrant = true;
       },
       state: {
         approvals,
         clients,
+        clientProfiles,
+        deletedGrantIds,
         grants,
       },
     };
@@ -392,5 +412,206 @@ describe("createOAuthCore", () => {
       code: "upstream-code-123",
       upstreamState: "missing-state",
     })).rejects.toThrow(InvalidRequestError);
+  });
+
+  it("carries a stored compatibility profile across grant rotation and refresh lookup", async () => {
+    const { core, store } = createCore();
+    const client = await core.registerClient({
+      client_name: "ChatGPT Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://chatgpt.com/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+
+    store.saveClientCompatibilityProfile(client.client_id, "chatgpt");
+
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://chatgpt.com/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    expect(store.state.grants.get(consentResult.consentChallenge)).toMatchObject({
+      compatibilityProfileId: "chatgpt",
+    });
+
+    const approvalResult = await core.approveConsent(consentResult.consentChallenge, "approve");
+
+    if (approvalResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const upstreamState = new URL(approvalResult.location).searchParams.get("state");
+    expect(store.getPendingAuthorizationGrant(upstreamState!)).toMatchObject({
+      compatibilityProfileId: "chatgpt",
+    });
+
+    const callbackResult = await core.handleCallback({
+      code: "upstream-code-123",
+      upstreamState: upstreamState!,
+    });
+
+    if (callbackResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const authorizationCode = new URL(callbackResult.location).searchParams.get("code");
+    expect(store.getAuthorizationCodeGrant(authorizationCode!)).toMatchObject({
+      compatibilityProfileId: "chatgpt",
+    });
+
+    const initialTokens = await core.exchangeAuthorizationCode(
+      client,
+      authorizationCode!,
+      "https://chatgpt.com/oauth/callback",
+      new URL("https://mcp.example.com/mcp"),
+    );
+
+    expect(store.getRefreshTokenGrant(initialTokens.refresh_token!)).toMatchObject({
+      compatibilityProfileId: "chatgpt",
+    });
+
+    const refreshedTokens = await core.exchangeRefreshToken(
+      client,
+      initialTokens.refresh_token!,
+      ["openid", "profile"],
+      new URL("https://mcp.example.com/mcp"),
+    );
+
+    expect(store.getRefreshTokenGrant(refreshedTokens.refresh_token!)).toMatchObject({
+      compatibilityProfileId: "chatgpt",
+    });
+  });
+
+  it("keeps the original consent grant if approval cannot be saved", async () => {
+    const { core, store } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    store.failNextGrantSave();
+
+    await expect(core.approveConsent(consentResult.consentChallenge, "approve")).rejects.toThrow("saveGrant failed");
+    expect(store.getPendingConsentGrant(consentResult.consentChallenge)).toMatchObject({
+      consent: {
+        challenge: consentResult.consentChallenge,
+      },
+    });
+  });
+
+  it("keeps the pending authorization grant if callback persistence fails", async () => {
+    const { core, store } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    const approvalResult = await core.approveConsent(consentResult.consentChallenge, "approve");
+
+    if (approvalResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const upstreamState = new URL(approvalResult.location).searchParams.get("state");
+    store.failNextGrantSave();
+
+    await expect(core.handleCallback({
+      code: "upstream-code-123",
+      upstreamState: upstreamState!,
+    })).rejects.toThrow("saveGrant failed");
+    expect(store.getPendingAuthorizationGrant(upstreamState!)).toMatchObject({
+      pendingAuthorization: {
+        stateId: upstreamState,
+      },
+    });
+  });
+
+  it("keeps the authorization code grant if refresh-token persistence fails", async () => {
+    const { core, store } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    const consentResult = await core.startAuthorization(client, {
+      codeChallenge: "pkce-challenge",
+      redirectUri: "https://claude.ai/oauth/callback",
+      resource: new URL("https://mcp.example.com/mcp"),
+      scopes: ["openid", "profile"],
+      state: "client-state",
+    });
+
+    if (consentResult.type !== "consent") {
+      throw new Error("Expected consent result");
+    }
+
+    const approvalResult = await core.approveConsent(consentResult.consentChallenge, "approve");
+
+    if (approvalResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const upstreamState = new URL(approvalResult.location).searchParams.get("state");
+    const callbackResult = await core.handleCallback({
+      code: "upstream-code-123",
+      upstreamState: upstreamState!,
+    });
+
+    if (callbackResult.type !== "redirect") {
+      throw new Error("Expected redirect result");
+    }
+
+    const authorizationCode = new URL(callbackResult.location).searchParams.get("code");
+    store.failNextGrantSave();
+
+    await expect(core.exchangeAuthorizationCode(
+      client,
+      authorizationCode!,
+      "https://claude.ai/oauth/callback",
+      new URL("https://mcp.example.com/mcp"),
+    )).rejects.toThrow("saveGrant failed");
+    expect(store.getAuthorizationCodeGrant(authorizationCode!)).toMatchObject({
+      authorizationCode: {
+        code: authorizationCode,
+      },
+    });
   });
 });

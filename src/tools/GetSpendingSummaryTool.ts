@@ -1,7 +1,13 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { buildAssignedSpentSummary, formatMilliunits, toTopRollups } from "./financeToolUtils.js";
+import {
+  buildAssignedSpentSummary,
+  formatMilliunits,
+  isWithinMonthRange,
+  normalizeMonthRange,
+  toTopRollups,
+} from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_spending_summary";
@@ -17,15 +23,6 @@ export const inputSchema = {
   ),
   topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of top rollups to include."),
 };
-
-function toMonthEnd(month: string) {
-  const [year, monthNumber] = month.split("-").map((value) => Number.parseInt(value, 10));
-  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
-}
-
-function isWithinRange(date: string, fromMonth: string, toMonth: string) {
-  return date >= fromMonth && date <= toMonthEnd(toMonth);
-}
 
 function buildCategoryGroupLookup(categoryGroups: ynab.CategoryGroupWithCategories[]) {
   return new Map(
@@ -61,8 +58,7 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
-    const fromMonth = input.fromMonth || "current";
-    const toMonth = input.toMonth || fromMonth;
+    const { fromMonth, toMonth } = normalizeMonthRange(input.fromMonth, input.toMonth);
     const topN = input.topN ?? 5;
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
@@ -81,7 +77,7 @@ export async function execute(
         (transaction) => !transaction.deleted
           && !transaction.transfer_account_id
           && transaction.amount < 0
-          && isWithinRange(transaction.date, fromMonth, toMonth),
+          && isWithinMonthRange(transaction.date, fromMonth, toMonth),
       );
 
       for (const transaction of spendingTransactions) {

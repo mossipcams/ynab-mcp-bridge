@@ -23,10 +23,39 @@ export function toSpentMilliunits(activityMilliunits: number) {
   return Math.abs(activityMilliunits);
 }
 
+export function getCurrentMonthStartIsoDate() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+}
+
+export function normalizeMonthInput(month?: string) {
+  return !month || month === "current" ? getCurrentMonthStartIsoDate() : month;
+}
+
+export function normalizeMonthRange(fromMonth?: string, toMonth?: string) {
+  const normalizedFromMonth = normalizeMonthInput(fromMonth);
+  const normalizedToMonth = normalizeMonthInput(toMonth ?? normalizedFromMonth);
+
+  return {
+    fromMonth: normalizedFromMonth,
+    toMonth: normalizedToMonth,
+  };
+}
+
+export function toMonthEnd(month: string) {
+  const [year, monthNumber] = month.split("-").map((value) => Number.parseInt(value, 10));
+  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+}
+
+export function isWithinMonthRange(date: string, fromMonth: string, toMonth: string) {
+  return date >= fromMonth && date <= toMonthEnd(toMonth);
+}
+
 export function listMonthsInRange(fromMonth: string, toMonth: string) {
   const months: string[] = [];
-  const cursor = new Date(`${fromMonth}T00:00:00.000Z`);
-  const end = new Date(`${toMonth}T00:00:00.000Z`);
+  const normalizedRange = normalizeMonthRange(fromMonth, toMonth);
+  const cursor = new Date(`${normalizedRange.fromMonth}T00:00:00.000Z`);
+  const end = new Date(`${normalizedRange.toMonth}T00:00:00.000Z`);
 
   while (cursor <= end) {
     months.push(cursor.toISOString().slice(0, 10));
