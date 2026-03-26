@@ -139,14 +139,26 @@ function getNormalizedUserAgent(req) {
 function hasHeaderValue(value) {
     return Boolean(getFirstHeaderValue(value));
 }
+function getAuthDetails(auth) {
+    if (!isRecord(auth)) {
+        return {};
+    }
+    const extra = getRecordValueIfObject(auth, "extra");
+    const clientId = getStringValue(auth, "clientId");
+    const subject = extra ? getStringValue(extra, "subject") : undefined;
+    return {
+        ...(clientId ? { clientId } : {}),
+        ...(subject ? { subject } : {}),
+    };
+}
 export function getRequestDebugDetails(req, options = {}) {
-    const authSubject = req.auth?.extra?.["subject"];
+    const authDetails = getAuthDetails(req.auth);
     return {
         ...getRequestLogFields(),
         authMode: options.authMode,
-        authClientId: req.auth?.clientId,
+        authClientId: authDetails.clientId,
         authRequired: options.authRequired,
-        authSubject: typeof authSubject === "string" ? authSubject : undefined,
+        authSubject: authDetails.subject,
         hasAuthorizationHeader: hasHeaderValue(req.headers.authorization),
         hasCfAccessJwtAssertion: hasHeaderValue(req.headers["cf-access-jwt-assertion"]),
         method: req.method ?? "UNKNOWN",

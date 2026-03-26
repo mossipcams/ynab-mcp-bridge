@@ -14,8 +14,36 @@ import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import { createRequestContext, getCorrelationHeaderName, getRequestLogFields, hasToolCallStarted, runWithRequestContext, } from "./requestContext.js";
 import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
 import { createServer } from "./serverRuntime.js";
+import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
+class StreamableTransportAdapter {
+    transport;
+    onclose = () => { };
+    onerror = () => { };
+    onmessage = () => { };
+    constructor(transport) {
+        this.transport = transport;
+        this.transport.onclose = () => {
+            this.onclose();
+        };
+        this.transport.onerror = (error) => {
+            this.onerror(error);
+        };
+        this.transport.onmessage = (message, extra) => {
+            this.onmessage(message, extra);
+        };
+    }
+    start() {
+        return this.transport.start();
+    }
+    send(...args) {
+        return this.transport.send(...args);
+    }
+    close() {
+        return this.transport.close();
+    }
+}
 function getRequestPath(req) {
     if (typeof req.path === "string" && req.path.length > 0) {
         return req.path;
@@ -25,9 +53,20 @@ function getRequestPath(req) {
     }
     return new URL(req.url, "http://127.0.0.1").pathname;
 }
+function toClientProfileHeaders(headers) {
+    const normalizedHeaders = {};
+    for (const [name, value] of Object.entries(headers)) {
+        if (typeof value === "string" || Array.isArray(value)) {
+            normalizedHeaders[name] = value;
+            continue;
+        }
+        normalizedHeaders[name] = undefined;
+    }
+    return normalizedHeaders;
+}
 function toClientProfileRequestContext(req) {
     return {
-        headers: req.headers,
+        headers: toClientProfileHeaders(req.headers),
         method: req.method ?? "GET",
         path: getRequestPath(req),
     };
@@ -154,46 +193,50 @@ function getRequestDebugDetails(req, options = {}) {
     };
 }
 function getJsonRpcDebugDetails(parsedBody) {
-    if (!parsedBody || typeof parsedBody !== "object") {
+    if (!isRecord(parsedBody)) {
         return {};
     }
-    const request = parsedBody;
     const details = {};
-    if (typeof request.method === "string") {
-        details["jsonRpcMethod"] = request.method;
+    const method = getStringValue(parsedBody, "method");
+    if (typeof method === "string") {
+        details["jsonRpcMethod"] = method;
     }
-    if ("id" in request) {
-        details["jsonRpcId"] = request.id;
+    if ("id" in parsedBody) {
+        details["jsonRpcId"] = parsedBody["id"];
     }
     return details;
 }
 function getInitializeParams(parsedBody) {
-    if (!parsedBody || typeof parsedBody !== "object") {
+    if (!isRecord(parsedBody)) {
         return undefined;
     }
-    const request = parsedBody;
-    if (request.method !== "initialize" || !request.params || typeof request.params !== "object") {
+    if (getStringValue(parsedBody, "method") !== "initialize") {
         return undefined;
     }
-    return request.params;
+    const params = getRecordValueIfObject(parsedBody, "params");
+    if (!params) {
+        return undefined;
+    }
+    return {
+        capabilities: params["capabilities"],
+        clientInfo: params["clientInfo"],
+    };
 }
 function getToolCallName(parsedBody) {
-    if (!parsedBody || typeof parsedBody !== "object") {
+    if (!isRecord(parsedBody)) {
         return undefined;
     }
-    const request = parsedBody;
-    if (request.method !== "tools/call" || !request.params || typeof request.params !== "object") {
+    if (getStringValue(parsedBody, "method") !== "tools/call") {
         return undefined;
     }
-    const name = request.params.name;
-    return typeof name === "string" ? name : undefined;
+    const params = getRecordValueIfObject(parsedBody, "params");
+    return params ? getStringValue(params, "name") : undefined;
 }
 function getBodyStringValue(body, key) {
-    if (!body || typeof body !== "object") {
+    if (!isRecord(body)) {
         return undefined;
     }
-    const value = body[key];
-    return typeof value === "string" ? value : undefined;
+    return getStringValue(body, key);
 }
 function getPersistedOAuthProfileReason(profileId) {
     return `oauth-client-profile:${profileId}`;
@@ -229,9 +272,7 @@ async function createManagedRequest(config) {
     const transport = new StreamableHTTPServerTransport({
         enableJsonResponse: true,
     });
-    // The SDK transport matches the runtime contract, but exact optional typing is narrower here.
-    // @ts-ignore transport optional callbacks are runtime-compatible with McpServer.connect
-    await mcpServer.connect(transport);
+    await mcpServer.connect(new StreamableTransportAdapter(transport));
     return {
         transport,
         close: async () => {
@@ -264,7 +305,10 @@ async function closeNodeServer(server) {
     await new Promise((resolve, reject) => {
         server.close((error) => {
             if (error) {
-                if (error.code === "ERR_SERVER_NOT_RUNNING") {
+                if (typeof error === "object" &&
+                    error !== null &&
+                    "code" in error &&
+                    error.code === "ERR_SERVER_NOT_RUNNING") {
                     resolve();
                     return;
                 }
@@ -560,6 +604,9 @@ export async function startHttpServer(options) {
     });
     const address = server.address();
     if (!address || typeof address === "string") {
+        throw new Error("HTTP server did not expose a TCP address");
+    }
+    if (!("port" in address) || typeof address.port !== "number") {
         throw new Error("HTTP server did not expose a TCP address");
     }
     const resolvedAddress = address;

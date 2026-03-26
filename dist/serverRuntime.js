@@ -135,6 +135,7 @@ function registerTool(registrar, tool, api) {
             toolName: tool.name,
         });
         try {
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- MCP validates tool input before invocation.
             const result = await tool.execute(input, api);
             const failed = "isError" in result && result.isError === true;
             logAppEvent("mcp", failed ? "tool.call.failed" : "tool.call.succeeded", {
@@ -165,6 +166,7 @@ export function createServer(config, api = createYnabApi(config)) {
     const normalizedConfig = assertYnabConfig(config);
     const server = new McpServer(SERVER_INFO);
     const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- McpServer structurally satisfies the runtime registrar contract.
     registerServerTools(server, configuredApi);
     return server;
 }

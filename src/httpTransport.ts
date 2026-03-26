@@ -13,6 +13,7 @@ import {
   localhostHostValidation,
 } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import {
   assertYnabConfig,
@@ -42,6 +43,7 @@ import {
 } from "./requestContext.js";
 import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
 import { createServer } from "./serverRuntime.js";
+import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 
 type HttpServerOptions = {
   allowedHosts?: string[];
@@ -79,12 +81,6 @@ type RequestResolution =
 
 type HttpDebugDetails = Record<string, unknown>;
 
-type JsonRpcRequestLike = {
-  id?: unknown;
-  method?: unknown;
-  params?: unknown;
-};
-
 type InitializeParamsLike = {
   capabilities?: unknown;
   clientInfo?: unknown;
@@ -108,6 +104,36 @@ type InstallMcpPostRouteOptions = {
 
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 
+class StreamableTransportAdapter implements Transport {
+  public onclose: NonNullable<Transport["onclose"]> = () => {};
+  public onerror: NonNullable<Transport["onerror"]> = () => {};
+  public onmessage: NonNullable<Transport["onmessage"]> = () => {};
+
+  public constructor(private readonly transport: StreamableHTTPServerTransport) {
+    this.transport.onclose = () => {
+      this.onclose();
+    };
+    this.transport.onerror = (error) => {
+      this.onerror(error);
+    };
+    this.transport.onmessage = (message, extra) => {
+      this.onmessage(message, extra);
+    };
+  }
+
+  public start(): Promise<void> {
+    return this.transport.start();
+  }
+
+  public send(...args: Parameters<Transport["send"]>): Promise<void> {
+    return this.transport.send(...args);
+  }
+
+  public close(): Promise<void> {
+    return this.transport.close();
+  }
+}
+
 function getRequestPath(req: Pick<Request, "path" | "url">) {
   if (typeof req.path === "string" && req.path.length > 0) {
     return req.path;
@@ -120,9 +146,26 @@ function getRequestPath(req: Pick<Request, "path" | "url">) {
   return new URL(req.url, "http://127.0.0.1").pathname;
 }
 
+function toClientProfileHeaders(
+  headers: Pick<Request, "headers">["headers"],
+): ClientProfileRequestContext["headers"] {
+  const normalizedHeaders: Record<string, string | string[] | undefined> = {};
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (typeof value === "string" || Array.isArray(value)) {
+      normalizedHeaders[name] = value;
+      continue;
+    }
+
+    normalizedHeaders[name] = undefined;
+  }
+
+  return normalizedHeaders;
+}
+
 function toClientProfileRequestContext(req: Pick<Request, "headers" | "method" | "path" | "url">): ClientProfileRequestContext {
   return {
-    headers: req.headers as Record<string, string | string[] | undefined>,
+    headers: toClientProfileHeaders(req.headers),
     method: req.method ?? "GET",
     path: getRequestPath(req),
   };
@@ -286,60 +329,65 @@ function getRequestDebugDetails(
 }
 
 function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
-  if (!parsedBody || typeof parsedBody !== "object") {
+  if (!isRecord(parsedBody)) {
     return {};
   }
 
-  const request = parsedBody as JsonRpcRequestLike;
   const details: HttpDebugDetails = {};
+  const method = getStringValue(parsedBody, "method");
 
-  if (typeof request.method === "string") {
-    details["jsonRpcMethod"] = request.method;
+  if (typeof method === "string") {
+    details["jsonRpcMethod"] = method;
   }
 
-  if ("id" in request) {
-    details["jsonRpcId"] = request.id;
+  if ("id" in parsedBody) {
+    details["jsonRpcId"] = parsedBody["id"];
   }
 
   return details;
 }
 
 function getInitializeParams(parsedBody: unknown) {
-  if (!parsedBody || typeof parsedBody !== "object") {
+  if (!isRecord(parsedBody)) {
     return undefined;
   }
 
-  const request = parsedBody as JsonRpcRequestLike;
-
-  if (request.method !== "initialize" || !request.params || typeof request.params !== "object") {
+  if (getStringValue(parsedBody, "method") !== "initialize") {
     return undefined;
   }
 
-  return request.params as InitializeParamsLike;
+  const params = getRecordValueIfObject(parsedBody, "params");
+
+  if (!params) {
+    return undefined;
+  }
+
+  return {
+    capabilities: params["capabilities"],
+    clientInfo: params["clientInfo"],
+  } satisfies InitializeParamsLike;
 }
 
 function getToolCallName(parsedBody: unknown) {
-  if (!parsedBody || typeof parsedBody !== "object") {
+  if (!isRecord(parsedBody)) {
     return undefined;
   }
 
-  const request = parsedBody as JsonRpcRequestLike;
-
-  if (request.method !== "tools/call" || !request.params || typeof request.params !== "object") {
+  if (getStringValue(parsedBody, "method") !== "tools/call") {
     return undefined;
   }
 
-  const name = (request.params as { name?: unknown }).name;
-  return typeof name === "string" ? name : undefined;
+  const params = getRecordValueIfObject(parsedBody, "params");
+
+  return params ? getStringValue(params, "name") : undefined;
 }
 
 function getBodyStringValue(body: unknown, key: string) {
-  if (!body || typeof body !== "object") {
+  if (!isRecord(body)) {
     return undefined;
   }
 
-  const value = (body as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : undefined;
+  return getStringValue(body, key);
 }
 
 function getPersistedOAuthProfileReason(profileId: ClientProfileId) {
@@ -388,9 +436,7 @@ async function createManagedRequest(config: YnabConfig) {
     enableJsonResponse: true,
   });
 
-  // The SDK transport matches the runtime contract, but exact optional typing is narrower here.
-  // @ts-ignore transport optional callbacks are runtime-compatible with McpServer.connect
-  await mcpServer.connect(transport);
+  await mcpServer.connect(new StreamableTransportAdapter(transport));
 
   return {
     transport,
@@ -436,7 +482,12 @@ async function closeNodeServer(server: NodeHttpServer) {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => {
       if (error) {
-        if ((error as NodeJS.ErrnoException).code === "ERR_SERVER_NOT_RUNNING") {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "ERR_SERVER_NOT_RUNNING"
+        ) {
           resolve();
           return;
         }
@@ -518,7 +569,7 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
         void cleanup();
       });
 
-      const provisionalProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+      const provisionalProfile = getResolvedClientProfile(res.locals);
       const initializeParams = getInitializeParams(parsedBody);
 
       if (provisionalProfile && initializeParams) {
@@ -528,7 +579,7 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
         });
         const reconciliation = reconcileClientProfile(provisionalProfile, confirmedProfile);
 
-        setResolvedClientProfile(res.locals as Record<string, unknown>, reconciliation.profile);
+        setResolvedClientProfile(res.locals, reconciliation.profile);
 
         if (!reconciliation.mismatch && confirmedProfile) {
           logClientProfileEvent("profile.detected", {
@@ -549,7 +600,7 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
         }
       }
 
-      const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+      const resolvedProfile = getResolvedClientProfile(res.locals);
 
       logHttpDebug("transport.handoff", {
         ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
@@ -622,7 +673,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   app.set("trust proxy", 1);
 
   app.use((req, res, next) => {
-    const requestContext = createRequestContext(req.headers as Record<string, string | string[] | undefined>);
+    const requestContext = createRequestContext(req.headers);
 
     runWithRequestContext(requestContext, () => {
       res.setHeader(getCorrelationHeaderName(), requestContext.correlationId);
@@ -648,7 +699,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     const tokenClientId = auth.mode === "oauth" &&
       getRequestPath(req) === "/token" &&
       req.method === "POST"
-      ? getBodyStringValue(req.body as unknown, "client_id")
+      ? getBodyStringValue(req.body, "client_id")
       : undefined;
     const persistedProfileId = auth.mode === "oauth" && tokenClientId
       ? mcpAuthModule?.getClientCompatibilityProfile(tokenClientId)
@@ -661,7 +712,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
         }
       : requestProfile;
 
-    setResolvedClientProfile(res.locals as Record<string, unknown>, detectedProfile);
+    setResolvedClientProfile(res.locals, detectedProfile);
     logClientProfileEvent("profile.detected", {
       method: req.method ?? "GET",
       path: getRequestPath(req),
@@ -810,7 +861,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     throw new Error("HTTP server did not expose a TCP address");
   }
 
-  const resolvedAddress = address as AddressInfo;
+  if (!("port" in address) || typeof address.port !== "number") {
+    throw new Error("HTTP server did not expose a TCP address");
+  }
+
+  const resolvedAddress: AddressInfo = address;
   let closed = false;
 
   return {

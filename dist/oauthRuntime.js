@@ -16,6 +16,7 @@ import { logAppEvent } from "./logger.js";
 import { createOAuthCore } from "./grantLifecycle.js";
 import { createOAuthStore } from "./grantPersistence.js";
 import { getRequestLogFields } from "./requestContext.js";
+import { getStringValue, isRecord } from "./typeUtils.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 function getConsentPageHeaders(authorizationUrl) {
     const authorizationOrigin = new URL(authorizationUrl).origin;
@@ -93,11 +94,10 @@ function getTokenResponseDebugDetails(tokens) {
     };
 }
 function getBodyStringValue(body, key) {
-    if (!body || typeof body !== "object") {
+    if (!isRecord(body)) {
         return undefined;
     }
-    const value = body[key];
-    return typeof value === "string" ? value : undefined;
+    return getStringValue(body, key);
 }
 export function createOAuthBroker(config) {
     const store = createOAuthStore(config.storePath);

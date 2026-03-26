@@ -1,6 +1,7 @@
 import type { Server as NodeHttpServer } from "node:http";
 import type { Request, Response } from "express";
 import { decodeJwt } from "jose";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 
 import type { RuntimeAuthConfig } from "./config.js";
 import { logAppEvent } from "./logger.js";
@@ -53,6 +54,10 @@ export type HttpDebugDetails = Record<string, unknown>;
 type InitializeParamsLike = {
   capabilities?: unknown;
   clientInfo?: unknown;
+};
+
+type AuthenticatedRequest = Request & {
+  auth?: AuthInfo;
 };
 
 export function getRequestPath(req: Pick<Request, "path" | "url">): string {
@@ -229,20 +234,36 @@ function hasHeaderValue(value: string | string[] | undefined) {
   return Boolean(getFirstHeaderValue(value));
 }
 
+function getAuthDetails(auth: AuthInfo | undefined): { clientId?: string; subject?: string } {
+  if (!isRecord(auth)) {
+    return {};
+  }
+
+  const extra = getRecordValueIfObject(auth, "extra");
+  const clientId = getStringValue(auth, "clientId");
+  const subject = extra ? getStringValue(extra, "subject") : undefined;
+
+  return {
+    ...(clientId ? { clientId } : {}),
+    ...(subject ? { subject } : {}),
+  };
+}
+
 export function getRequestDebugDetails(
-  req: Request,
+  req: AuthenticatedRequest,
   options: {
     authMode?: RuntimeAuthConfig["mode"] | undefined;
     authRequired?: boolean | undefined;
   } = {},
 ): HttpDebugDetails {
-  const authSubject = req.auth?.extra?.["subject"];
+  const authDetails = getAuthDetails(req.auth);
+
   return {
     ...getRequestLogFields(),
     authMode: options.authMode,
-    authClientId: req.auth?.clientId,
+    authClientId: authDetails.clientId,
     authRequired: options.authRequired,
-    authSubject: typeof authSubject === "string" ? authSubject : undefined,
+    authSubject: authDetails.subject,
     hasAuthorizationHeader: hasHeaderValue(req.headers.authorization),
     hasCfAccessJwtAssertion: hasHeaderValue(req.headers["cf-access-jwt-assertion"]),
     method: req.method ?? "UNKNOWN",

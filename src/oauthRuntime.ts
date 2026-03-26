@@ -23,6 +23,7 @@ import { logAppEvent } from "./logger.js";
 import { createOAuthCore, type PendingConsent } from "./grantLifecycle.js";
 import { createOAuthStore } from "./grantPersistence.js";
 import { getRequestLogFields } from "./requestContext.js";
+import { getStringValue, isRecord } from "./typeUtils.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
@@ -134,12 +135,11 @@ function getTokenResponseDebugDetails(tokens: OAuthTokens) {
 }
 
 function getBodyStringValue(body: unknown, key: string) {
-  if (!body || typeof body !== "object") {
+  if (!isRecord(body)) {
     return undefined;
   }
 
-  const value = (body as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : undefined;
+  return getStringValue(body, key);
 }
 
 export function createOAuthBroker(config: OAuthAuthConfig): {
@@ -343,8 +343,8 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
 
   const handleConsent: RequestHandler = async (req, res, next) => {
     try {
-      const consentChallenge = getBodyStringValue(req.body as unknown, "consent_challenge");
-      const action = getBodyStringValue(req.body as unknown, "action");
+      const consentChallenge = getBodyStringValue(req.body, "consent_challenge");
+      const action = getBodyStringValue(req.body, "action");
       logOAuthDebug("consent.received", {
         action,
         hasConsentChallenge: Boolean(consentChallenge),
@@ -512,7 +512,7 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
   } = options;
 
   app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
-    const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+    const resolvedProfile = getResolvedClientProfile(res.locals);
 
     if (resolvedProfile?.profileId !== "chatgpt") {
       next();
@@ -523,7 +523,7 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
   });
 
   app.use((req, res, next) => {
-    const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+    const resolvedProfile = getResolvedClientProfile(res.locals);
     const canonicalPath = getCanonicalOAuthDiscoveryPath(
       getRequestPath(req),
       resolvedProfile?.profileId ?? "generic",
@@ -595,13 +595,13 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
       profileId: persistedProfileId,
       reason: getPersistedOAuthProfileReason(persistedProfileId),
     };
-    const resolvedProfile = getResolvedClientProfile(res.locals as Record<string, unknown>);
+    const resolvedProfile = getResolvedClientProfile(res.locals);
 
     if (
       resolvedProfile?.profileId !== persistedProfile.profileId ||
       resolvedProfile.reason !== persistedProfile.reason
     ) {
-      setResolvedClientProfile(res.locals as Record<string, unknown>, persistedProfile);
+      setResolvedClientProfile(res.locals, persistedProfile);
       logClientProfileEvent("profile.detected", {
         method: req.method ?? "GET",
         path: getRequestPath(req),

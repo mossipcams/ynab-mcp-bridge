@@ -79,19 +79,28 @@ type ToolModule = {
   name: string;
   description: string;
   inputSchema: unknown;
-  execute: (input: any, api: API) => Promise<CallToolResult>;
+  execute: (input: never, api: API) => Promise<CallToolResult> | CallToolResult;
 };
 
 type ToolSource = Omit<ToolModule, "title">;
 type ToolRegistrar = {
-  registerTool: (...args: any[]) => unknown;
+  registerTool: (
+    name: string,
+    config: {
+      annotations?: unknown;
+      description?: string;
+      inputSchema?: unknown;
+      title?: string;
+    },
+    cb: (input: Record<string, unknown>) => unknown,
+  ) => unknown;
 };
 
-export function defineTool(title: string, tool: any): ToolModule {
+export function defineTool(title: string, tool: ToolSource): ToolModule {
   return {
     title,
     ...tool,
-  } as ToolModule;
+  };
 }
 
 const toolRegistrations: ToolModule[] = [
@@ -144,7 +153,7 @@ const toolRegistrations: ToolModule[] = [
   defineTool("Get Category Trend Summary", GetCategoryTrendSummaryTool),
 ];
 
-function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: API) {
+function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: API): void {
   registrar.registerTool(
     tool.name,
     {
@@ -153,7 +162,7 @@ function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: API) {
       inputSchema: tool.inputSchema,
       annotations: READ_ONLY_TOOL_ANNOTATIONS,
     },
-    async (input: unknown) => {
+    async (input: Record<string, unknown>) => {
       markToolCallStarted();
       logAppEvent("mcp", "tool.call.started", {
         ...getRequestLogFields(),
@@ -161,7 +170,8 @@ function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: API) {
       });
 
       try {
-        const result = await tool.execute(input, api);
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- MCP validates tool input before invocation.
+        const result = await tool.execute(input as never, api);
         const failed = "isError" in result && result.isError === true;
 
         logAppEvent("mcp", failed ? "tool.call.failed" : "tool.call.succeeded", {
@@ -182,7 +192,7 @@ function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: API) {
   );
 }
 
-export function registerServerTools(registrar: ToolRegistrar, api: API) {
+export function registerServerTools(registrar: ToolRegistrar, api: API): string[] {
   const registeredToolNames: string[] = [];
 
   for (const tool of toolRegistrations) {
@@ -193,11 +203,12 @@ export function registerServerTools(registrar: ToolRegistrar, api: API) {
   return registeredToolNames;
 }
 
-export function createServer(config: YnabConfig, api = createYnabApi(config)) {
+export function createServer(config: YnabConfig, api = createYnabApi(config)): McpServer {
   const normalizedConfig = assertYnabConfig(config);
   const server = new McpServer(SERVER_INFO);
   const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
 
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- McpServer structurally satisfies the runtime registrar contract.
   registerServerTools(server as unknown as ToolRegistrar, configuredApi);
 
   return server;
