@@ -28,19 +28,24 @@ const sharedTransactionBrowseTools = [
 ] as const;
 
 describe("duplicate code remediation", () => {
-  it("centralizes list-tool collection rendering behind a shared helper", () => {
+  it("centralizes list-tool pagination and projection primitives behind shared helpers", () => {
     const helperSource = readFileSync(collectionToolUtilsPath, "utf8");
 
-    expect(helperSource).toContain("export function renderCollectionResult");
+    expect(helperSource).toContain("export function hasPaginationControls");
+    expect(helperSource).toContain("export function hasProjectionControls");
+    expect(helperSource).toContain("export function paginateEntries");
+    expect(helperSource).toContain("export function projectRecord");
 
     for (const toolFile of sharedCollectionTools) {
       const toolSource = readFileSync(path.join(projectRoot, "src", "tools", toolFile), "utf8");
 
-      expect(toolSource).toContain("renderCollectionResult(");
-      expect(toolSource).not.toContain("hasPaginationControls(");
-      expect(toolSource).not.toContain("hasProjectionControls(");
-      expect(toolSource).not.toContain("paginateEntries(");
-      expect(toolSource).not.toContain("projectRecord(");
+      expect(toolSource).toContain("collectionToolUtils");
+      expect(toolSource).toContain("hasPaginationControls(");
+      expect(toolSource).toContain("hasProjectionControls(");
+      expect(toolSource).toContain("paginateEntries(");
+      expect(toolSource).toContain("projectRecord(");
+      expect(toolSource).not.toContain("function normalizePaginationNumber(");
+      expect(toolSource).not.toContain("const DEFAULT_LIMIT =");
     }
   });
 
@@ -105,7 +110,7 @@ describe("duplicate code remediation", () => {
     }
   });
 
-  it("centralizes oauth grant record views behind a shared helper", () => {
+  it("keeps oauth grant record view shaping local to oauthStore while preserving standalone helper coverage", () => {
     const helperPath = path.join(projectRoot, "src", "oauthGrantViews.ts");
     const helperSource = readFileSync(helperPath, "utf8");
 
@@ -117,28 +122,31 @@ describe("duplicate code remediation", () => {
     const oauthStoreSource = readFileSync(path.join(projectRoot, "src", "oauthStore.ts"), "utf8");
     const oauthCoreSource = readFileSync(path.join(projectRoot, "src", "oauthCore.ts"), "utf8");
 
+    expect(oauthStoreSource).not.toContain('from "./oauthGrantViews.js"');
     expect(oauthStoreSource).toContain("toPendingConsentRecord(");
     expect(oauthStoreSource).toContain("toPendingAuthorizationRecord(");
     expect(oauthStoreSource).toContain("toAuthorizationCodeRecord(");
     expect(oauthStoreSource).toContain("toRefreshTokenRecord(");
-    expect(oauthStoreSource).not.toContain("function toPendingConsentRecord(");
-    expect(oauthStoreSource).not.toContain("function toPendingAuthorizationRecord(");
-    expect(oauthStoreSource).not.toContain("function toAuthorizationCodeRecord(");
-    expect(oauthStoreSource).not.toContain("function toRefreshTokenRecord(");
+    expect(oauthStoreSource).toContain("function toPendingConsentRecord(");
+    expect(oauthStoreSource).toContain("function toPendingAuthorizationRecord(");
+    expect(oauthStoreSource).toContain("function toAuthorizationCodeRecord(");
+    expect(oauthStoreSource).toContain("function toRefreshTokenRecord(");
 
-    expect(oauthCoreSource).toContain("toPendingConsentRecord(");
-    expect(oauthCoreSource).not.toContain("function toPendingConsent(");
+    expect(oauthCoreSource).toContain("function toPendingConsent(");
+    expect(oauthCoreSource).not.toContain("toPendingConsentRecord(");
   });
 
-  it("centralizes authorization-code grant validation behind one oauth core helper", () => {
+  it("keeps authorization-code validation explicit at the two oauth core call sites", () => {
     const oauthCoreSource = readFileSync(path.join(projectRoot, "src", "oauthCore.ts"), "utf8");
 
-    expect(oauthCoreSource).toContain("function requireAuthorizationCodeGrant(");
-    expect(oauthCoreSource.match(/Unknown authorization code\./g)?.length ?? 0).toBe(1);
-    expect(oauthCoreSource.match(/Authorization code has expired\./g)?.length ?? 0).toBe(1);
+    expect(oauthCoreSource).toContain("async function getAuthorizationCodeChallenge(");
+    expect(oauthCoreSource).toContain("async function exchangeAuthorizationCode(");
+    expect(oauthCoreSource).not.toContain("function requireAuthorizationCodeGrant(");
+    expect(oauthCoreSource.match(/Unknown authorization code\./g)?.length ?? 0).toBe(2);
+    expect(oauthCoreSource.match(/Authorization code has expired\./g)?.length ?? 0).toBe(2);
   });
 
-  it("centralizes oauth compatibility grant persistence behind shared builders", () => {
+  it("keeps compatibility grant builders standalone while oauthStore owns live persistence methods", () => {
     const helperPath = path.join(projectRoot, "src", "oauthCompatibilityGrants.ts");
     const helperSource = readFileSync(helperPath, "utf8");
     const oauthStoreSource = readFileSync(path.join(projectRoot, "src", "oauthStore.ts"), "utf8");
@@ -148,45 +156,45 @@ describe("duplicate code remediation", () => {
     expect(helperSource).toContain("export function createPendingConsentCompatibilityGrant");
     expect(helperSource).toContain("export function createRefreshTokenCompatibilityGrant");
 
-    expect(oauthStoreSource).toContain("createAuthorizationCodeCompatibilityGrant(");
-    expect(oauthStoreSource).toContain("createPendingAuthorizationCompatibilityGrant(");
-    expect(oauthStoreSource).toContain("createPendingConsentCompatibilityGrant(");
-    expect(oauthStoreSource).toContain("createRefreshTokenCompatibilityGrant(");
-    expect(oauthStoreSource).not.toContain("[`compat-code:${code}`]: normalizeGrant({");
-    expect(oauthStoreSource).not.toContain("[`compat-authorization:${stateId}`]: normalizeGrant({");
-    expect(oauthStoreSource).not.toContain("[`compat-consent:${consentId}`]: normalizeGrant({");
-    expect(oauthStoreSource).not.toContain("[`compat-refresh:${refreshToken}`]: normalizeGrant({");
+    expect(oauthStoreSource).not.toContain('from "./oauthCompatibilityGrants.js"');
+    expect(oauthStoreSource).toContain("saveAuthorizationCode(code: string, record: AuthorizationCodeRecord)");
+    expect(oauthStoreSource).toContain("savePendingAuthorization(stateId: string, record: PendingAuthorizationRecord)");
+    expect(oauthStoreSource).toContain("savePendingConsent(consentId: string, record: PendingConsentRecord)");
+    expect(oauthStoreSource).toContain("saveRefreshToken(refreshToken: string, record: RefreshTokenRecord)");
+    expect(oauthStoreSource).toContain("[`compat-code:${code}`]: normalizeGrant({");
+    expect(oauthStoreSource).toContain("[`compat-authorization:${stateId}`]: normalizeGrant({");
+    expect(oauthStoreSource).toContain("[`compat-consent:${consentId}`]: normalizeGrant({");
+    expect(oauthStoreSource).toContain("[`compat-refresh:${refreshToken}`]: normalizeGrant({");
   });
 
-  it("keeps compatibility persistence local to oauthStore behind one narrow save helper", () => {
+  it("keeps compatibility persistence localized to dedicated oauthStore save methods", () => {
     const helperSource = readFileSync(path.join(projectRoot, "src", "oauthCompatibilityGrants.ts"), "utf8");
     const oauthStoreSource = readFileSync(path.join(projectRoot, "src", "oauthStore.ts"), "utf8");
 
     expect(helperSource).not.toContain("persist(");
     expect(helperSource).not.toContain("state =");
 
-    expect(oauthStoreSource).toContain("function saveCompatibilityGrant(");
-    expect(oauthStoreSource.match(/saveCompatibilityGrant\(/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
-    expect(oauthStoreSource.match(/persist\(\);/g)?.length ?? 0).toBeLessThan(8);
+    expect(oauthStoreSource).not.toContain("function saveCompatibilityGrant(");
+    expect(oauthStoreSource.match(/saveAuthorizationCode\(/g)?.length ?? 0).toBe(1);
+    expect(oauthStoreSource.match(/savePendingAuthorization\(/g)?.length ?? 0).toBe(1);
+    expect(oauthStoreSource.match(/savePendingConsent\(/g)?.length ?? 0).toBe(1);
+    expect(oauthStoreSource.match(/saveRefreshToken\(/g)?.length ?? 0).toBe(1);
+    expect(oauthStoreSource.match(/persist\(\);/g)?.length ?? 0).toBeGreaterThanOrEqual(8);
   });
 
-  it("delegates oauth store migration and persisted-state parsing to a dedicated module", () => {
+  it("keeps oauth migration helpers standalone while oauthStore still owns live load-state parsing", () => {
     const migrationSource = readFileSync(path.join(projectRoot, "src", "oauthStoreMigration.ts"), "utf8");
     const oauthStoreSource = readFileSync(path.join(projectRoot, "src", "oauthStore.ts"), "utf8");
 
     expect(migrationSource).toContain("export function loadPersistedOAuthState(");
-    expect(oauthStoreSource).toContain("loadPersistedOAuthState(");
-    expect(migrationSource).not.toContain("type LegacyPersistedOAuthState");
-    expect(migrationSource).not.toContain("function migrateLegacyState(");
-    expect(migrationSource).not.toContain("function toLegacyPendingConsentGrant(");
-    expect(migrationSource).not.toContain("function toLegacyPendingAuthorizationGrant(");
-    expect(migrationSource).not.toContain("function toLegacyAuthorizationCodeGrant(");
-    expect(migrationSource).not.toContain("function toLegacyRefreshTokenGrant(");
-    expect(oauthStoreSource).not.toContain("function parseGrantRecord(");
-    expect(oauthStoreSource).not.toContain("function migrateLegacyState(");
+    expect(migrationSource).toContain("export function deserializePersistedOAuthState(");
+    expect(oauthStoreSource).toContain("function loadState(");
+    expect(oauthStoreSource).not.toContain('from "./oauthStoreMigration.js"');
+    expect(oauthStoreSource).toContain("function parseGrantRecord(");
+    expect(oauthStoreSource).toContain("function migrateLegacyState(");
   });
 
-  it("keeps persisted-state deserialization in the migration module and live file I/O in oauthStore", () => {
+  it("keeps migration helpers free of file I/O while oauthStore owns file access and JSON parsing", () => {
     const migrationSource = readFileSync(path.join(projectRoot, "src", "oauthStoreMigration.ts"), "utf8");
     const oauthStoreSource = readFileSync(path.join(projectRoot, "src", "oauthStore.ts"), "utf8");
 
@@ -194,33 +202,36 @@ describe("duplicate code remediation", () => {
     expect(migrationSource).not.toContain("readFileSync(");
     expect(migrationSource).not.toContain("writeFileSync(");
     expect(migrationSource).not.toContain("renameSync(");
-    expect(oauthStoreSource).toContain("deserializePersistedOAuthState(");
-    expect(oauthStoreSource).not.toContain("JSON.parse(");
+    expect(oauthStoreSource).not.toContain("deserializePersistedOAuthState(");
+    expect(oauthStoreSource).toContain("JSON.parse(");
     expect(oauthStoreSource).toContain("readFileSync(");
     expect(oauthStoreSource).toContain("writeFileSync(");
   });
 
-  it("centralizes oauth grant rotation behind one narrow core helper", () => {
+  it("keeps oauth grant mutation explicit through store.saveGrant at transition sites", () => {
     const oauthCoreSource = readFileSync(path.join(projectRoot, "src", "oauthCore.ts"), "utf8");
 
-    expect(oauthCoreSource).toContain("function replaceGrant(");
-    expect(oauthCoreSource.match(/replaceGrant\(/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
-    expect(oauthCoreSource.match(/store\.saveGrant\(\{/g)?.length ?? 0).toBeLessThanOrEqual(1);
+    expect(oauthCoreSource).not.toContain("function replaceGrant(");
+    expect(oauthCoreSource.match(/store\.saveGrant\(\{/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
   });
 
-  it("centralizes pending oauth grant validation behind narrow core helpers", () => {
+  it("keeps pending oauth grant validation explicit in consent and callback flows", () => {
     const oauthCoreSource = readFileSync(path.join(projectRoot, "src", "oauthCore.ts"), "utf8");
 
-    expect(oauthCoreSource).toContain("function requirePendingConsentGrant(");
-    expect(oauthCoreSource).toContain("function requirePendingAuthorizationGrant(");
-    expect(oauthCoreSource.match(/store\.getPendingConsentGrant\(/g)?.length ?? 0).toBeLessThanOrEqual(1);
-    expect(oauthCoreSource.match(/store\.getPendingAuthorizationGrant\(/g)?.length ?? 0).toBeLessThanOrEqual(1);
+    expect(oauthCoreSource).not.toContain("function requirePendingConsentGrant(");
+    expect(oauthCoreSource).not.toContain("function requirePendingAuthorizationGrant(");
+    expect(oauthCoreSource.match(/store\.getPendingConsentGrant\(/g)?.length ?? 0).toBe(1);
+    expect(oauthCoreSource.match(/store\.getPendingAuthorizationGrant\(/g)?.length ?? 0).toBe(1);
+    expect(oauthCoreSource.match(/Unknown consent challenge\./g)?.length ?? 0).toBe(2);
+    expect(oauthCoreSource.match(/Unknown upstream OAuth state\./g)?.length ?? 0).toBe(1);
   });
 
-  it("keeps refresh-token grant validation behind one narrow core helper", () => {
+  it("keeps refresh-token grant validation explicit in the refresh exchange flow", () => {
     const oauthCoreSource = readFileSync(path.join(projectRoot, "src", "oauthCore.ts"), "utf8");
 
-    expect(oauthCoreSource).toContain("function requireRefreshTokenGrant(");
-    expect(oauthCoreSource.match(/store\.getRefreshTokenGrant\(/g)?.length ?? 0).toBeLessThanOrEqual(1);
+    expect(oauthCoreSource).not.toContain("function requireRefreshTokenGrant(");
+    expect(oauthCoreSource.match(/store\.getRefreshTokenGrant\(/g)?.length ?? 0).toBe(1);
+    expect(oauthCoreSource.match(/Unknown refresh token\./g)?.length ?? 0).toBe(1);
+    expect(oauthCoreSource.match(/Refresh token has expired\./g)?.length ?? 0).toBe(1);
   });
 });

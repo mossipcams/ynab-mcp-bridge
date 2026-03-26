@@ -23,6 +23,7 @@ export const inputSchema = {
   ),
   topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of top rollups to include."),
 };
+
 function buildCategoryGroupLookup(categoryGroups: ynab.CategoryGroupWithCategories[]) {
   return new Map(
     categoryGroups.flatMap((group) => group.categories
@@ -68,9 +69,9 @@ export async function execute(
       ]);
 
       const groupByCategoryId = buildCategoryGroupLookup(categoriesResponse.data.category_groups);
-      const categoryRollups = new Map<string, { id?: string | undefined; name: string; amountMilliunits: number; transactionCount: number }>();
-      const categoryGroupRollups = new Map<string, { id?: string | undefined; name: string; amountMilliunits: number; transactionCount: number }>();
-      const payeeRollups = new Map<string, { id?: string | undefined; name: string; amountMilliunits: number; transactionCount: number }>();
+      const categoryRollups = new Map<string, { id?: string; name: string; amountMilliunits: number; transactionCount: number }>();
+      const categoryGroupRollups = new Map<string, { id?: string; name: string; amountMilliunits: number; transactionCount: number }>();
+      const payeeRollups = new Map<string, { id?: string; name: string; amountMilliunits: number; transactionCount: number }>();
 
       const spendingTransactions = transactionsResponse.data.transactions.filter(
         (transaction) => !transaction.deleted

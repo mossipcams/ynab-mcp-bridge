@@ -1,5 +1,4 @@
 import { getFirstHeaderValue } from "../headerUtils.js";
-
 import type { RequestContext } from "./types.js";
 
 export function getRequestOrigin(context: RequestContext) {

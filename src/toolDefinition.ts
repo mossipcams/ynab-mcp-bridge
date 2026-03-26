@@ -1,5 +1,8 @@
 import * as ynab from "ynab";
 
+import { logAppEvent } from "./logger.js";
+import { getRequestLogFields, markToolCallStarted } from "./requestContext.js";
+
 export const READ_ONLY_TOOL_ANNOTATIONS = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -42,12 +45,36 @@ function stripUndefinedProperties(input: Record<string, unknown>): Record<string
 function executeTool<TResult>(
   execute: (input: never, api: ynab.API) => TResult,
   api: ynab.API,
-): (input: Record<string, unknown>) => TResult {
-  return (input: Record<string, unknown>): TResult => {
+  toolName: string,
+): (input: Record<string, unknown>) => Promise<Awaited<TResult>> {
+  return async (input: Record<string, unknown>): Promise<Awaited<TResult>> => {
     const sanitizedInput = stripUndefinedProperties(input);
 
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- MCP validates tool input before invocation.
-    return execute(sanitizedInput as never, api);
+    markToolCallStarted();
+    logAppEvent("mcp", "tool.call.started", {
+      ...getRequestLogFields(),
+      toolName,
+    });
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- MCP validates tool input before invocation.
+      const result = await execute(sanitizedInput as never, api);
+      const failed = typeof result === "object" && result !== null && "isError" in result && result.isError === true;
+
+      logAppEvent("mcp", failed ? "tool.call.failed" : "tool.call.succeeded", {
+        ...getRequestLogFields(),
+        toolName,
+      });
+
+      return result;
+    } catch (error) {
+      logAppEvent("mcp", "tool.call.failed", {
+        ...getRequestLogFields(),
+        error,
+        toolName,
+      });
+      throw error;
+    }
   };
 }
 
@@ -64,7 +91,7 @@ export function defineReadOnlyTool<TResult>(
         description: tool.description,
         inputSchema: tool.inputSchema,
         annotations: READ_ONLY_TOOL_ANNOTATIONS,
-      }, executeTool(tool.execute, api));
+      }, executeTool(tool.execute, api, tool.name));
     },
   };
 }

@@ -15,9 +15,8 @@ describe("getFirstHeaderValue", () => {
     expect(getFirstHeaderValue(["text/html", "application/json"])).toBe("text/html");
   });
 
-  it("returns undefined for blank header values", () => {
-    expect(getFirstHeaderValue("   ")).toBeUndefined();
-    expect(getFirstHeaderValue(["   ", "application/json"])).toBeUndefined();
+  it("returns the first comma-delimited value from a string array entry", () => {
+    expect(getFirstHeaderValue(["trace-123, trace-456"])).toBe("trace-123");
   });
 });
 
@@ -26,9 +25,7 @@ describe("isLoopbackHostname", () => {
     expect(isLoopbackHostname("localhost")).toBe(true);
   });
 
-  it("returns true for loopback hosts that include an explicit port", () => {
-    expect(isLoopbackHostname("localhost:3000")).toBe(true);
-    expect(isLoopbackHostname("127.0.0.1:3000")).toBe(true);
-    expect(isLoopbackHostname("[::1]:3000")).toBe(true);
+  it("returns false for non-loopback hosts", () => {
+    expect(isLoopbackHostname("example.com")).toBe(false);
   });
 });

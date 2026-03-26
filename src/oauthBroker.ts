@@ -8,11 +8,12 @@ import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { getEffectiveOAuthScopes, type RuntimeAuthConfig } from "./config.js";
-import { logAppEvent } from "./logger.js";
 import { createLocalTokenService } from "./localTokenService.js";
+import { logAppEvent } from "./logger.js";
 import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
-import { parseCallbackQuery, parseConsentRequestBody } from "./oauthSchemas.js";
 import { createOAuthStore } from "./oauthStore.js";
+import { getRequestLogFields } from "./requestContext.js";
+import { getStringValue, isRecord } from "./typeUtils.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
@@ -30,7 +31,10 @@ function getConsentPageHeaders(authorizationUrl: string) {
 }
 
 function logOAuthDebug(event: string, details: Record<string, unknown>) {
-  logAppEvent("oauth", event, details);
+  logAppEvent("oauth", event, {
+    ...getRequestLogFields(),
+    ...details,
+  });
 }
 
 function getErrorDetails(error: unknown) {
@@ -98,6 +102,50 @@ function getTokenResponseDebugDetails(tokens: OAuthTokens) {
     hasTokenType: typeof tokens.token_type === "string" && tokens.token_type.length > 0,
     tokenResponseFields: Object.keys(tokens).sort(),
   };
+}
+function getBodyStringValue(body: unknown, key: string) {
+  if (!isRecord(body)) {
+    return undefined;
+  }
+
+  return getStringValue(body, key);
+}
+
+function getQueryStringValue(query: unknown, key: string) {
+  if (!isRecord(query)) {
+    return undefined;
+  }
+
+  return getStringValue(query, key);
+}
+
+function getCallbackRequestDetails(query: unknown) {
+  const upstreamState = getQueryStringValue(query, "state");
+  const upstreamError = getQueryStringValue(query, "error");
+  const upstreamErrorDescription = getQueryStringValue(query, "error_description");
+  const code = getQueryStringValue(query, "code");
+
+  return {
+    code,
+    upstreamError,
+    upstreamErrorDescription,
+    upstreamState,
+  };
+}
+
+async function exchangeAuthorizationCodeWithLogging(args: {
+  authorizationCode: string;
+  client: Parameters<OAuthServerProvider["exchangeAuthorizationCode"]>[0];
+  core: Pick<ReturnType<typeof createOAuthCore>, "exchangeAuthorizationCode">;
+  redirectUri: string | undefined;
+  resource: URL | undefined;
+}) {
+  return await args.core.exchangeAuthorizationCode(
+    args.client,
+    args.authorizationCode,
+    args.redirectUri,
+    args.resource,
+  );
 }
 
 export function createOAuthBroker(config: OAuthAuthConfig): {
@@ -246,11 +294,17 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     async challengeForAuthorizationCode(client, authorizationCode) {
       return await core.getAuthorizationCodeChallenge(client, authorizationCode);
     },
-    // The MCP SDK provider interface fixes this method shape.
-    // eslint-disable-next-line max-params
-    async exchangeAuthorizationCode(client, authorizationCode, _codeVerifier, redirectUri, resource) {
+    async exchangeAuthorizationCode(...args) {
+      const [client, authorizationCode, _codeVerifier, redirectUri, resource] = args;
+
       try {
-        const tokens = await core.exchangeAuthorizationCode(client, authorizationCode, redirectUri, resource);
+        const tokens = await exchangeAuthorizationCodeWithLogging({
+          authorizationCode,
+          client,
+          core,
+          redirectUri,
+          resource,
+        });
         logOAuthDebug("token.exchange.succeeded", {
           clientId: client.client_id,
           grantType: "authorization_code",
@@ -303,11 +357,16 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
 
   const handleConsent: RequestHandler = async (req, res, next) => {
     try {
-      const { action, consentChallenge } = parseConsentRequestBody(req.body);
+      const consentChallenge = getBodyStringValue(req.body, "consent_challenge");
+      const action = getBodyStringValue(req.body, "action");
       logOAuthDebug("consent.received", {
         action,
         hasConsentChallenge: Boolean(consentChallenge),
       });
+
+      if (!consentChallenge) {
+        throw new InvalidRequestError("Missing consent challenge.");
+      }
 
       const result = await core.approveConsent(consentChallenge, action ?? "");
       logOAuthDebug("consent.resolved", {
@@ -328,33 +387,42 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
 
   const handleCallback: RequestHandler = async (req, res, next) => {
     try {
-      const callbackRequest = parseCallbackQuery(req.query);
+      const {
+        code,
+        upstreamError,
+        upstreamErrorDescription,
+        upstreamState,
+      } = getCallbackRequestDetails(req.query);
+      const hasCode = typeof code === "string" && code.length > 0;
+      const hasError = typeof upstreamError === "string";
+      const hasState = typeof upstreamState === "string" && upstreamState.length > 0;
 
       logOAuthDebug("callback.received", {
-        hasCode: callbackRequest.hasCode,
-        hasError: callbackRequest.hasError,
-        hasState: callbackRequest.hasState,
+        hasCode,
+        hasError,
+        hasState,
       });
 
-      if (!callbackRequest.upstreamState) {
-        throw createMissingUpstreamStateError(callbackRequest.error, callbackRequest.errorDescription);
+      if (!upstreamState) {
+        throw createMissingUpstreamStateError(upstreamError, upstreamErrorDescription);
       }
 
       const result = await core.handleCallback({
-        code: callbackRequest.code,
-        error: callbackRequest.error,
-        errorDescription: callbackRequest.errorDescription,
-        upstreamState: callbackRequest.upstreamState,
+        code: hasCode ? code : undefined,
+        error: upstreamError,
+        errorDescription: upstreamErrorDescription,
+        upstreamState,
       });
       logOAuthDebug("callback.completed", {
-        hasCode: callbackRequest.hasCode,
-        hasError: callbackRequest.hasError,
-        hasState: callbackRequest.hasState,
+        hasCode,
+        hasError,
+        hasState,
         issuedAuthorizationCode: result.type === "redirect",
       });
       res.redirect(302, result.location);
     } catch (error) {
       logAppEvent("oauth", "callback.failed", {
+        ...getRequestLogFields(),
         ...getErrorDetails(error),
         path: req.path,
       });

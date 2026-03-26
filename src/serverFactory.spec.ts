@@ -1,11 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { PassThrough } from "node:stream";
+
+import { setLoggerDestinationForTests } from "./logger.js";
+import { runWithRequestContext } from "./requestContext.js";
 import { createServer, registerServerTools } from "./server.js";
 import { defineReadOnlyTool, registerDefinedTools } from "./toolDefinition.js";
+import { attachYnabApiRuntimeContext } from "./ynabApi.js";
 import * as ListTransactionsTool from "./tools/ListTransactionsTool.js";
 
 describe("createServer", () => {
   const originalEnv = process.env;
+
+  function createBufferedDestination() {
+    const destination = new PassThrough();
+    const chunks: string[] = [];
+
+    destination.on("data", (chunk) => {
+      chunks.push(chunk.toString("utf8"));
+    });
+
+    return {
+      destination,
+      readEntries() {
+        return chunks
+          .join("")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+      },
+    };
+  }
 
   beforeEach(() => {
     process.env = { ...originalEnv };
@@ -13,6 +39,7 @@ describe("createServer", () => {
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    setLoggerDestinationForTests();
   });
 
   it("registers the rebuilt read-only YNAB toolset", () => {
@@ -225,6 +252,124 @@ describe("createServer", () => {
     expect(source).toContain("defineReadOnlyTool(");
     expect(source).toContain("registerDefinedTools(");
     expect(source).not.toContain("register: (registrar, api) =>");
+  });
+
+  it("logs tool lifecycle events with request correlation for success and failure", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
+
+    const registeredHandlers = new Map<string, (input: unknown) => Promise<unknown>>();
+
+    registerServerTools(
+      {
+        registerTool: ((name: string, _metadata: unknown, handler: (input: unknown) => Promise<unknown>) => {
+          registeredHandlers.set(name, handler as (input: unknown) => Promise<unknown>);
+          return {} as any;
+        }) as any,
+      },
+      {} as any,
+    );
+
+    await runWithRequestContext({
+      correlationId: "corr-tool-success-123",
+      requestId: "req-tool-success-123",
+    }, async () => {
+      await registeredHandlers.get("ynab_get_mcp_version")?.({});
+    });
+
+    const failedResult = await runWithRequestContext({
+      correlationId: "corr-tool-failure-123",
+      requestId: "req-tool-failure-123",
+    }, async () => {
+      return await registeredHandlers.get("ynab_get_user")?.({});
+    });
+
+    expect(failedResult).toMatchObject({
+      isError: true,
+    });
+
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        correlationId: "corr-tool-success-123",
+        event: "tool.call.started",
+        requestId: "req-tool-success-123",
+        scope: "mcp",
+        toolName: "ynab_get_mcp_version",
+      }),
+      expect.objectContaining({
+        correlationId: "corr-tool-success-123",
+        event: "tool.call.succeeded",
+        requestId: "req-tool-success-123",
+        scope: "mcp",
+        toolName: "ynab_get_mcp_version",
+      }),
+      expect.objectContaining({
+        correlationId: "corr-tool-failure-123",
+        event: "tool.call.failed",
+        requestId: "req-tool-failure-123",
+        scope: "mcp",
+        toolName: "ynab_get_user",
+      }),
+    ]));
+  });
+
+  it("does not let one tool call's dynamic plan resolution bleed into the next call", async () => {
+    const registeredHandlers = new Map<string, (input: unknown) => Promise<unknown>>();
+    let availablePlanIds = ["plan-a"];
+    const api = attachYnabApiRuntimeContext({
+      plans: {
+        async getPlanById(planId: string) {
+          return {
+            data: {
+              plan: {
+                id: planId,
+                name: `Plan ${planId}`,
+                last_modified_on: "2026-03-25T00:00:00.000Z",
+              },
+            },
+          };
+        },
+        async getPlans() {
+          return {
+            data: {
+              plans: availablePlanIds.map((id) => ({ id })),
+              default_plan: { id: availablePlanIds[0] },
+            },
+          };
+        },
+      },
+    }, {
+      apiToken: "test-token",
+    });
+
+    registerServerTools(
+      {
+        registerTool: ((name: string, _metadata: unknown, handler: (input: unknown) => Promise<unknown>) => {
+          registeredHandlers.set(name, handler as (input: unknown) => Promise<unknown>);
+          return {} as any;
+        }) as any,
+      },
+      api as any,
+    );
+
+    const firstResult = await registeredHandlers.get("ynab_get_plan")?.({});
+    availablePlanIds = ["plan-b"];
+    const secondResult = await registeredHandlers.get("ynab_get_plan")?.({});
+
+    expect(JSON.parse((firstResult as { content: Array<{ text: string }> }).content[0].text)).toEqual({
+      plan: {
+        id: "plan-a",
+        last_modified_on: "2026-03-25T00:00:00.000Z",
+        name: "Plan plan-a",
+      },
+    });
+    expect(JSON.parse((secondResult as { content: Array<{ text: string }> }).content[0].text)).toEqual({
+      plan: {
+        id: "plan-b",
+        last_modified_on: "2026-03-25T00:00:00.000Z",
+        name: "Plan plan-b",
+      },
+    });
   });
 
   it("documents assigned_vs_spent as buffering and timing behavior in finance tool descriptions", () => {

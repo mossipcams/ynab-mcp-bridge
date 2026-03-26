@@ -1,4 +1,5 @@
 import {
+  InvalidClientMetadataError,
   InvalidGrantError,
   InvalidRequestError,
   InvalidScopeError,
@@ -7,10 +8,21 @@ import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextproto
 
 import type { ClientProfileId } from "./clientProfiles/types.js";
 import { getEffectiveOAuthScopes } from "./config.js";
-import { minimizeUpstreamTokens, type OAuthGrant } from "./oauthGrant.js";
-import { toPendingConsentRecord } from "./oauthGrantViews.js";
-import { parseAuthorizationRequest, parseClientMetadata } from "./oauthSchemas.js";
-export type { PendingAuthorization, PendingConsent } from "./oauthGrantViews.js";
+import type { OAuthGrant } from "./oauthGrant.js";
+
+export type PendingAuthorization = {
+  clientId: string;
+  codeChallenge: string;
+  expiresAt: number;
+  redirectUri: string;
+  resource: string;
+  scopes: string[];
+  state?: string | undefined;
+};
+
+export type PendingConsent = PendingAuthorization & {
+  clientName?: string | undefined;
+};
 
 type OAuthCoreStore = {
   approveClient: (record: { clientId: string; resource: string; scopes: string[] }) => void;
@@ -127,90 +139,105 @@ function isExpired(expiresAt: number | undefined, now: number) {
   return expiresAt !== undefined && expiresAt <= now;
 }
 
+function validateRegisteredRedirectUris(redirectUris: string[] | undefined) {
+  for (const redirectUri of redirectUris ?? []) {
+    let parsedRedirectUri: URL;
+
+    try {
+      parsedRedirectUri = new URL(redirectUri);
+    } catch {
+      throw new InvalidClientMetadataError(`redirect_uris must contain valid absolute URLs: ${redirectUri}`);
+    }
+
+    if (parsedRedirectUri.protocol !== "https:") {
+      throw new InvalidClientMetadataError(`redirect_uris must use https: ${redirectUri}`);
+    }
+  }
+}
+
+function validateClientMetadata(client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">) {
+  validateRegisteredRedirectUris(client.redirect_uris);
+
+  const unsupportedFields = [
+    "client_uri",
+    "contacts",
+    "jwks",
+    "jwks_uri",
+    "logo_uri",
+    "policy_uri",
+    "software_id",
+    "software_statement",
+    "software_version",
+    "tos_uri",
+  ] as const;
+
+  for (const field of unsupportedFields) {
+    if (field in client && client[field] !== undefined) {
+      throw new InvalidClientMetadataError(`${field} is not supported by this bridge.`);
+    }
+  }
+
+  const allowedGrantTypes = new Set(["authorization_code", "refresh_token"]);
+  const invalidGrantType = (client.grant_types ?? ["authorization_code"])
+    .find((grantType) => !allowedGrantTypes.has(grantType));
+
+  if (invalidGrantType) {
+    throw new InvalidClientMetadataError(`Unsupported grant type: ${invalidGrantType}`);
+  }
+
+  const allowedResponseTypes = new Set(["code"]);
+  const responseTypes = client.response_types ?? ["code"];
+  const invalidResponseType = responseTypes.find((responseType) => !allowedResponseTypes.has(responseType));
+
+  if (invalidResponseType) {
+    throw new InvalidClientMetadataError(`Unsupported response type: ${invalidResponseType}`);
+  }
+
+  if (responseTypes.length !== 1 || responseTypes[0] !== "code") {
+    throw new InvalidClientMetadataError("response_types must be exactly [\"code\"].");
+  }
+
+  const allowedAuthMethods = new Set(["client_secret_post", "none"]);
+  const tokenEndpointAuthMethod = client.token_endpoint_auth_method ?? "none";
+
+  if (!allowedAuthMethods.has(tokenEndpointAuthMethod)) {
+    throw new InvalidClientMetadataError(
+      `Unsupported token endpoint auth method: ${tokenEndpointAuthMethod}`,
+    );
+  }
+}
+
 function assertRegisteredRedirectUri(client: OAuthClientInformationFull, redirectUri: string) {
   if (!client.redirect_uris.includes(redirectUri)) {
     throw new InvalidRequestError("redirect_uri does not match a registered client redirect URI.");
   }
 }
 
+function toPendingConsent(grant: OAuthGrant): PendingConsent {
+  if (!grant.consent) {
+    throw new InvalidRequestError("Unknown consent challenge.");
+  }
+
+  return {
+    clientId: grant.clientId,
+    clientName: grant.clientName,
+    codeChallenge: grant.codeChallenge,
+    expiresAt: grant.consent.expiresAt,
+    redirectUri: grant.redirectUri,
+    resource: grant.resource,
+    scopes: grant.scopes,
+    state: grant.state,
+  };
+}
+
 export function createOAuthCore({ config, dependencies, store }: OAuthCoreOptions) {
-  function replaceGrant(currentGrantId: string, nextGrant: OAuthGrant) {
-    store.saveGrant(nextGrant);
-
-    if (currentGrantId !== nextGrant.grantId) {
-      store.deleteGrant(currentGrantId);
-    }
-  }
-
-  function requireAuthorizationCodeGrant(
-    client: OAuthClientInformationFull,
-    authorizationCode: string,
-  ) {
-    const grant = store.getAuthorizationCodeGrant(authorizationCode);
-
-    if (!grant || !grant.authorizationCode || grant.clientId !== client.client_id) {
-      throw new InvalidGrantError("Unknown authorization code.");
-    }
-
-    if (isExpired(grant.authorizationCode.expiresAt, dependencies.now())) {
-      store.deleteGrant(grant.grantId);
-      throw new InvalidGrantError("Authorization code has expired.");
-    }
-
-    return grant;
-  }
-
-  function requirePendingConsentGrant(consentChallenge: string) {
-    const grant = store.getPendingConsentGrant(consentChallenge);
-
-    if (!grant || isExpired(grant.consent?.expiresAt, dependencies.now())) {
-      if (grant) {
-        store.deleteGrant(grant.grantId);
-      }
-      throw new InvalidRequestError("Unknown consent challenge.");
-    }
-
-    return grant;
-  }
-
-  function requirePendingAuthorizationGrant(upstreamState: string) {
-    const grant = store.getPendingAuthorizationGrant(upstreamState);
-
-    if (!grant || isExpired(grant.pendingAuthorization?.expiresAt, dependencies.now())) {
-      if (grant) {
-        store.deleteGrant(grant.grantId);
-      }
-      throw new InvalidRequestError("Unknown upstream OAuth state.");
-    }
-
-    return grant;
-  }
-
-  function requireRefreshTokenGrant(
-    client: OAuthClientInformationFull,
-    refreshToken: string,
-  ) {
-    const grant = store.getRefreshTokenGrant(refreshToken);
-
-    if (!grant || !grant.refreshToken || grant.clientId !== client.client_id) {
-      throw new InvalidGrantError("Unknown refresh token.");
-    }
-
-    if (isExpired(grant.refreshToken.expiresAt, dependencies.now())) {
-      store.deleteGrant(grant.grantId);
-      throw new InvalidGrantError("Refresh token has expired.");
-    }
-
-    return grant;
-  }
-
   async function registerClient(
     client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">,
   ) {
-    const parsedClient = parseClientMetadata(client);
+    validateClientMetadata(client);
 
     const registeredClient: OAuthClientInformationFull = {
-      ...parsedClient,
+      ...client,
       client_id: dependencies.createClientId?.() ?? dependencies.createId(),
       client_id_issued_at: Math.floor(dependencies.now() / 1000),
     };
@@ -224,13 +251,12 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
   }
 
   async function startAuthorization(client: OAuthClientInformationFull, params: AuthorizationRequest) {
-    const parsedParams = parseAuthorizationRequest(params);
-    assertRegisteredRedirectUri(client, parsedParams.redirectUri);
+    assertRegisteredRedirectUri(client, params.redirectUri);
 
     const scopes = getEffectiveOAuthScopes(
-      parsedParams.scopes && parsedParams.scopes.length > 0 ? parsedParams.scopes : config.defaultScopes,
+      params.scopes && params.scopes.length > 0 ? params.scopes : config.defaultScopes,
     );
-    const resource = parsedParams.resource?.href ?? config.defaultResource;
+    const resource = params.resource?.href ?? config.defaultResource;
     const compatibilityProfileId = store.getClientCompatibilityProfile(client.client_id);
 
     if (store.isClientApproved({
@@ -241,17 +267,17 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       const upstreamState = dependencies.createId();
       store.saveGrant({
         clientId: client.client_id,
+        codeChallenge: params.codeChallenge,
         compatibilityProfileId,
-        codeChallenge: parsedParams.codeChallenge,
         grantId: upstreamState,
         pendingAuthorization: {
           expiresAt: dependencies.now() + 10 * 60 * 1000,
           stateId: upstreamState,
         },
-        redirectUri: parsedParams.redirectUri,
+        redirectUri: params.redirectUri,
         resource,
         scopes,
-        state: parsedParams.state,
+        state: params.state,
       });
 
       return {
@@ -268,35 +294,37 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     const grant: OAuthGrant = {
       clientId: client.client_id,
       clientName: client.client_name,
+      codeChallenge: params.codeChallenge,
       compatibilityProfileId,
-      codeChallenge: parsedParams.codeChallenge,
       consent: {
         challenge: consentChallenge,
         expiresAt: dependencies.now() + 10 * 60 * 1000,
       },
       grantId: consentChallenge,
-      redirectUri: parsedParams.redirectUri,
+      redirectUri: params.redirectUri,
       resource,
       scopes,
-      state: parsedParams.state,
+      state: params.state,
     };
 
     store.saveGrant(grant);
 
-    const pending = toPendingConsentRecord(grant);
-    if (!pending) {
-      throw new InvalidRequestError("Unknown consent challenge.");
-    }
-
     return {
       type: "consent" as const,
       consentChallenge,
-      pending,
+      pending: toPendingConsent(grant),
     };
   }
 
   async function approveConsent(consentChallenge: string, action: string) {
-    const grant = requirePendingConsentGrant(consentChallenge);
+    const grant = store.getPendingConsentGrant(consentChallenge);
+
+    if (!grant || isExpired(grant.consent?.expiresAt, dependencies.now())) {
+      if (grant) {
+        store.deleteGrant(grant.grantId);
+      }
+      throw new InvalidRequestError("Unknown consent challenge.");
+    }
 
     if (action !== "approve") {
       store.deleteGrant(grant.grantId);
@@ -317,7 +345,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     });
 
     const upstreamState = dependencies.createId();
-    replaceGrant(grant.grantId, {
+    store.saveGrant({
       ...grant,
       consent: undefined,
       pendingAuthorization: {
@@ -337,7 +365,14 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
   }
 
   async function handleCallback(params: CallbackInput) {
-    const grant = requirePendingAuthorizationGrant(params.upstreamState);
+    const grant = store.getPendingAuthorizationGrant(params.upstreamState);
+
+    if (!grant || isExpired(grant.pendingAuthorization?.expiresAt, dependencies.now())) {
+      if (grant) {
+        store.deleteGrant(grant.grantId);
+      }
+      throw new InvalidRequestError("Unknown upstream OAuth state.");
+    }
 
     if (params.error) {
       store.deleteGrant(grant.grantId);
@@ -358,7 +393,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     const authorizationCode = dependencies.createId();
     const upstreamTokens = await dependencies.exchangeUpstreamAuthorizationCode(params.code);
 
-    replaceGrant(grant.grantId, {
+    store.saveGrant({
       ...grant,
       authorizationCode: {
         code: authorizationCode,
@@ -366,7 +401,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       },
       pendingAuthorization: undefined,
       principalId: grant.clientId,
-      upstreamTokens: minimizeUpstreamTokens(upstreamTokens),
+      upstreamTokens,
     });
 
     const redirectUrl = new URL(grant.redirectUri);
@@ -383,7 +418,17 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
   }
 
   async function getAuthorizationCodeChallenge(client: OAuthClientInformationFull, authorizationCode: string) {
-    const grant = requireAuthorizationCodeGrant(client, authorizationCode);
+    const grant = store.getAuthorizationCodeGrant(authorizationCode);
+
+    if (!grant || !grant.authorizationCode || grant.clientId !== client.client_id) {
+      throw new InvalidGrantError("Unknown authorization code.");
+    }
+
+    if (isExpired(grant.authorizationCode.expiresAt, dependencies.now())) {
+      store.deleteGrant(grant.grantId);
+      throw new InvalidGrantError("Authorization code has expired.");
+    }
+
     return grant.codeChallenge;
   }
 
@@ -393,7 +438,16 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     redirectUri: string | undefined,
     resource: URL | undefined,
   ) {
-    const grant = requireAuthorizationCodeGrant(client, authorizationCode);
+    const grant = store.getAuthorizationCodeGrant(authorizationCode);
+
+    if (!grant || !grant.authorizationCode || grant.clientId !== client.client_id) {
+      throw new InvalidGrantError("Unknown authorization code.");
+    }
+
+    if (isExpired(grant.authorizationCode.expiresAt, dependencies.now())) {
+      store.deleteGrant(grant.grantId);
+      throw new InvalidGrantError("Authorization code has expired.");
+    }
 
     if (redirectUri && redirectUri !== grant.redirectUri) {
       throw new InvalidGrantError("redirect_uri does not match the authorization request.");
@@ -418,14 +472,13 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     });
     const refreshToken = dependencies.createId();
 
-    replaceGrant(grant.grantId, {
+    store.saveGrant({
       ...grant,
       authorizationCode: undefined,
       refreshToken: {
         expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
         token: refreshToken,
       },
-      upstreamTokens: minimizeUpstreamTokens(grant.upstreamTokens),
     });
 
     return {
@@ -443,7 +496,16 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     scopes: string[] | undefined,
     resource: URL | undefined,
   ) {
-    const grant = requireRefreshTokenGrant(client, refreshToken);
+    const grant = store.getRefreshTokenGrant(refreshToken);
+
+    if (!grant || !grant.refreshToken || grant.clientId !== client.client_id) {
+      throw new InvalidGrantError("Unknown refresh token.");
+    }
+
+    if (isExpired(grant.refreshToken.expiresAt, dependencies.now())) {
+      store.deleteGrant(grant.grantId);
+      throw new InvalidGrantError("Refresh token has expired.");
+    }
 
     const grantedScopes = scopes && scopes.length > 0 ? scopes : grant.scopes;
 
@@ -455,14 +517,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
       throw new InvalidGrantError("resource does not match the refresh token.");
     }
 
-    const upstreamRefreshToken = grant.upstreamTokens?.refresh_token;
-
-    if (!upstreamRefreshToken) {
-      store.deleteGrant(grant.grantId);
-      throw new InvalidGrantError("Refresh token is missing upstream refresh-token context.");
-    }
-
-    const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(upstreamRefreshToken);
+    const refreshedUpstreamTokens = await dependencies.exchangeUpstreamRefreshToken(grant.upstreamTokens?.refresh_token ?? "");
     const nextUpstreamTokens: OAuthTokens = {
       ...grant.upstreamTokens,
       ...refreshedUpstreamTokens,
@@ -484,13 +539,13 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     });
     const nextRefreshToken = dependencies.createId();
 
-    replaceGrant(grant.grantId, {
+    store.saveGrant({
       ...grant,
       refreshToken: {
         expiresAt: dependencies.now() + 30 * 24 * 60 * 60 * 1000,
         token: nextRefreshToken,
       },
-      upstreamTokens: minimizeUpstreamTokens(nextUpstreamTokens),
+      upstreamTokens: nextUpstreamTokens,
     });
 
     return {

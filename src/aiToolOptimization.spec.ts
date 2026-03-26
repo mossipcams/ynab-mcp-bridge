@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import * as GetTransactionsByAccountTool from "./tools/GetTransactionsByAccountTool.js";
 import * as ListAccountsTool from "./tools/ListAccountsTool.js";
 import * as ListTransactionsTool from "./tools/ListTransactionsTool.js";
 import * as SearchTransactionsTool from "./tools/SearchTransactionsTool.js";
@@ -261,6 +262,84 @@ describe("AI tool optimization", () => {
         include_transfers: false,
         sort: "date_desc",
       },
+    });
+  });
+
+  it("supports bounded projected account transaction listings", async () => {
+    const api = {
+      transactions: {
+        getTransactionsByAccount: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-03-01",
+                amount: -1000,
+                deleted: false,
+                payee_name: "Coffee Shop",
+                category_name: "Coffee",
+                account_name: "Checking",
+                approved: true,
+                cleared: "cleared",
+              },
+              {
+                id: "tx-2",
+                date: "2026-03-02",
+                amount: -2500,
+                deleted: false,
+                payee_name: "Grocer",
+                category_name: "Groceries",
+                account_name: "Checking",
+                approved: false,
+                cleared: "uncleared",
+              },
+              {
+                id: "tx-3",
+                date: "2026-03-03",
+                amount: -4000,
+                deleted: false,
+                payee_name: "Utility Co",
+                category_name: "Utilities",
+                account_name: "Checking",
+                approved: true,
+                cleared: "cleared",
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetTransactionsByAccountTool.execute({
+      planId: "plan-1",
+      accountId: "acct-1",
+      limit: 1,
+      offset: 1,
+      includeIds: false,
+      fields: ["date", "amount", "payee_name"],
+    }, api as any);
+
+    expect(api.transactions.getTransactionsByAccount).toHaveBeenCalledWith(
+      "plan-1",
+      "acct-1",
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(parseText(result as any)).toEqual({
+      transactions: [
+        {
+          date: "2026-03-02",
+          amount: "-2.50",
+          payee_name: "Grocer",
+        },
+      ],
+      transaction_count: 3,
+      returned_count: 1,
+      offset: 1,
+      limit: 1,
+      has_more: true,
+      next_offset: 2,
     });
   });
 });

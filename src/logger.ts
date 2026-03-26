@@ -29,7 +29,7 @@ function normalizeKey(key: string) {
 function isSensitiveKey(key: string) {
   const normalizedKey = normalizeKey(key);
 
-  if (normalizedKey.startsWith("has_") || normalizedKey.startsWith("issued_")) {
+  if ((normalizedKey.startsWith("has_") || normalizedKey.startsWith("issued_")) && normalizedKey.endsWith("_token")) {
     return false;
   }
 
@@ -61,14 +61,9 @@ function sanitizeLogValue(value: unknown): unknown {
   return Object.fromEntries(sanitizedEntries);
 }
 
-function sanitizeLogObject(value: Record<string, unknown>) {
-  const sanitized = sanitizeLogValue(value);
-
-  if (!isRecord(sanitized)) {
-    return {};
-  }
-
-  return sanitized;
+function sanitizeLogRecord(details: Record<string, unknown>) {
+  const sanitizedDetails = sanitizeLogValue(details);
+  return isRecord(sanitizedDetails) ? sanitizedDetails : {};
 }
 
 function getDefaultDestination(): DestinationStream {
@@ -89,7 +84,9 @@ function getDefaultDestination(): DestinationStream {
 export function createLogger(options: {
   destination?: DestinationStream | undefined;
 } = {}): Logger {
-  return pino({}, options.destination ?? getDefaultDestination());
+  return pino({
+    base: null,
+  }, options.destination ?? getDefaultDestination());
 }
 
 let appLogger = createLogger();
@@ -99,7 +96,9 @@ export function getAppLogger() {
 }
 
 export function setLoggerDestinationForTests(destination?: DestinationStream) {
-  appLogger = createLogger(destination ? { destination } : {});
+  appLogger = createLogger({
+    destination,
+  });
 }
 
 export function logEvent(
@@ -108,8 +107,10 @@ export function logEvent(
   event: string,
   details: Record<string, unknown> = {},
 ) {
+  const sanitizedDetails = sanitizeLogRecord(details);
+
   logger.info({
-    ...sanitizeLogObject(details),
+    ...sanitizedDetails,
     event,
     scope,
   }, event);

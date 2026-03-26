@@ -31,16 +31,26 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
+    type CategorySummary = {
+      id?: string | undefined;
+      name: string;
+    };
+    type CategoryGroupSummary = {
+      id?: string | undefined;
+      name: string;
+      categories: CategorySummary[];
+    };
+
     const response = await withResolvedPlan(input.planId, api, async (planId) => api.categories.getCategories(planId));
-    const groups = response.data.category_groups
+    const groups: CategoryGroupSummary[] = response.data.category_groups
       .filter((group) => !group.deleted && !group.hidden)
-      .map((group) => compactObject({
-        id: input.includeIds === false ? undefined : group.id,
+      .map((group) => ({
+        ...(input.includeIds === false ? {} : { id: group.id }),
         name: group.name,
         categories: group.categories
           .filter((category) => !category.deleted && !category.hidden)
-          .map((category) => compactObject({
-            id: input.includeIds === false ? undefined : category.id,
+          .map((category) => ({
+            ...(input.includeIds === false ? {} : { id: category.id }),
             name: category.name,
           })),
       }));
@@ -56,9 +66,9 @@ export async function execute(
     if (!hasPaginationControls(input)) {
       return toTextResult({
         category_groups: groups.map((group) => compactObject({
-          id: input.includeIds === false ? undefined : group["id"],
-          name: requestedFields.has("name") ? group["name"] : undefined,
-          categories: requestedFields.has("categories") ? group["categories"] : undefined,
+          ...(input.includeIds === false || group.id === undefined ? {} : { id: group.id }),
+          name: requestedFields.has("name") ? group.name : undefined,
+          categories: requestedFields.has("categories") ? group.categories : undefined,
         })),
         category_group_count: groups.length,
       });
@@ -68,9 +78,9 @@ export async function execute(
 
     return toTextResult({
       category_groups: pagedGroups.entries.map((group) => compactObject({
-        id: input.includeIds === false ? undefined : group["id"],
-        name: requestedFields.has("name") ? group["name"] : undefined,
-        categories: requestedFields.has("categories") ? group["categories"] : undefined,
+        ...(input.includeIds === false || group.id === undefined ? {} : { id: group.id }),
+        name: requestedFields.has("name") ? group.name : undefined,
+        categories: requestedFields.has("categories") ? group.categories : undefined,
       })),
       category_group_count: groups.length,
       ...pagedGroups.metadata,

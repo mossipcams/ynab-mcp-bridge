@@ -33,9 +33,9 @@ export const codexProfile: ClientProfile = {
     return undefined;
   },
   matchesPreAuth: (context) => Boolean(codexProfile.detectPreAuth?.(context)),
-  matchesInitialize: (clientInfo) => Boolean(
+  matchesInitialize: (clientInfo) => (
     isRecord(clientInfo) &&
-    getStringValue(clientInfo, "name")?.toLowerCase().includes("codex"),
+    getStringValue(clientInfo, "name")?.toLowerCase().includes("codex") === true
   ),
   oauth: {
     ...genericProfile.oauth,

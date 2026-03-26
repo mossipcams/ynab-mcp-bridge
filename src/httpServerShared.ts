@@ -13,6 +13,7 @@ import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProf
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import type { ClientProfileId, RequestContext as ClientProfileRequestContext } from "./clientProfiles/types.js";
 import { getFirstHeaderValue } from "./headerUtils.js";
+import { getRequestLogFields } from "./requestContext.js";
 import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 
 export const HTTP_ALLOWED_METHODS = ["POST", "DELETE"] as const;
@@ -237,6 +238,7 @@ export function getRequestDebugDetails(
 ): HttpDebugDetails {
   const authSubject = req.auth?.extra?.["subject"];
   return {
+    ...getRequestLogFields(),
     authMode: options.authMode,
     authClientId: req.auth?.clientId,
     authRequired: options.authRequired,

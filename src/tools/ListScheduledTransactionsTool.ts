@@ -3,7 +3,10 @@ import * as ynab from "ynab";
 
 import {
   formatAmountMilliunits,
-  renderCollectionResult,
+  hasPaginationControls,
+  hasProjectionControls,
+  paginateEntries,
+  projectRecord,
 } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
@@ -50,13 +53,35 @@ export async function execute(
         account_name: transaction.account_name,
       }));
 
-    return toTextResult(renderCollectionResult(
-      scheduledTransactions,
-      scheduledTransactionFields,
-      input,
-      "scheduled_transactions",
-      "scheduled_transaction_count",
-    ));
+    if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
+      return toTextResult({
+        scheduled_transactions: scheduledTransactions,
+        scheduled_transaction_count: scheduledTransactions.length,
+      });
+    }
+
+    if (!hasPaginationControls(input)) {
+      return toTextResult({
+        scheduled_transactions: scheduledTransactions.map((transaction) => projectRecord(
+          transaction,
+          scheduledTransactionFields,
+          input,
+        )),
+        scheduled_transaction_count: scheduledTransactions.length,
+      });
+    }
+
+    const pagedTransactions = paginateEntries(scheduledTransactions, input);
+
+    return toTextResult({
+      scheduled_transactions: pagedTransactions.entries.map((transaction) => projectRecord(
+        transaction,
+        scheduledTransactionFields,
+        input,
+      )),
+      scheduled_transaction_count: scheduledTransactions.length,
+      ...pagedTransactions.metadata,
+    });
   } catch (error) {
     return toErrorResult(error);
   }

@@ -73,7 +73,6 @@ describe("createYnabApi rate limiting", () => {
         apiToken: "token-a",
         planId: "plan-1",
       },
-      runtimePlanIdOverride: undefined,
     });
   });
 

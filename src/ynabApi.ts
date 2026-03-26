@@ -1,8 +1,9 @@
+/* eslint-disable @typescript-eslint/consistent-type-assertions --
+   The YNAB SDK exposes configuration and generated API internals through
+   protected/private-ish shapes, so we need narrow structural casts at this boundary. */
 import * as ynab from "ynab";
 
-import { assertYnabConfig, type NormalizedYnabConfig, type YnabConfig } from "./config.js";
-import { getRecordValueIfObject, isRecord } from "./typeUtils.js";
-import { isPlanId, type PlanId } from "./ynabTypes.js";
+import { assertYnabConfig, type YnabConfig } from "./config.js";
 import { SlidingWindowRateLimiter, createYnabRateLimiter } from "./ynabRateLimiter.js";
 
 declare module "ynab" {
@@ -23,17 +24,22 @@ const DEFAULT_RETRY_LIMIT = 1;
 const sharedRateLimiter = createYnabRateLimiter();
 const runtimeContextSymbol = Symbol("ynabRuntimeContext");
 
-type YnabSdkConfiguration = {
-  configuration: ynab.ConfigurationParameters;
-  sdk: ynab.Configuration;
+type YnabApiWithInternals = {
+  _configuration: {
+    config?: Record<string, unknown> | undefined;
+    configuration: ynab.ConfigurationParameters;
+  };
 };
 
 type YnabApiRuntimeContext = {
-  config: NormalizedYnabConfig;
-  runtimePlanIdOverride?: PlanId | undefined;
+  config: YnabConfig;
 };
 
-function normalizeYnabConfig(configOrToken: YnabConfig | string | undefined): NormalizedYnabConfig {
+type YnabApiWithRuntimeContext = ynab.API & {
+  [runtimeContextSymbol]?: YnabApiRuntimeContext;
+};
+
+function normalizeYnabConfig(configOrToken: YnabConfig | string | undefined): YnabConfig {
   if (typeof configOrToken === "string") {
     return assertYnabConfig({
       apiToken: configOrToken.trim(),
@@ -43,28 +49,8 @@ function normalizeYnabConfig(configOrToken: YnabConfig | string | undefined): No
   return assertYnabConfig(configOrToken);
 }
 
-function getSdkConfiguration(api: ynab.API): YnabSdkConfiguration {
-  const sdkConfiguration: unknown = Object.getOwnPropertyDescriptor(api, "_configuration")?.value;
-
-  if (!(sdkConfiguration instanceof ynab.Configuration)) {
-    throw new Error("YNAB SDK configuration is invalid.");
-  }
-
-  return {
-    configuration: {
-      ...(sdkConfiguration.accessToken !== undefined ? { accessToken: sdkConfiguration.accessToken } : {}),
-      ...(sdkConfiguration.apiKey !== undefined ? { apiKey: sdkConfiguration.apiKey } : {}),
-      basePath: sdkConfiguration.basePath,
-      ...(sdkConfiguration.credentials !== undefined ? { credentials: sdkConfiguration.credentials } : {}),
-      ...(sdkConfiguration.fetchApi !== undefined ? { fetchApi: sdkConfiguration.fetchApi } : {}),
-      ...(sdkConfiguration.headers !== undefined ? { headers: sdkConfiguration.headers } : {}),
-      ...(sdkConfiguration.middleware !== undefined ? { middleware: sdkConfiguration.middleware } : {}),
-      ...(sdkConfiguration.password !== undefined ? { password: sdkConfiguration.password } : {}),
-      ...(sdkConfiguration.queryParamsStringify !== undefined ? { queryParamsStringify: sdkConfiguration.queryParamsStringify } : {}),
-      ...(sdkConfiguration.username !== undefined ? { username: sdkConfiguration.username } : {}),
-    },
-    sdk: sdkConfiguration,
-  };
+function getSdkConfiguration(api: ynab.API): YnabApiWithInternals["_configuration"] {
+  return (api as unknown as YnabApiWithInternals)._configuration;
 }
 
 function sleep(ms: number) {
@@ -116,15 +102,16 @@ function createRateLimitedFetchApi(
   };
 }
 
-export function attachYnabApiRuntimeContext<T extends object>(api: T, config: NormalizedYnabConfig) {
-  const existingContext = getYnabApiRuntimeContext(api);
+export function attachYnabApiRuntimeContext<T extends object>(api: T, config: YnabConfig) {
+  const target = api as T & YnabApiWithRuntimeContext;
+  const existingContext = target[runtimeContextSymbol];
 
   if (existingContext) {
     existingContext.config = config;
-    return api;
+    return target;
   }
 
-  Object.defineProperty(api, runtimeContextSymbol, {
+  Object.defineProperty(target, runtimeContextSymbol, {
     configurable: false,
     enumerable: false,
     value: {
@@ -133,43 +120,11 @@ export function attachYnabApiRuntimeContext<T extends object>(api: T, config: No
     writable: false,
   });
 
-  return api;
+  return target;
 }
 
-export function getYnabApiRuntimeContext(api: object): YnabApiRuntimeContext | undefined {
-  const descriptor = Object.getOwnPropertyDescriptor(api, runtimeContextSymbol);
-  const value: unknown = descriptor?.value;
-
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const config = getRecordValueIfObject(value, "config");
-
-  if (!config) {
-    return undefined;
-  }
-
-  const runtimePlanIdOverride = value["runtimePlanIdOverride"];
-
-  if (runtimePlanIdOverride !== undefined && typeof runtimePlanIdOverride !== "string") {
-    return undefined;
-  }
-
-  const trimmedRuntimePlanIdOverride = typeof runtimePlanIdOverride === "string"
-    ? runtimePlanIdOverride.trim()
-    : undefined;
-  const normalizedRuntimePlanIdOverride = trimmedRuntimePlanIdOverride !== undefined && isPlanId(trimmedRuntimePlanIdOverride)
-    ? trimmedRuntimePlanIdOverride
-    : undefined;
-
-  return {
-    config: assertYnabConfig({
-      apiToken: typeof config["apiToken"] === "string" ? config["apiToken"] : "",
-      ...(typeof config["planId"] === "string" ? { planId: config["planId"] } : {}),
-    }),
-    ...(normalizedRuntimePlanIdOverride ? { runtimePlanIdOverride: normalizedRuntimePlanIdOverride } : {}),
-  };
+export function getYnabApiRuntimeContext(api: object) {
+  return (api as YnabApiWithRuntimeContext)[runtimeContextSymbol];
 }
 
 export function createYnabApi(configOrToken: YnabConfig | string | undefined, options: CreateYnabApiOptions = {}) {
@@ -177,7 +132,7 @@ export function createYnabApi(configOrToken: YnabConfig | string | undefined, op
   const api = attachYnabApiRuntimeContext(new ynab.API(config.apiToken), config);
   const configuration = getSdkConfiguration(api);
 
-  configuration.sdk.config = new ynab.Configuration({
+  configuration.config = {
     ...configuration.configuration,
     fetchApi: createRateLimitedFetchApi(config.apiToken, {
       fetchApi: options.fetchApi ?? fetch,
@@ -185,15 +140,13 @@ export function createYnabApi(configOrToken: YnabConfig | string | undefined, op
       retryDelayMs: options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS,
       retryLimit: options.retryLimit ?? DEFAULT_RETRY_LIMIT,
     }),
-  });
+  };
 
   if (!("moneyMovements" in api)) {
-    const sdkConfiguration = getSdkConfiguration(api);
-
     Object.defineProperty(api, "moneyMovements", {
       configurable: true,
       enumerable: false,
-      value: new ynab.MoneyMovementsApi(sdkConfiguration.sdk),
+      value: new ynab.MoneyMovementsApi(getSdkConfiguration(api) as unknown as ynab.Configuration),
     });
   }
 

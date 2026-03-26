@@ -3,6 +3,7 @@ import { type ErrorRequestHandler } from "express";
 
 import type { RuntimeAuthConfig, YnabConfig } from "./config.js";
 import { logAppEvent } from "./logger.js";
+import { hasToolCallStarted } from "./requestContext.js";
 import {
   getJsonRpcDebugDetails,
   type ManagedRequest,
@@ -22,6 +23,19 @@ import {
   writePayloadTooLarge,
   writeRequestResolution,
 } from "./httpServerShared.js";
+import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
+
+function getToolCallName(parsedBody: unknown) {
+  if (!isRecord(parsedBody)) {
+    return undefined;
+  }
+
+  if (getStringValue(parsedBody, "method") !== "tools/call") {
+    return undefined;
+  }
+
+  return getStringValue(getRecordValueIfObject(parsedBody, "params") ?? {}, "name");
+}
 
 export function registerMcpTransportRoutes(options: {
   app: express.Express;
@@ -112,6 +126,16 @@ export function registerMcpTransportRoutes(options: {
         profileReason: resolvedProfile?.reason,
       });
       await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
+
+      const toolName = getToolCallName(parsedBody);
+
+      if (toolName && !hasToolCallStarted()) {
+        logHttpDebug("tool.dispatch.absent", {
+          ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+          ...getJsonRpcDebugDetails(parsedBody),
+          toolName,
+        });
+      }
     } catch (error) {
       await cleanup();
       next(error);
