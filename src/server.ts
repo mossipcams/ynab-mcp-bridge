@@ -1,19 +1,19 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import * as ynab from "ynab";
 
 import { assertYnabConfig, type YnabConfig } from "./config.js";
+import { logAppEvent } from "./logger.js";
 import { getPackageInfo } from "./packageInfo.js";
-import {
-  defineReadOnlyTool,
-  registerDefinedTools,
-  type ToolRegistrar,
-} from "./toolDefinition.js";
+import { getRequestLogFields, markToolCallStarted } from "./requestContext.js";
 import { attachYnabApiRuntimeContext, createYnabApi } from "./ynabApi.js";
 import * as GetAccountTool from "./tools/GetAccountTool.js";
 import * as GetBudgetCleanupSummaryTool from "./tools/GetBudgetCleanupSummaryTool.js";
+import * as GetBudgetRatioSummaryTool from "./tools/GetBudgetRatioSummaryTool.js";
 import * as GetBudgetHealthSummaryTool from "./tools/GetBudgetHealthSummaryTool.js";
-import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
 import * as GetCashRunwayTool from "./tools/GetCashRunwayTool.js";
+import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
 import * as GetCategoryTool from "./tools/GetCategoryTool.js";
 import * as GetCategoryTrendSummaryTool from "./tools/GetCategoryTrendSummaryTool.js";
 import * as GetDebtSummaryTool from "./tools/GetDebtSummaryTool.js";
@@ -23,23 +23,21 @@ import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";
 import * as GetGoalProgressSummaryTool from "./tools/GetGoalProgressSummaryTool.js";
 import * as GetIncomeSummaryTool from "./tools/GetIncomeSummaryTool.js";
 import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
-import * as GetMoneyMovementGroupsByMonthTool from "./tools/GetMoneyMovementGroupsByMonthTool.js";
 import * as GetMoneyMovementGroupsTool from "./tools/GetMoneyMovementGroupsTool.js";
-import * as GetMoneyMovementsByMonthTool from "./tools/GetMoneyMovementsByMonthTool.js";
+import * as GetMoneyMovementGroupsByMonthTool from "./tools/GetMoneyMovementGroupsByMonthTool.js";
 import * as GetMoneyMovementsTool from "./tools/GetMoneyMovementsTool.js";
+import * as GetMoneyMovementsByMonthTool from "./tools/GetMoneyMovementsByMonthTool.js";
 import * as GetMonthCategoryTool from "./tools/GetMonthCategoryTool.js";
-import * as GetMonthlyReviewTool from "./tools/GetMonthlyReviewTool.js";
-import * as GetNetWorthTrajectoryTool from "./tools/GetNetWorthTrajectoryTool.js";
 import * as GetPayeeLocationTool from "./tools/GetPayeeLocationTool.js";
 import * as GetPayeeLocationsByPayeeTool from "./tools/GetPayeeLocationsByPayeeTool.js";
 import * as GetPayeeTool from "./tools/GetPayeeTool.js";
+import * as GetScheduledTransactionTool from "./tools/GetScheduledTransactionTool.js";
+import * as SearchTransactionsTool from "./tools/SearchTransactionsTool.js";
+import * as GetSpendingSummaryTool from "./tools/GetSpendingSummaryTool.js";
+import * as GetSpendingAnomaliesTool from "./tools/GetSpendingAnomaliesTool.js";
 import * as GetPlanDetailsTool from "./tools/GetPlanDetailsTool.js";
 import * as GetPlanMonthTool from "./tools/GetPlanMonthTool.js";
 import * as GetPlanSettingsTool from "./tools/GetPlanSettingsTool.js";
-import * as GetRecurringExpenseSummaryTool from "./tools/GetRecurringExpenseSummaryTool.js";
-import * as GetScheduledTransactionTool from "./tools/GetScheduledTransactionTool.js";
-import * as GetSpendingAnomaliesTool from "./tools/GetSpendingAnomaliesTool.js";
-import * as GetSpendingSummaryTool from "./tools/GetSpendingSummaryTool.js";
 import * as GetTransactionTool from "./tools/GetTransactionTool.js";
 import * as GetTransactionsByAccountTool from "./tools/GetTransactionsByAccountTool.js";
 import * as GetTransactionsByCategoryTool from "./tools/GetTransactionsByCategoryTool.js";
@@ -47,15 +45,15 @@ import * as GetTransactionsByMonthTool from "./tools/GetTransactionsByMonthTool.
 import * as GetTransactionsByPayeeTool from "./tools/GetTransactionsByPayeeTool.js";
 import * as GetUpcomingObligationsTool from "./tools/GetUpcomingObligationsTool.js";
 import * as GetUserTool from "./tools/GetUserTool.js";
+import * as GetRecurringExpenseSummaryTool from "./tools/GetRecurringExpenseSummaryTool.js";
 import * as ListAccountsTool from "./tools/ListAccountsTool.js";
 import * as ListPayeeLocationsTool from "./tools/ListPayeeLocationsTool.js";
+import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
 import * as ListPayeesTool from "./tools/ListPayeesTool.js";
 import * as ListPlanCategoriesTool from "./tools/ListPlanCategoriesTool.js";
-import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
 import * as ListPlansTool from "./tools/ListPlansTool.js";
 import * as ListScheduledTransactionsTool from "./tools/ListScheduledTransactionsTool.js";
 import * as ListTransactionsTool from "./tools/ListTransactionsTool.js";
-import * as SearchTransactionsTool from "./tools/SearchTransactionsTool.js";
 
 const packageInfo = getPackageInfo();
 
@@ -64,72 +62,135 @@ const SERVER_INFO = {
   version: packageInfo.version,
 } as const;
 
-const toolDefinitions = [
-  defineReadOnlyTool("Get MCP Version", GetMcpVersionTool),
-  defineReadOnlyTool("Get User", GetUserTool),
-  defineReadOnlyTool("List Plans", ListPlansTool),
-  defineReadOnlyTool("Get Plan", GetPlanDetailsTool),
-  defineReadOnlyTool("Get Plan Settings", GetPlanSettingsTool),
-  defineReadOnlyTool("Get Plan Month", GetPlanMonthTool),
-  defineReadOnlyTool("List Plan Months", ListPlanMonthsTool),
-  defineReadOnlyTool("List Categories", ListPlanCategoriesTool),
-  defineReadOnlyTool("Get Category", GetCategoryTool),
-  defineReadOnlyTool("Get Month Category", GetMonthCategoryTool),
-  defineReadOnlyTool("List Transactions", ListTransactionsTool),
-  defineReadOnlyTool("Search Transactions", SearchTransactionsTool),
-  defineReadOnlyTool("Get Transactions By Month", GetTransactionsByMonthTool),
-  defineReadOnlyTool("Get Transaction", GetTransactionTool),
-  defineReadOnlyTool("Get Transactions By Account", GetTransactionsByAccountTool),
-  defineReadOnlyTool("Get Transactions By Category", GetTransactionsByCategoryTool),
-  defineReadOnlyTool("Get Transactions By Payee", GetTransactionsByPayeeTool),
-  defineReadOnlyTool("List Scheduled Transactions", ListScheduledTransactionsTool),
-  defineReadOnlyTool("Get Scheduled Transaction", GetScheduledTransactionTool),
-  defineReadOnlyTool("List Accounts", ListAccountsTool),
-  defineReadOnlyTool("Get Account", GetAccountTool),
-  defineReadOnlyTool("List Payees", ListPayeesTool),
-  defineReadOnlyTool("Get Payee", GetPayeeTool),
-  defineReadOnlyTool("List Payee Locations", ListPayeeLocationsTool),
-  defineReadOnlyTool("Get Payee Location", GetPayeeLocationTool),
-  defineReadOnlyTool("Get Payee Locations By Payee", GetPayeeLocationsByPayeeTool),
-  defineReadOnlyTool("Get Money Movements", GetMoneyMovementsTool),
-  defineReadOnlyTool("Get Money Movements By Month", GetMoneyMovementsByMonthTool),
-  defineReadOnlyTool("Get Money Movement Groups", GetMoneyMovementGroupsTool),
-  defineReadOnlyTool("Get Money Movement Groups By Month", GetMoneyMovementGroupsByMonthTool),
-  defineReadOnlyTool("Get Financial Snapshot", GetFinancialSnapshotTool),
-  defineReadOnlyTool("Get Net Worth Trajectory", GetNetWorthTrajectoryTool),
-  defineReadOnlyTool("Get Monthly Review", GetMonthlyReviewTool),
-  defineReadOnlyTool("Get Financial Health Check", GetFinancialHealthCheckTool),
-  defineReadOnlyTool("Get Spending Summary", GetSpendingSummaryTool),
-  defineReadOnlyTool("Get Spending Anomalies", GetSpendingAnomaliesTool),
-  defineReadOnlyTool("Get Cash Flow Summary", GetCashFlowSummaryTool),
-  defineReadOnlyTool("Get Cash Runway", GetCashRunwayTool),
-  defineReadOnlyTool("Get Budget Health Summary", GetBudgetHealthSummaryTool),
-  defineReadOnlyTool("Get Upcoming Obligations", GetUpcomingObligationsTool),
-  defineReadOnlyTool("Get Goal Progress Summary", GetGoalProgressSummaryTool),
-  defineReadOnlyTool("Get Budget Cleanup Summary", GetBudgetCleanupSummaryTool),
-  defineReadOnlyTool("Get Income Summary", GetIncomeSummaryTool),
-  defineReadOnlyTool("Get Emergency Fund Coverage", GetEmergencyFundCoverageTool),
-  defineReadOnlyTool("Get Debt Summary", GetDebtSummaryTool),
-  defineReadOnlyTool("Get Recurring Expense Summary", GetRecurringExpenseSummaryTool),
-  defineReadOnlyTool("Get Category Trend Summary", GetCategoryTrendSummaryTool),
-] as const;
+const READ_ONLY_TOOL_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+} as const;
 
-export function registerServerTools(registrar: ToolRegistrar, api: ynab.API): string[] {
-  return registerDefinedTools(registrar, api, toolDefinitions);
+type ToolModule = {
+  title: string;
+  name: string;
+  description: string;
+  inputSchema: ZodRawShapeCompat;
+  execute: (input: unknown, api: ynab.API) => Promise<CallToolResult>;
+};
+
+type ToolSource = Omit<ToolModule, "title">;
+type ToolRegistrar = Pick<McpServer, "registerTool">;
+
+export function defineTool(title: string, tool: ToolSource): ToolModule {
+  return {
+    title,
+    ...tool,
+  };
 }
 
-export function createServer(config: YnabConfig, api = createYnabApi(config)): McpServer {
+const toolRegistrations: ToolModule[] = [
+  defineTool("Get MCP Version", GetMcpVersionTool),
+  defineTool("Get User", GetUserTool),
+  defineTool("List Plans", ListPlansTool),
+  defineTool("Get Plan", GetPlanDetailsTool),
+  defineTool("Get Plan Settings", GetPlanSettingsTool),
+  defineTool("Get Plan Month", GetPlanMonthTool),
+  defineTool("List Plan Months", ListPlanMonthsTool),
+  defineTool("List Categories", ListPlanCategoriesTool),
+  defineTool("Get Category", GetCategoryTool),
+  defineTool("Get Month Category", GetMonthCategoryTool),
+  defineTool("List Transactions", ListTransactionsTool),
+  defineTool("Search Transactions", SearchTransactionsTool),
+  defineTool("Get Transactions By Month", GetTransactionsByMonthTool),
+  defineTool("Get Transaction", GetTransactionTool),
+  defineTool("Get Transactions By Account", GetTransactionsByAccountTool),
+  defineTool("Get Transactions By Category", GetTransactionsByCategoryTool),
+  defineTool("Get Transactions By Payee", GetTransactionsByPayeeTool),
+  defineTool("List Scheduled Transactions", ListScheduledTransactionsTool),
+  defineTool("Get Scheduled Transaction", GetScheduledTransactionTool),
+  defineTool("List Accounts", ListAccountsTool),
+  defineTool("Get Account", GetAccountTool),
+  defineTool("List Payees", ListPayeesTool),
+  defineTool("Get Payee", GetPayeeTool),
+  defineTool("List Payee Locations", ListPayeeLocationsTool),
+  defineTool("Get Payee Location", GetPayeeLocationTool),
+  defineTool("Get Payee Locations By Payee", GetPayeeLocationsByPayeeTool),
+  defineTool("Get Money Movements", GetMoneyMovementsTool),
+  defineTool("Get Money Movements By Month", GetMoneyMovementsByMonthTool),
+  defineTool("Get Money Movement Groups", GetMoneyMovementGroupsTool),
+  defineTool("Get Money Movement Groups By Month", GetMoneyMovementGroupsByMonthTool),
+  defineTool("Get Financial Snapshot", GetFinancialSnapshotTool),
+  defineTool("Get Financial Health Check", GetFinancialHealthCheckTool),
+  defineTool("Get Spending Summary", GetSpendingSummaryTool),
+  defineTool("Get Spending Anomalies", GetSpendingAnomaliesTool),
+  defineTool("Get Cash Flow Summary", GetCashFlowSummaryTool),
+  defineTool("Get Cash Runway", GetCashRunwayTool),
+  defineTool("Get Budget Health Summary", GetBudgetHealthSummaryTool),
+  defineTool("Get Upcoming Obligations", GetUpcomingObligationsTool),
+  defineTool("Get Goal Progress Summary", GetGoalProgressSummaryTool),
+  defineTool("Get Budget Cleanup Summary", GetBudgetCleanupSummaryTool),
+  defineTool("Get Income Summary", GetIncomeSummaryTool),
+  defineTool("Get Emergency Fund Coverage", GetEmergencyFundCoverageTool),
+  defineTool("Get Debt Summary", GetDebtSummaryTool),
+  defineTool("Get Recurring Expense Summary", GetRecurringExpenseSummaryTool),
+  defineTool("Get Category Trend Summary", GetCategoryTrendSummaryTool),
+  defineTool("Get 70/20/10 Summary", GetBudgetRatioSummaryTool),
+];
+
+function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: ynab.API) {
+  registrar.registerTool(
+    tool.name,
+    {
+      title: tool.title,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    },
+    async (input) => {
+      markToolCallStarted();
+      logAppEvent("mcp", "tool.call.started", {
+        ...getRequestLogFields(),
+        toolName: tool.name,
+      });
+
+      try {
+        const result = await tool.execute(input, api);
+        const failed = "isError" in result && result.isError === true;
+
+        logAppEvent("mcp", failed ? "tool.call.failed" : "tool.call.succeeded", {
+          ...getRequestLogFields(),
+          toolName: tool.name,
+        });
+
+        return result;
+      } catch (error) {
+        logAppEvent("mcp", "tool.call.failed", {
+          ...getRequestLogFields(),
+          error,
+          toolName: tool.name,
+        });
+        throw error;
+      }
+    },
+  );
+}
+
+export function registerServerTools(registrar: ToolRegistrar, api: ynab.API) {
+  const registeredToolNames: string[] = [];
+
+  for (const tool of toolRegistrations) {
+    registerTool(registrar, tool, api);
+    registeredToolNames.push(tool.name);
+  }
+
+  return registeredToolNames;
+}
+
+export function createServer(config: YnabConfig, api = createYnabApi(config)) {
   const normalizedConfig = assertYnabConfig(config);
   const server = new McpServer(SERVER_INFO);
   const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
-  const registrar: ToolRegistrar = {
-    registerTool: (name, toolConfig, cb) => {
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- This adapter intentionally erases MCP's heavy generic types.
-      return server.registerTool(name, toolConfig as never, cb as never);
-    },
-  };
 
-  registerServerTools(registrar, configuredApi);
+  registerServerTools(server, configuredApi);
 
   return server;
 }

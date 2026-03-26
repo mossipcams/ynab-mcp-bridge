@@ -1,3 +1,622 @@
+# Tech Debt Remediation Execution Plan
+
+## Goal
+
+Implement the remaining work in `tasks/tech-debt-remediation-roadmap.md` in the roadmap order, using small TDD slices, while keeping the current dirty checkout safe.
+
+## Constraints And Notes
+
+- The current checkout is on `fix/cors-cf-utility-dedup`, not `main`.
+- The worktree is already dirty with unrelated local changes, so implementation should be isolated in a fresh branch/worktree from the latest `main` unless you explicitly want work to continue here.
+- Repo rules require a stop after this plan and approval before runtime code changes.
+- Repo rules require red-first TDD for code changes, one task at a time, with a stop after each task.
+- Repo rules allow Markdown-only edits and administrative git/worktree setup without TDD.
+- `tasks/lessons.md` currently emphasizes updating the plan when priorities shift; this plan follows the roadmap's risk-first order.
+- Recommended `dist/` policy for this pass: keep `dist/` tracked for now, document that decision, and align validation around it. Removing tracked `dist/` is a one-way-door publish-process change that should not be coupled to the higher-risk runtime refactors in this roadmap.
+
+## Assumptions
+
+- Existing specs under `src/*.spec.ts` can be updated as part of TDD because they are not under a `tests/` directory.
+- Targeted spec runs will be used for each slice first, then broader suites as confidence checks.
+- When a roadmap item depends on an architectural choice, I will make the smallest choice that satisfies the acceptance criteria and keeps follow-on items simpler.
+
+## Tasks
+
+- [ ] Task 0: Isolate implementation work from the dirty checkout
+  Test to write:
+  None. This is branch/worktree setup only.
+  Code to implement:
+  Create or reuse a clean worktree from the latest `main`, then copy this plan context forward there before starting Task 1.
+  How to verify it works:
+  Confirm the new worktree is on a fresh branch from current `main`, `git status` is clean there, and this current checkout remains undisturbed.
+
+- [ ] Task 1: Add failing logging coverage for shared OAuth and profile sinks
+  Test to write:
+  Extend `src/oauthBroker.spec.ts` and `src/clientProfiles.spec.ts` so they fail unless OAuth callback failures, non-callback OAuth events, and profile events all flow through the shared Pino sink with structured `scope`, `event`, and redacted fields.
+  Code to implement:
+  No production code in this task. Only red tests that pin the structured logging contract.
+  How to verify it works:
+  Run the targeted Vitest files and show the logging assertions failing against the current raw `console.error` paths.
+
+- [ ] Task 2: Route OAuth and profile logging through the shared logger
+  Test to write:
+  Reuse the failing specs from Task 1.
+  Code to implement:
+  Update `src/oauthBroker.ts` so `logOAuthDebug()` and the callback error path call `logAppEvent("oauth", ...)`, update `src/clientProfiles/profileLogger.ts` to use `logAppEvent("profile", ...)`, and normalize event/detail shape without direct runtime `console.error` usage in those paths.
+  How to verify it works:
+  Re-run the targeted logging specs and show them passing, then run a focused grep to confirm the runtime OAuth/profile logging paths no longer use direct `console.error`.
+
+- [ ] Task 3: Add failing release validation coverage for branch-safe published baselines and real PR checks
+  Test to write:
+  Extend `src/releasePlease.spec.ts` so it fails unless the published-version baseline is branch-aware instead of globally highest-tag based, and unless `release-please-pr-checks.yml` runs real validation steps instead of placeholder `echo` jobs.
+  Code to implement:
+  No production code in this task. Only red tests that define the safer release contract.
+  How to verify it works:
+  Run `npx vitest run src/releasePlease.spec.ts` and show the failures proving the current branch-sensitive assertion and placeholder workflow are insufficient.
+
+- [ ] Task 4: Repair release validation and release-please PR checks
+  Test to write:
+  Reuse the failing specs from Task 3.
+  Code to implement:
+  Update `src/releasePlease.spec.ts` support code and the release workflows so published-version validation uses a branch-aware reachable baseline, manifest/package validation stays separate, and release-please PR checks execute real validation commands.
+  How to verify it works:
+  Re-run `npx vitest run src/releasePlease.spec.ts`, then run `npm run test:ci` and `npm run test:coverage` as the milestone proof for the release-validation slice.
+
+- [ ] Task 5: Record and align the `dist/` tracking decision
+  Test to write:
+  Add or update a lightweight metadata/spec assertion only if needed so repository guidance matches the chosen tracked-`dist/` policy.
+  Code to implement:
+  Document the decision to keep `dist/` tracked for now, and adjust any affected docs or validation text so the policy is explicit.
+  How to verify it works:
+  Confirm the repository guidance is internally consistent and that no CI/package assumptions conflict with the documented policy.
+
+- [ ] Task 6: Add direct failing coverage for shared helper surfaces needed before refactors
+  Test to write:
+  Add focused red specs for `src/requestContext.ts`, `src/tools/collectionToolUtils.ts`, `src/tools/financialDiagnosticsUtils.ts`, and `src/tools/errorUtils.ts`, plus any missing edge-case coverage in `src/headerUtils.spec.ts`, so upcoming refactors are pinned by local helper tests instead of only broad integration suites.
+  Code to implement:
+  No production code in this task. Only failing helper tests and any minimal test fixtures.
+  How to verify it works:
+  Run the new targeted helper spec set and show the expected failures on currently unpinned behavior.
+
+- [ ] Task 7: Implement the missing helper behaviors or exports required by the new coverage
+  Test to write:
+  Reuse the failing specs from Task 6.
+  Code to implement:
+  Add the smallest helper-layer code needed so the new shared utility tests pass without changing higher-level behavior.
+  How to verify it works:
+  Re-run the targeted helper specs and show them passing, then run the directly affected broader specs if a helper feeds an integration-heavy module.
+
+- [ ] Task 8: Add failing OAuth durability coverage for `approveConsent`
+  Test to write:
+  Extend `src/oauthCore.spec.ts` and, if helpful, `src/oauthStore.spec.ts` so they fail unless the `approveConsent` transition survives a persistence failure without deleting the recoverable prior state first.
+  Code to implement:
+  No production code in this task. Only red tests that define durable write semantics for the consent-approval transition.
+  How to verify it works:
+  Run the targeted OAuth specs and show the failure demonstrating the current delete-then-save risk.
+
+- [ ] Task 9: Implement durable `approveConsent` state transitions
+  Test to write:
+  Reuse the failing specs from Task 8.
+  Code to implement:
+  Rework the `approveConsent` flow and any store helper it needs so replacement grant state becomes durable before the prior recoverable state is discarded.
+  How to verify it works:
+  Re-run the targeted OAuth specs and show them passing, then do a small proof review of persisted state behavior around the updated transition.
+
+- [ ] Task 10: Add failing OAuth durability coverage for callback and code-exchange transitions
+  Test to write:
+  Extend `src/oauthCore.spec.ts` and `src/oauthStore.spec.ts` so they fail unless `handleCallback` and `exchangeAuthorizationCode` preserve recoverable grant state when persistence or upstream steps fail mid-transition.
+  Code to implement:
+  No production code in this task. Only red tests for the remaining delete-before-save gaps.
+  How to verify it works:
+  Run the targeted OAuth specs and show the failures in the callback and token-exchange paths.
+
+- [ ] Task 11: Implement durable callback and token-exchange transitions
+  Test to write:
+  Reuse the failing specs from Task 10.
+  Code to implement:
+  Update the callback and authorization-code exchange flows plus store helpers so they use write-then-delete or equivalent upsert semantics that keep state recoverable through transient errors.
+  How to verify it works:
+  Re-run the targeted OAuth specs and show them passing, then run the broader OAuth-related spec set for regression coverage.
+
+- [ ] Task 12: Add failing coverage for minimized persisted OAuth secrets
+  Test to write:
+  Extend `src/oauthStore.spec.ts` and `src/oauthCore.spec.ts` so they fail unless persisted grants drop upstream access tokens after callback/token exchange and retain only the minimum secret-bearing fields needed for recovery.
+  Code to implement:
+  No production code in this task. Only red tests that define the new persisted grant shape and backward-compatible load behavior.
+  How to verify it works:
+  Run the targeted OAuth specs and show failures proving the current store still writes full upstream token payloads.
+
+- [ ] Task 13: Implement minimized OAuth persistence
+  Test to write:
+  Reuse the failing specs from Task 12.
+  Code to implement:
+  Update `src/oauthGrant.ts` and `src/oauthStore.ts` write paths so persisted grants no longer retain upstream access tokens after durable transitions complete, while remaining compatible with existing on-disk records during reads.
+  How to verify it works:
+  Re-run the targeted OAuth specs and show them passing, then inspect a representative serialized state fixture or output to confirm only the intended secrets remain.
+
+- [ ] Task 14: Add failing coverage for header parsing dedup and shared request context semantics
+  Test to write:
+  Add or extend focused specs for `src/headerUtils.ts`, `src/requestContext.ts`, `src/cloudflareCompatibility.ts`, and `src/clientProfiles/requestContext.ts` so they fail unless `getFirstHeaderValue`, session/correlation parsing, and forwarded-host handling all come from the shared layer with consistent ambiguous-header behavior.
+  Code to implement:
+  No production code in this task. Only red tests defining the shared header contract.
+  How to verify it works:
+  Run the targeted header/request-context spec set and show the failures on duplicated or inconsistent behavior.
+
+- [ ] Task 15: Centralize header parsing and trust decisions
+  Test to write:
+  Reuse the failing specs from Task 14.
+  Code to implement:
+  Remove remaining local `getFirstHeaderValue` copies, move shared request-context parsing into the common layer, and align origin/forwarded-host trust behavior behind the shared utilities.
+  How to verify it works:
+  Re-run the targeted header/request-context specs and show them passing, then use a repo grep to confirm duplicate `getFirstHeaderValue` implementations are gone.
+
+- [ ] Task 16: Add route-scoped safety coverage before splitting `httpServer.ts`
+  Test to write:
+  Add focused red specs for the route/middleware seams that will be extracted from `src/httpServer.ts`, prioritizing ingress/profile detection, OAuth/auth routes, and MCP transport routing, while preserving the current behavior already covered by `src/httpServer.spec.ts`.
+  Code to implement:
+  No production code in this task. Only extraction-oriented tests that make the route boundaries explicit.
+  How to verify it works:
+  Run the targeted HTTP server specs and show the newly added boundary tests failing before extraction.
+
+- [ ] Task 17: Extract shared ingress and auth route modules from `httpServer.ts`
+  Test to write:
+  Reuse the failing specs from Task 16.
+  Code to implement:
+  Split `src/httpServer.ts` into smaller route-scoped modules for shared ingress/profile setup and OAuth/auth flows, keeping behavior stable and imports aligned with the shared header layer.
+  How to verify it works:
+  Re-run the targeted HTTP specs and show them passing, then run the full `src/httpServer.spec.ts` suite as the broader regression proof.
+
+- [ ] Task 18: Extract MCP transport routing and finish HTTP server decomposition
+  Test to write:
+  Reuse the boundary coverage from Task 16 and add any final red assertions needed for the MCP transport extraction seam.
+  Code to implement:
+  Finish splitting the remaining transport-routing logic from `src/httpServer.ts`, reduce repeated path/method checks, and leave the main server entry file as thin orchestration.
+  How to verify it works:
+  Run the focused HTTP specs, then the full HTTP/server-related spec set, and confirm the decomposed modules preserve behavior.
+
+- [ ] Task 19: Add failing coverage for cross-call plan override bleed
+  Test to write:
+  Extend `src/tools/planToolUtils.spec.ts`, `src/serverFactory.spec.ts`, or other direct plan-resolution coverage so they fail unless plan resolution stays scoped to a single call/request and can no longer bleed through a shared API instance.
+  Code to implement:
+  No production code in this task. Only red tests that pin the non-mutable resolution behavior.
+  How to verify it works:
+  Run the targeted plan-resolution specs and show the failure demonstrating the current shared `runtimePlanIdOverride` mutation.
+
+- [ ] Task 20: Remove mutable runtime plan override state
+  Test to write:
+  Reuse the failing specs from Task 19.
+  Code to implement:
+  Refactor `src/tools/planToolUtils.ts`, `src/ynabApi.ts`, `src/server.ts`, and `src/stdioServer.ts` to use per-call or request-scoped plan resolution instead of mutable shared API state.
+  How to verify it works:
+  Re-run the targeted plan-resolution specs and show them passing, then run the affected tool/server specs to confirm fallback behavior still works.
+
+- [ ] Task 21: Add failing coverage for config ownership boundaries
+  Test to write:
+  Extend `src/config.spec.ts` and `src/runtimeConfig.spec.ts` so they fail unless runtime transport config, OAuth config, and YNAB config are owned by smaller modules with clearer APIs and less duplicated matrix coverage.
+  Code to implement:
+  No production code in this task. Only red tests pinning the intended ownership boundaries.
+  How to verify it works:
+  Run the targeted config specs and show the failures proving the current facade/ownership split is too thin.
+
+- [ ] Task 22: Split config ownership into real modules
+  Test to write:
+  Reuse the failing specs from Task 21.
+  Code to implement:
+  Refactor `src/config.ts` and `src/runtimeConfig.ts` into clearer ownership modules, removing the pure-reexport boundary if it stays empty or turning it into a real ownership seam.
+  How to verify it works:
+  Re-run the targeted config specs and show them passing, then run typecheck to confirm the new module boundaries compile cleanly.
+
+- [ ] Task 23: Add failing coverage for a first-class tool definition pattern
+  Test to write:
+  Extend `src/serverFactory.spec.ts` and any tool-local specs needed so they fail unless tool definitions can be declared through a shared builder that reduces central boilerplate while respecting the new plan-resolution pattern.
+  Code to implement:
+  No production code in this task. Only red tests for the desired registration contract.
+  How to verify it works:
+  Run the targeted server/tool specs and show the failures proving the current manual registration shape is still required.
+
+- [ ] Task 24: Introduce the shared tool definition abstraction
+  Test to write:
+  Reuse the failing specs from Task 23.
+  Code to implement:
+  Add a `defineTool`/builder pattern, move repeated schema/wrapper metadata toward tool-local ownership, and update `src/server.ts` plus representative tools to use it without changing behavior.
+  How to verify it works:
+  Re-run the targeted server/tool specs and show them passing, then run the broader server spec set for regression confidence.
+
+- [ ] Task 25: Add failing coverage for shared transaction retrieval semantics
+  Test to write:
+  Extend the transaction-tool specs so they fail unless list/search/get-by-* tools share consistent filtering, pagination, projection, and month-validation behavior through one query engine.
+  Code to implement:
+  No production code in this task. Only red tests that define the unified transaction semantics.
+  How to verify it works:
+  Run the targeted transaction-related spec set and show the failures proving the current implementations still drift.
+
+- [ ] Task 26: Consolidate the transaction tool family onto one core engine
+  Test to write:
+  Reuse the failing specs from Task 25.
+  Code to implement:
+  Build the shared transaction query/presentation layer and make `SearchTransactionsTool`, `ListTransactionsTool`, and the `GetTransactionsBy*` tools delegate to it.
+  How to verify it works:
+  Re-run the targeted transaction specs and show them passing, then run the broader finance/tool suite impacted by transaction summaries.
+
+- [ ] Task 27: Add failing coverage for excluding test-only helpers from build output
+  Test to write:
+  Add or extend a focused packaging/build assertion so it fails unless files like `src/oauthTestHelpers.ts` are omitted from emitted runtime artifacts.
+  Code to implement:
+  No production code in this task. Only red tests or packaging assertions that define the expected build output.
+  How to verify it works:
+  Run the targeted packaging/build validation and show the failure proving test-only helpers still leak into `dist/`.
+
+- [ ] Task 28: Exclude test-only helpers from package output
+  Test to write:
+  Reuse the failing checks from Task 27.
+  Code to implement:
+  Update the build/package configuration so test-only helpers do not emit into `dist/` or ship in the package output.
+  How to verify it works:
+  Re-run the targeted packaging/build validation and then run `npm run build` to confirm runtime artifacts exclude test helpers.
+
+- [ ] Task 29: Add failing coverage for a local CI-equivalent preflight command
+  Test to write:
+  Add a small metadata/spec assertion so repository scripts and docs fail unless there is one documented local preflight command that matches the real CI gate set.
+  Code to implement:
+  No production code in this task. Only red validation for the script/documentation contract.
+  How to verify it works:
+  Run the targeted validation and show the failure proving there is no single CI-aligned preflight command yet.
+
+- [ ] Task 30: Add the local preflight command and final roadmap verification
+  Test to write:
+  Reuse the failing checks from Task 29.
+  Code to implement:
+  Add the preflight npm script, document it, and align it with the actual CI validation steps used after the release-check repair.
+  How to verify it works:
+  Re-run the targeted validation, then run the new preflight command plus final repo-wide checks appropriate to the touched surfaces so the roadmap closes with a full proof pass.
+
+## Milestones
+
+- [ ] Milestone 1: Tasks 0-7
+  Outcome:
+  Logging and release validation are repaired, `dist/` policy is documented, and shared helper coverage exists before deeper refactors.
+
+- [ ] Milestone 2: Tasks 8-15
+  Outcome:
+  OAuth transitions are durable, persisted OAuth secret handling is reduced, and header/request parsing is centralized.
+
+- [ ] Milestone 3: Tasks 16-22
+  Outcome:
+  HTTP server and config ownership are decomposed into clearer modules, and plan resolution no longer relies on shared mutable state.
+
+- [ ] Milestone 4: Tasks 23-30
+  Outcome:
+  Tool registration and transaction retrieval are consolidated, packaging is cleaner, and local preflight matches CI.
+
+## Review Bar
+
+- The logging and release-validation failures called out in the roadmap are green.
+- OAuth flows never delete the only recoverable state before durable replacement exists.
+- Persisted OAuth state keeps only the minimum required secret-bearing fields.
+- Header parsing, request context, and plan resolution semantics are explicit and directly covered.
+- `httpServer.ts`, config ownership, and tool registration are materially simpler without behavior regressions.
+- Package output excludes test-only helpers.
+- One local preflight command mirrors the real CI gate set.
+- Before closing the full roadmap, we should ask whether the result meets a staff engineer review bar.
+
+---
+
+# Git Cleanup Automation Plan
+
+## Goal
+
+Add a safe local automation command that helps prevent branch and worktree sprawl by:
+
+- showing stale worktrees and merged local branches in one place
+- defaulting to a non-destructive dry run
+- only deleting branches that are merged and not attached to an active worktree
+- pruning stale worktree metadata
+
+## Constraints And Notes
+
+- The current checkout is on `fix/cors-cf-utility-dedup`, not `main`.
+- The worktree is already dirty with unrelated local changes.
+- Repo rules require a stop after this plan and approval before any code changes.
+- Repo branch rules say implementation work should start from the latest `main`, but I should not switch automatically from the current dirty branch. If you approve implementation, I will pause once more before Task 1 if isolation in a fresh branch/worktree from `main` is needed.
+- Repo rules say not to modify files in a `tests/` directory unless explicitly asked to. The existing Vitest specs live under `src/`, so targeted spec updates there are allowed.
+- The safest automation shape is a dry-run-first CLI with an explicit apply flag, rather than a command that silently deletes git objects on every run.
+
+## Assumptions
+
+- The automation should be repo-local and runnable as an npm script, not a machine-global shell alias.
+- A good default command name is `npm run git:cleanup`.
+- Dry run output should be readable enough to use as a weekly review command.
+- Apply mode should be conservative:
+  - fetch/prune remote refs
+  - prune stale worktree metadata
+  - delete only merged local branches that are not protected and not currently used by any active worktree
+- Protected branches should include at least `main`.
+- It is acceptable to leave truly active but old worktrees alone instead of trying to infer intent from age alone.
+
+## Tasks
+
+- [ ] Task 1: Add failing coverage for cleanup candidate detection and safety rules
+  Test to write:
+  Add a focused red spec under `src/` for a new git cleanup module that proves it:
+  identifies merged local branch candidates from git output,
+  excludes protected branches like `main`,
+  excludes the current branch,
+  excludes branches attached to active worktrees,
+  and flags prunable or missing worktree entries separately from active worktrees.
+  Code to implement:
+  No production code in this task. Only failing specs and fixture data that define the cleanup contract and the safety exclusions.
+  How to verify it works:
+  Run the targeted Vitest command for the new spec and show the failures proving the cleanup analyzer does not exist yet.
+
+- [ ] Task 2: Implement the cleanup analyzer and dry-run CLI output
+  Test to write:
+  Reuse the red tests from Task 1 and add or extend coverage for dry-run summary formatting if needed.
+  Code to implement:
+  Add a small TypeScript module under `src/` that parses git command output into:
+  active worktrees,
+  prunable worktrees,
+  merged branch cleanup candidates,
+  and blocked branches that are still in use.
+  Add a CLI entry point that runs the necessary git commands, prints a dry-run summary by default, and exits without deleting anything unless an explicit apply flag is present.
+  Add an npm script entry in `package.json` for the new command.
+  How to verify it works:
+  Re-run the targeted Vitest command and show the tests turning green.
+  Then run the dry-run command itself in this repo and confirm the output matches the current local state without deleting anything.
+
+- [ ] Task 3: Add failing coverage for apply-mode command sequencing and deletion guards
+  Test to write:
+  Extend the new cleanup spec so it fails unless apply mode:
+  runs remote/worktree prune steps before deletions,
+  deletes only the approved merged branch candidates,
+  never deletes the current branch,
+  and never deletes branches still attached to an active worktree.
+  Code to implement:
+  No production code in this task. Only failing tests that pin the exact safe command sequence and guardrails.
+  How to verify it works:
+  Run the targeted Vitest command and show the failures demonstrating apply behavior is not implemented yet.
+
+- [ ] Task 4: Implement apply mode, document usage, and verify end to end
+  Test to write:
+  Reuse the red tests from Task 3.
+  Code to implement:
+  Finish the CLI so `--apply` performs the conservative cleanup steps:
+  `git fetch --prune`,
+  `git worktree prune`,
+  removal of stale worktree metadata when applicable,
+  and deletion of only safe merged branch candidates.
+  Add a short README section documenting dry run versus apply usage and the safety rules.
+  How to verify it works:
+  Re-run the targeted spec and show it passing.
+  Then run the dry-run command in this repo.
+  If the implementation can support a non-destructive preview of apply actions, use that as the smallest meaningful proof beyond unit tests.
+  Finally run `npm run typecheck` to confirm the new module and CLI compile cleanly.
+
+## Review Bar
+
+- The default command is safe and non-destructive.
+- Apply mode cannot delete `main`, the current branch, or a branch still checked out by any active worktree.
+- The command gives one obvious path to regular cleanup instead of relying on memory.
+- The output is clear enough that future cleanup can become routine rather than an occasional rescue operation.
+
+# Calculation Logic Remediation Plan
+
+## Goal
+
+Fix the highest-impact YNAB calculation issues from the audit so the finance analytics tools use consistent money semantics, stop misclassifying transfers and refunds, and expose outputs that an LLM can interpret correctly.
+
+## Constraints And Notes
+
+- The current checkout is on `fix/cors-cf-utility-dedup`, not `main`.
+- The worktree is already dirty with unrelated local changes, so any future implementation should stay narrowly scoped unless we first isolate the work in a fresh branch/worktree.
+- Repo rules require TDD for code changes, one task at a time, with a stop after each task.
+- The finance tools currently mix month snapshots, raw transactions, scheduled transactions, and current category metadata; several fixes will need shared helpers so the same YNAB rules are not reimplemented inconsistently.
+- The YNAB SDK confirms `transactions.getTransactions(planId, sinceDate, ...)` is a since-date endpoint, while `getTransactionsByMonth` is the month-scoped endpoint. Future implementation should prefer the month endpoint when the tool contract is month-specific.
+
+## Assumptions
+
+- The first remediation pass should prioritize semantic correctness over adding new tools.
+- Credit card payment categories should not count as discretionary spending in spending, anomaly, or ratio tools.
+- Positive category activity should not automatically be treated as spending; refunds should either reduce spend or be surfaced separately.
+- Tools that forecast upcoming obligations should separate due outflows from expected inflows instead of mixing them into one obligation total.
+- We can update existing Vitest specs under `src/` because they are not inside a `tests/` directory.
+
+## Tasks
+
+- [ ] Task 1: Add failing coverage for shared money-classification semantics
+  Test to write:
+  Add focused red tests in `src/financeToolUtils.spec.ts` and the affected finance specs proving that:
+  negative expense activity counts as spend,
+  positive refund activity does not inflate spend,
+  transfers are excluded from expense/income classification,
+  and credit card payment categories are excluded from spending-style summaries.
+  Code to implement:
+  No production code in this task. Only failing specs that pin the desired behavior for refunds, transfers, and credit-card-payment handling.
+  How to verify it works:
+  Run `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the failures proving the current helpers and tools misclassify these cases.
+
+- [ ] Task 2: Implement shared money classification and replace `Math.abs(activity)` spending logic
+  Test to write:
+  Reuse the failing specs from Task 1.
+  Code to implement:
+  Add shared helpers in `src/tools/financeToolUtils.ts` for sign-aware spending, refund treatment, transfer exclusion, and optional credit-card-payment exclusion.
+  Update these tools to use the shared logic instead of raw `Math.abs(...)`:
+  `GetFinancialSnapshotTool.ts`,
+  `GetBudgetHealthSummaryTool.ts`,
+  `GetCashFlowSummaryTool.ts`,
+  `GetCategoryTrendSummaryTool.ts`,
+  `GetSpendingAnomaliesTool.ts`,
+  and `GetBudgetRatioSummaryTool.ts`.
+  How to verify it works:
+  Re-run the Task 1 Vitest command and show the new tests passing.
+  Then run the broader touched suite:
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/financeToolUtils.spec.ts`.
+
+- [ ] Task 3: Add failing coverage for month-scoped cleanup and health excluding transfer noise
+  Test to write:
+  Extend `src/financeAdvancedTools.spec.ts` and `src/financialDiagnostics.spec.ts` so they fail unless month cleanup and health counts exclude on-budget transfers from uncategorized backlog and other cleanup metrics.
+  Include a fixture where a transfer is uncategorized by design and must not be reported as user cleanup work.
+  Code to implement:
+  No production code in this task. Only failing tests for transfer-aware cleanup semantics.
+  How to verify it works:
+  Run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the failures proving transfer transactions are currently over-counted.
+
+- [ ] Task 4: Implement transfer-aware cleanup and health query fixes
+  Test to write:
+  Reuse the red tests from Task 3.
+  Code to implement:
+  Update `GetBudgetCleanupSummaryTool.ts` and `GetFinancialHealthCheckTool.ts` to exclude transfer transactions from cleanup counts.
+  Where the contract is explicitly month-based, prefer month-specific transaction fetches or equivalent exact month filtering with the transfer-aware classifier.
+  How to verify it works:
+  Re-run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the red tests turning green.
+  Then run `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` to confirm no finance-summary regression.
+
+- [ ] Task 5: Add failing coverage for true-income versus generic positive inflow semantics
+  Test to write:
+  Extend `src/financeAdvancedTools.spec.ts` and, if helpful, add focused helper coverage so `ynab_get_income_summary` fails unless it distinguishes real income from refund/reimbursement-like positive inflows.
+  The fixture should cover:
+  paycheck income,
+  a merchant refund,
+  and a positive non-transfer inflow that should not be labeled as income without an explicit rule.
+  Code to implement:
+  No production code in this task. Only failing tests that define the intended income contract.
+  How to verify it works:
+  Run `npx vitest run src/financeAdvancedTools.spec.ts` and show the failure demonstrating the current tool over-counts positive inflows as income.
+
+- [ ] Task 6: Implement tighter income semantics and expose any unavoidable ambiguity
+  Test to write:
+  Reuse the failing specs from Task 5.
+  Code to implement:
+  Update `GetIncomeSummaryTool.ts` to use a stricter income classifier.
+  If the available API data cannot reliably separate every positive inflow type, surface that limitation explicitly in the payload or tool description rather than silently calling all positive inflows "income".
+  Keep the implementation minimal and grounded in YNAB fields that actually exist.
+  How to verify it works:
+  Re-run `npx vitest run src/financeAdvancedTools.spec.ts` and show the tests passing.
+  Then run the broader finance specs to confirm no regression in downstream summaries that reference income.
+
+- [ ] Task 7: Add failing coverage for obligation-window forecasting semantics
+  Test to write:
+  Extend `src/financeAdvancedTools.spec.ts` and `src/financialDiagnostics.spec.ts` so they fail unless:
+  upcoming obligation outputs separate due outflows from expected inflows,
+  transfer-like scheduled transactions are excluded,
+  and repeated schedules inside a 30-day window are not silently undercounted.
+  Code to implement:
+  No production code in this task. Only failing specs that define the forecast contract.
+  How to verify it works:
+  Run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the failures proving the current obligation math mixes inflows with obligations and only counts `date_next`.
+
+- [ ] Task 8: Implement expanded obligation forecasting and align health-check cash-risk inputs
+  Test to write:
+  Reuse the failing specs from Task 7.
+  Code to implement:
+  Update `GetUpcomingObligationsTool.ts` to expand recurring scheduled transactions across the 7/14/30 day windows, exclude transfers, and return outflows separately from inflows.
+  Update `GetFinancialHealthCheckTool.ts` so its `upcoming_30d_net` or equivalent risk input is based on the corrected obligation model.
+  How to verify it works:
+  Re-run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the new tests passing.
+  Then run the broader finance suite to confirm the health-check output remains stable apart from the intentional semantic correction.
+
+- [ ] Task 9: Add failing coverage for ratio and trend labels that currently overstate meaning
+  Test to write:
+  Add focused assertions in `src/financeAdvancedTools.spec.ts`, `src/financeSummaryTools.spec.ts`, `src/serverFactory.spec.ts`, or `src/codeQuality.spec.ts` so they fail unless:
+  `ynab_get_70_20_10_summary` uses a single basis or explicitly labels mixed-basis buckets,
+  `assigned_vs_spent` fields are described as timing/buffering metrics rather than discipline scores,
+  and category/group trend summaries surface enough context to avoid silent history rewrites when group names change.
+  Code to implement:
+
+# PR 154 CI / Mergeability Remediation Plan
+
+## Current Findings
+
+- PR `#154` currently has no failing GitHub Actions checks.
+- The only attached check is `validate-pr-title`, and it is passing.
+- GitHub reports the PR as `mergeable: CONFLICTING` with `mergeStateStatus: DIRTY`.
+- There are no `CI` workflow runs for branch `feat/finance-summary-priorities` under the `pull_request` event.
+- A synthetic merge against `origin/main` shows overlapping edits in these files:
+  - `src/financeAdvancedTools.spec.ts`
+  - `src/financeSummaryTools.spec.ts`
+  - `src/serverFactory.spec.ts`
+  - `src/tools/GetBudgetHealthSummaryTool.ts`
+  - `src/tools/GetCashFlowSummaryTool.ts`
+  - `src/tools/GetFinancialSnapshotTool.ts`
+  - `src/tools/financeToolUtils.ts`
+  - `tasks/todo.md`
+
+## Assumptions
+
+- The user-visible "CI failed" symptom is most likely a missing or blocked `CI` run caused by the PR branch being out of date and conflicting with `main`.
+- The safest fix is to update the PR branch with `main`, resolve the overlapping finance-summary conflicts carefully, and then run the impacted local checks before pushing.
+- Because the current worktree is on a different dirty branch, implementation should happen in an isolated worktree or branch for PR `#154` rather than inside the present checkout.
+
+## Tasks
+
+- [ ] Task 1: Isolate PR `#154` in a safe worktree and reproduce the merge conflict set
+  Test to write:
+  No new automated test in this task. This is setup and conflict reproduction only.
+  Code to implement:
+  Create or reuse an isolated checkout for `feat/finance-summary-priorities`, merge or rebase from the latest `main`, and inspect the exact conflict hunks in the affected finance files.
+  How to verify it works:
+  Confirm the isolated checkout is on the PR branch, show the conflict file list, and verify the current dirty branch in this worktree was not disturbed.
+
+- [ ] Task 2: Resolve the finance-summary merge conflicts without dropping either side's intended behavior
+  Test to write:
+  No new red-first test required for pure conflict resolution. Preserve all existing assertions and keep any added specs intact while reconciling the files.
+  Code to implement:
+  Merge the `main`-side calculation and wording updates with the PR-side monthly review and trajectory additions in the conflicting source and spec files.
+  How to verify it works:
+  Re-run targeted validation covering the touched finance files and confirm the merged files compile and retain both behavior sets.
+
+- [ ] Task 3: Prove the branch is healthy after conflict resolution and re-check PR status
+  Test to write:
+  No new test; this task is verification only.
+  Code to implement:
+  Run the smallest meaningful local suite for the touched files, then check git status/diff for clean conflict resolution and inspect PR checks again after push.
+  How to verify it works:
+  Show passing local commands for the touched finance suite, confirm no conflict markers remain, and confirm GitHub now schedules or accepts the expected PR checks.
+
+## Review Bar
+
+- The PR is no longer conflicting with `main`.
+- No existing finance-summary behavior is silently dropped during conflict resolution.
+- Local validation passes before any push.
+- PR `#154` shows the expected non-title CI state after the branch update.
+  No production code in this task. Only red assertions for contract wording and output clarity.
+  How to verify it works:
+  Run the targeted Vitest specs and show the failures proving the current tool contracts are semantically too loose.
+
+- [ ] Task 10: Implement contract/description cleanup for ratio, trend, and snapshot semantics
+  Test to write:
+  Reuse the failing specs from Task 9.
+  Code to implement:
+  Update the affected tool descriptions and payload labels in:
+  `GetBudgetRatioSummaryTool.ts`,
+  `GetCategoryTrendSummaryTool.ts`,
+  `GetCashFlowSummaryTool.ts`,
+  `GetBudgetHealthSummaryTool.ts`,
+  and `GetFinancialSnapshotTool.ts`.
+  Keep this task focused on truthful semantics and output shape, not on adding brand-new analytics.
+  How to verify it works:
+  Re-run the targeted specs from Task 9 and show them passing.
+  Then inspect the registered tool metadata through the existing registrar coverage to confirm the clarified contracts are exposed at runtime.
+
+- [ ] Task 11: Final verification on the audited analytics surface
+  Test to write:
+  No new tests in this task. Use the approved red/green specs as proof.
+  Code to implement:
+  No new production behavior unless verification exposes a tightly coupled issue. If that happens, stop and re-plan before continuing.
+  How to verify it works:
+  Run at minimum:
+  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/serverFactory.spec.ts`
+  and
+  `npm run typecheck`
+  Add a short results section to this file before closing out implementation.
+
+## Review Bar
+
+- Spending-like fields treat refunds, transfers, and credit-card-payment shuffling correctly.
+- Cleanup-style tools do not tell the LLM that normal transfers are uncategorized user mistakes.
+- Income outputs are either meaningfully constrained to real income or explicitly labeled when ambiguity remains.
+- Obligation windows reflect the full scheduled horizon, not just each item's next occurrence.
+- Tool descriptions and payload labels are truthful enough that an LLM can answer finance questions without silently overstating what the server actually computed.
+
 # Finance Summary Priorities Plan
 
 ## Goal
@@ -10,9 +629,10 @@ Implement the three highest-leverage improvements in this order:
 
 ## Constraints And Notes
 
-- Work is isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-finance-summary` on branch `feat/finance-summary-priorities` from `origin/main`.
-- The original checkout remains untouched because it had unrelated local changes on a non-`main` branch.
-- The repo instructions say not to modify files in a `tests/` directory unless explicitly asked to. The existing Vitest files are under `src/`, so targeted spec updates there are allowed.
+- The current checkout is on `fix/cors-cf-utility-dedup`, not `main`.
+- The worktree is already dirty with unrelated local changes.
+- Repo rules say implementation work should start from `main`, but I should not switch branches automatically when that could disturb the current checkout. If you approve implementation, I will pause once more before Task 1 if we need to isolate the work in a fresh worktree from `main`.
+- The repo instructions also say not to modify files in a `tests/` directory unless explicitly asked to. The existing Vitest files are under `src/`, so targeted spec updates there are allowed.
 - The installed YNAB SDK types show `getPlanMonth` returns month/category data, not month-by-month account balances. The net worth trajectory tool therefore needs to derive historical month-end balances from current account balances plus transaction history, rather than reading a native historical balances endpoint.
 
 ## Assumptions
@@ -26,7 +646,7 @@ Implement the three highest-leverage improvements in this order:
 
 ## Tasks
 
-- [x] Task 1: Add failing coverage for monthly net worth trajectory reconstruction and registration
+- [ ] Task 1: Add failing coverage for monthly net worth trajectory reconstruction and registration
   Test to write:
   Extend `src/financeSummaryTools.spec.ts` with a red test for `ynab_get_net_worth_trajectory` that uses current account balances plus dated transactions to prove the tool reconstructs month-end `net_worth`, `liquid_cash`, and `debt` across a range.
   Extend `src/serverFactory.spec.ts` so it fails unless the tool registry includes the new tool name and metadata.
@@ -39,13 +659,8 @@ Implement the three highest-leverage improvements in this order:
   No production code in this task. Only the failing specs that pin the intended historical-balance behavior and registry surface.
   How to verify it works:
   Run `npx vitest run src/financeSummaryTools.spec.ts src/serverFactory.spec.ts` and show the failure proving the tool is missing and the month-by-month balance expectations are not yet implemented.
-  Result:
-  Added a red registry expectation in `src/serverFactory.spec.ts` and a red trajectory fixture in `src/financeSummaryTools.spec.ts`.
-  Verified red with:
-  `npx vitest run src/financeSummaryTools.spec.ts src/serverFactory.spec.ts`
-  which failed because the registry still exposes 45 tools and `ynab_get_net_worth_trajectory` is not registered yet.
 
-- [x] Task 2: Implement `ynab_get_net_worth_trajectory`
+- [ ] Task 2: Implement `ynab_get_net_worth_trajectory`
   Test to write:
   Reuse the red tests from Task 1.
   Code to implement:
@@ -66,14 +681,8 @@ Implement the three highest-leverage improvements in this order:
   How to verify it works:
   Re-run `npx vitest run src/financeSummaryTools.spec.ts src/serverFactory.spec.ts` and show the new tests passing.
   Then run `npx vitest run src/financeToolUtils.spec.ts src/financialDiagnostics.spec.ts` to prove the new helpers do not regress existing finance behavior.
-  Result:
-  Added `src/tools/GetNetWorthTrajectoryTool.ts`, registered it in `src/server.ts`, and introduced focused month/balance helpers in `src/tools/financeToolUtils.ts` for month normalization, month-end checks, and historical balance reconstruction.
-  Verified green with:
-  `npx vitest run src/financeSummaryTools.spec.ts src/serverFactory.spec.ts`
-  and
-  `npx vitest run src/financeToolUtils.spec.ts src/financialDiagnostics.spec.ts`
 
-- [x] Task 3: Add failing coverage for a bundled monthly review payload
+- [ ] Task 3: Add failing coverage for a bundled monthly review payload
   Test to write:
   Extend `src/financeAdvancedTools.spec.ts` with a red test for `ynab_get_monthly_review` that fails unless a single tool call returns the core month answer set:
   month identity,
@@ -89,13 +698,8 @@ Implement the three highest-leverage improvements in this order:
   No production code in this task. Only the failing specs that define the minimal high-value monthly review contract.
   How to verify it works:
   Run `npx vitest run src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts` and show the failure caused by the missing tool and missing bundled payload.
-  Result:
-  Added a red monthly-review contract in `src/financeAdvancedTools.spec.ts` and expanded the registry expectations in `src/serverFactory.spec.ts`.
-  Verified red with:
-  `npx vitest run src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts`
-  which failed because the registry still exposed 46 tools and `ynab_get_monthly_review` was not registered yet.
 
-- [x] Task 4: Implement `ynab_get_monthly_review`
+- [ ] Task 4: Implement `ynab_get_monthly_review`
   Test to write:
   Reuse the red tests from Task 3.
   Code to implement:
@@ -111,15 +715,8 @@ Implement the three highest-leverage improvements in this order:
   How to verify it works:
   Re-run `npx vitest run src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts` and show the new tests passing.
   Then run `npx vitest run src/financeSummaryTools.spec.ts src/aiToolOptimization.spec.ts` to confirm the new bundling work does not break existing finance-summary expectations.
-  Result:
-  Added `src/tools/GetMonthlyReviewTool.ts` and registered it in `src/server.ts`.
-  The tool now assembles one compact payload from current month detail, in-month transactions, and a short trailing month baseline for anomalies.
-  Verified green with:
-  `npx vitest run src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts`
-  and
-  `npx vitest run src/financeSummaryTools.spec.ts src/aiToolOptimization.spec.ts`
 
-- [x] Task 5: Add failing coverage for YNAB semantics wording around `assigned_vs_spent`
+- [ ] Task 5: Add failing coverage for YNAB semantics wording around `assigned_vs_spent`
   Test to write:
   Add or extend a focused quality/spec assertion in `src/serverFactory.spec.ts` or `src/codeQuality.spec.ts` so it fails unless the descriptions for the relevant finance tools explain that `assigned_vs_spent` reflects buffering or timing behavior and is not a budget-discipline score.
   At minimum, pin the descriptions for:
@@ -131,13 +728,8 @@ Implement the three highest-leverage improvements in this order:
   No production code in this task. Only the red documentation/metadata assertions.
   How to verify it works:
   Run `npx vitest run src/serverFactory.spec.ts src/codeQuality.spec.ts` and show the failure proving the current descriptions do not give LLMs the needed semantic guidance.
-  Result:
-  Added a focused registry-level wording assertion in `src/serverFactory.spec.ts` for the finance tools that expose `assigned_vs_spent`.
-  Verified red with:
-  `npx vitest run src/serverFactory.spec.ts`
-  which failed because the existing finance-tool descriptions did not mention buffering or timing semantics.
 
-- [x] Task 6: Implement the tool-description and README guidance pass
+- [ ] Task 6: Implement the tool-description and README guidance pass
   Test to write:
   Reuse the red assertions from Task 5.
   Code to implement:
@@ -147,13 +739,8 @@ Implement the three highest-leverage improvements in this order:
   How to verify it works:
   Re-run `npx vitest run src/serverFactory.spec.ts src/codeQuality.spec.ts` and show the wording assertions passing.
   Then inspect the registered tool metadata through the existing registrar coverage to confirm the clarified descriptions are actually exposed at runtime.
-  Result:
-  Updated the descriptions in `GetFinancialSnapshotTool`, `GetBudgetHealthSummaryTool`, `GetCashFlowSummaryTool`, and `GetMonthlyReviewTool`, and added a short README note under tool coverage.
-  Verified green with:
-  `npx vitest run src/serverFactory.spec.ts`
-  and the registry assertions confirm the clarified descriptions are exposed through the runtime tool metadata.
 
-- [x] Task 7: Do final verification on the expanded finance-summary surface
+- [ ] Task 7: Do final verification on the expanded finance-summary surface
   Test to write:
   No new tests in this task. Use the approved red/green specs as the proof.
   Code to implement:
@@ -164,1014 +751,561 @@ Implement the three highest-leverage improvements in this order:
   and
   `npm run typecheck`
   Add a short results section to this file before closing out.
-  Result:
-  Final verification passed with:
-  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/serverFactory.spec.ts src/financeToolUtils.spec.ts src/financialDiagnostics.spec.ts src/aiToolOptimization.spec.ts src/codeQuality.spec.ts`
-# Calculation Logic Remediation Plan
-
-## Goal
-
-Fix the highest-impact YNAB calculation issues from the audit so the finance analytics tools use consistent money semantics, stop misclassifying transfers and refunds, and expose outputs that an LLM can interpret correctly.
-
-## Constraints And Notes
-
-- Work is isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-calculation-logic-remediation` on branch `fix/calculation-logic-remediation` from `origin/main`.
-- Repo rules require TDD for code changes, one task at a time, with a stop after each task.
-- The finance tools currently mix month snapshots, raw transactions, scheduled transactions, and current category metadata; several fixes will need shared helpers so the same YNAB rules are not reimplemented inconsistently.
-- The YNAB SDK confirms `transactions.getTransactions(planId, sinceDate, ...)` is a since-date endpoint, while `getTransactionsByMonth` is the month-scoped endpoint. Future implementation should prefer the month endpoint when the tool contract is month-specific.
-
-## Assumptions
-
-- The first remediation pass should prioritize semantic correctness over adding new tools.
-- Credit card payment categories should not count as discretionary spending in spending, anomaly, or ratio tools.
-- Positive category activity should not automatically be treated as spending; refunds should either reduce spend or be surfaced separately.
-- Tools that forecast upcoming obligations should separate due outflows from expected inflows instead of mixing them into one obligation total.
-- We can update existing Vitest specs under `src/` because they are not inside a `tests/` directory.
-
-## Tasks
-
-- [x] Task 1: Add failing coverage for shared money-classification semantics
-  Test to write:
-  Add focused red tests in `src/financeToolUtils.spec.ts` and the affected finance specs proving that:
-  negative expense activity counts as spend,
-  positive refund activity does not inflate spend,
-  transfers are excluded from expense/income classification,
-  and credit card payment categories are excluded from spending-style summaries.
-  Code to implement:
-  No production code in this task. Only failing specs that pin the desired behavior for refunds, transfers, and credit-card-payment handling.
-  How to verify it works:
-  Run `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the failures proving the current helpers and tools misclassify these cases.
-  Result:
-  Added red coverage in:
-  `src/financeToolUtils.spec.ts`,
-  `src/financeSummaryTools.spec.ts`,
-  `src/financeAdvancedTools.spec.ts`,
-  and `src/financialDiagnostics.spec.ts`.
-  Verified red with:
-  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
-  which failed because:
-  `toSpentMilliunits` still converts positive activity into spend,
-  `ynab_get_financial_snapshot` still reports positive month activity as spending,
-  `ynab_get_category_trend_summary` still counts positive refund activity as spend,
-  and `ynab_get_spending_anomalies` still flags credit card payment categories as spending anomalies.
-
-- [x] Task 2: Implement shared money classification and replace `Math.abs(activity)` spending logic
-  Test to write:
-  Reuse the failing specs from Task 1.
-
-# Duplicate Code Remediation Plan
-
-## Goal
-
-Reduce unexpected duplicate production code in this fresh `origin/main` worktree, while first establishing a repeatable measurement and verification loop so we can prove the percentage is actually improving.
-
-## Constraints And Notes
-
-- Work is isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation` from `origin/main`.
-- The original checkout remains untouched and is still dirty on another branch.
-- This fresh branch currently does not include duplicate-reporting guardrails yet:
-  - no checked-in [`.jscpd.json`](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/.jscpd.json)
-  - no `lint:duplicates` script in [package.json](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/package.json)
-  - no `tech-debt:report` script
-- Prior exploratory work on another isolated branch showed the worst production duplication clusters are likely in:
-  - `src/oauthStore.ts`
-  - `src/oauthCore.ts`
-  - `src/httpServerShared.ts`
-  - `src/reliabilityHttp.ts`
-  - `src/tools/SearchTransactionsTool.ts`
-  - `src/tools/transactionCollectionToolUtils.ts`
-  - `src/tools/planToolUtils.ts`
-- Repo rules require TDD for code changes, one task at a time, with a stop after each task once execution begins.
-
-## Assumptions
-
-- The first remediation pass should optimize for “unexpected production duplication,” not for crushing all repetition in specs/docs/config.
-- We still want a raw duplicate scan available eventually, but the first practical gate for this branch should focus on maintained implementation code.
-- The best first wins are clustered helper/module refactors that remove repeated control flow, not micro-deduping tiny expressions everywhere.
-
-## Tasks
-
-- [x] Task 1: Add failing coverage for duplicate-measurement guardrails
-  Test to write:
-  Add red coverage in `src/codeQuality.spec.ts` and, if needed, `src/preflight.spec.ts` that fails unless the repo defines:
-  - a checked-in JSCPD config,
-  - a `lint:duplicates` script,
-  - and documentation for the local duplicate-check command.
-  The contract should explicitly target unexpected production duplication first, not specs/docs.
-  Code to implement:
-  No production/config implementation in this task beyond the failing tests.
-  How to verify it works:
-  Run `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts` and show the red failure.
-  Result:
-  Added red guardrail coverage in `src/codeQuality.spec.ts` and `src/preflight.spec.ts`.
-  Verified red with:
-  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`
-  which failed because the branch was still missing `.jscpd.json`, `jscpd` in `devDependencies`, the `lint:duplicates` script, and README guidance for the local duplicate check.
-
-- [x] Task 2: Implement the first duplicate-measurement baseline for production code
-  Test to write:
-  Use the failing coverage from Task 1.
-  Code to implement:
-  Add:
-  - [`.jscpd.json`](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/.jscpd.json),
-  - the `lint:duplicates` script in [package.json](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/package.json),
-  - and a short README note.
-  Configure the baseline so the default percentage reflects unexpected production duplication by excluding expected-repetition classes such as `*.spec.ts`, `*.contract.ts`, Markdown, generated output, and vendor files.
-  How to verify it works:
-  Re-run `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`, then run `npm run lint:duplicates` and capture the first baseline percentage.
-  Result:
-  Added `.jscpd.json`, wired `lint:duplicates` in `package.json`, installed `jscpd`, and documented the command in `README.md`.
-  Verified green with:
-  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`
-  and
-  `npm run lint:duplicates`
-  which established the first unexpected-production baseline at `16.37%`.
-
-- [x] Task 3: Add failing coverage for the first targeted production deduplication seam
-  Test to write:
-  Add or tighten focused structure/behavior tests around the smallest high-value cluster we decide to tackle first, likely one of:
-  - transaction query tool wrappers,
-  - OAuth store/core record mutation helpers,
-  - HTTP shared response/guard helpers.
-  The red test should prove the new shared seam or helper abstraction is required, not just reassert behavior we already cover too indirectly.
-  Code to implement:
-  No production refactor in this task beyond the failing tests.
-  How to verify it works:
-  Run the narrow Vitest targets for the chosen cluster and show the red failure.
-  Result:
-  Added a focused structure spec in `src/duplicateCodeRemediation.spec.ts` that fails unless the repeated list-tool collection rendering is centralized behind a shared helper.
-  Verified red with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts`
-  which failed because `collectionToolUtils.ts` did not yet export the shared renderer and the list tools still inlined pagination/projection control flow.
-
-- [x] Task 4: Refactor the first high-value production cluster
-  Test to write:
-  Reuse the failing coverage from Task 3.
-  Code to implement:
-  Introduce the smallest clean shared helper or abstraction that removes repeated logic without broadening behavior.
-  Keep the write scope tight to the chosen cluster and preserve public tool/server behavior.
-  How to verify it works:
-  Re-run the targeted specs, then `npm run lint:duplicates` to confirm the percentage moves in the right direction.
-  Result:
-  Added `renderCollectionResult(...)` to `src/tools/collectionToolUtils.ts` and refactored:
-  `ListAccountsTool.ts`,
-  `ListPayeesTool.ts`,
-  `ListPlanMonthsTool.ts`,
-  `ListScheduledTransactionsTool.ts`,
-  and `ListTransactionsTool.ts`
-  to use the shared renderer instead of repeating three-way full/projection/pagination branches.
-  Verified green with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/additionalReadTools.spec.ts src/planReadTools.spec.ts src/aiToolOptimization.spec.ts`
-  and
-  `npm run lint:duplicates`
-  which moved the baseline from `16.37%` to `15.76%`.
-
-- [x] Task 5: Add failing coverage for the second high-value production cluster
-  Test to write:
-  Add red coverage around the next duplicate-heavy production seam from the updated baseline.
-  Prefer a different cluster than Task 4 so the changes do not overlap heavily.
-  Code to implement:
-  No production refactor in this task beyond the failing tests.
-  How to verify it works:
-  Run the narrow Vitest targets for the chosen cluster and show the red failure.
-  Result:
-  Added a second structural red test in `src/duplicateCodeRemediation.spec.ts` that fails unless the repeated `GetTransactionsBy*` lookup/rendering flow is centralized behind a shared helper.
-  Verified red with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts`
-  which failed because `src/tools/transactionToolUtils.ts` did not exist and the four lookup tools still repeated transaction filtering/formatting inline.
-
-- [x] Task 6: Refactor the second high-value production cluster
-  Test to write:
-  Reuse the failing coverage from Task 5.
-  Code to implement:
-  Apply the minimum elegant refactor to remove the duplicated control flow or payload-shaping logic in that cluster.
-  How to verify it works:
-  Re-run the targeted specs, then `npm run lint:duplicates` to capture the new baseline delta.
-  Result:
-  Added `src/tools/transactionToolUtils.ts` with `toDisplayTransactions(...)` and `executeTransactionLookup(...)`, then refactored:
-  `GetTransactionsByAccountTool.ts`,
-  `GetTransactionsByCategoryTool.ts`,
-  `GetTransactionsByMonthTool.ts`,
-  and `GetTransactionsByPayeeTool.ts`
-  to use the shared helper instead of repeating filter/map/render logic.
-  Added a small object-style wrapper in `collectionToolUtils.ts` so the focused utility spec stays green against the shared collection helper seam.
-  Verified green with:
-  `npx vitest run src/collectionToolUtils.spec.ts src/duplicateCodeRemediation.spec.ts src/additionalReadTools.spec.ts src/aiToolOptimization.spec.ts src/planReadTools.spec.ts`
-  and
-  `npm run lint:duplicates`
-  which moved the baseline from `15.76%` to `15.51%`.
-
-- [x] Task 7: Add a tech-debt report for duplicate-remediation tracking
-  Test to write:
-  Add red coverage in `src/techDebtReport.spec.ts` or `src/codeQuality.spec.ts` so the repo fails unless a local command exists to print at least:
-  - the current unexpected production duplication percentage,
-  - dead exports,
-  - suppression counts.
-  Code to implement:
-  No script implementation in this task beyond the failing tests.
-  How to verify it works:
-  Run the targeted Vitest command and show the red failure.
-  Result:
-  Added red coverage in `src/techDebtReport.spec.ts`, `src/codeQuality.spec.ts`, and `src/preflight.spec.ts` for a checked-in `tech-debt:report` command and script.
-  Verified red with:
-  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts src/techDebtReport.spec.ts`
-  which failed because the branch still had no `tech-debt:report` script and no `scripts/tech-debt-report.mjs`.
-
-- [x] Task 8: Implement the tracking report and final verification loop
-  Test to write:
-  Reuse the failing coverage from Task 7.
-  Code to implement:
-  Add a maintainable local report script and README note so we can track duplicate-remediation progress over time.
-  Keep the report aligned with the duplicate baseline defined in Task 2.
-  How to verify it works:
-  Run:
-  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts src/techDebtReport.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Then record the before/after duplicate percentages in this file.
-  Result:
-  Added `scripts/tech-debt-report.mjs`, wired `tech-debt:report` in `package.json`, and documented the command in `README.md`.
-  Verified green with:
-  `npx vitest run src/collectionToolUtils.spec.ts src/duplicateCodeRemediation.spec.ts src/additionalReadTools.spec.ts src/aiToolOptimization.spec.ts src/planReadTools.spec.ts src/codeQuality.spec.ts src/preflight.spec.ts src/techDebtReport.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Final duplicate/remediation snapshot:
-  - Baseline after measurement wiring: `16.37%`
-  - After list-tool deduplication: `15.76%`
-  - After transaction lookup deduplication and report wiring: `15.35%`
-  - `tech-debt:report` output:
-    - Duplication: `15.35%`
-    - Dead exports: `0`
-    - `ts-ignore` count: `6`
-    - `eslint-disable` count: `8`
-    - `TODO/FIXME/HACK` count: `9`
-
-## Review Bar
-
-- The branch has a repeatable duplicate baseline focused on unexpected production duplication.
-- At least two meaningful production duplication clusters are reduced with behavior preserved by tests.
-- The repo gains a local report/command that makes future duplicate-remediation work measurable.
-- We favor cleaner shared abstractions over “DRY at all costs” micro-refactors.
-
-Plan ready. Approve to proceed.
-
-# Next OAuth Seam Plan
-
-## Goal
-
-Reduce the next architecturally unnecessary overlap in the OAuth/token/exchange family by centralizing repeated active-grant validation and invalidation logic in `oauthCore.ts`.
-
-## Constraints And Notes
-
-- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
-- The previous slice already cleaned:
-  - refresh-token preconditions
-  - compatibility grant builders
-  - store migration split
-  - grant rotation
-- The next likely hotspot is repeated active-step validation in `oauthCore.ts`, especially around:
-  - pending consent lookup + expiry cleanup
-  - pending authorization lookup + expiry cleanup
-  - refresh-token lookup + expiry cleanup + ownership checks
-- The goal is to remove overlap only where the behavior is truly the same. We should not force unrelated OAuth branches into one generic engine.
-
-## Tasks
-
-- [x] Task 1: Add failing coverage for shared active-grant validation helpers
-  Test to write:
-  Add red structural coverage in `src/duplicateCodeRemediation.spec.ts` plus focused OAuth behavior coverage in `src/oauthCore.spec.ts` that fails unless repeated active-grant validation is routed through narrow helpers.
-  The best initial target is likely one or both of:
-  `requirePendingConsentGrant(...)`
-  `requirePendingAuthorizationGrant(...)`
-  with shared expiry cleanup behavior.
-  Code to implement:
-  No production code in this task. Only failing tests that pin the seam and preserve current behavior.
-  How to verify it works:
-  Run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts` and show the red failure.
-  Result:
-  Added red structure coverage for `requirePendingConsentGrant(...)`, `requirePendingAuthorizationGrant(...)`, and `requireRefreshTokenGrant(...)` in `src/duplicateCodeRemediation.spec.ts`, plus OAuth behavior coverage in `src/oauthCore.spec.ts` proving expired pending consent, pending authorization, and refresh-token grants are deleted through the shared validation path.
-  Verified red with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts`
-  which failed because the helper seams did not exist yet.
-
-- [x] Task 2: Implement the active-grant validation seam
-  Test to write:
-  Reuse the red tests from Task 1.
-  Code to implement:
-  Extract the smallest helper or helper set in `src/oauthCore.ts` that centralizes repeated validation, expiry checks, and invalid-grant cleanup for the chosen steps.
-  Keep redirect building, token minting, and resource/scope checks in place unless they are part of the exact seam under test.
-  How to verify it works:
-  Re-run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts` and show the new tests passing.
-  Result:
-  Implemented `requirePendingConsentGrant(...)`, `requirePendingAuthorizationGrant(...)`, and `requireRefreshTokenGrant(...)` inside `src/oauthCore.ts`, then routed `approveConsent(...)`, `handleCallback(...)`, and `exchangeRefreshToken(...)` through those narrow validators.
-  Verified green with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts`
-
-- [x] Task 3: Add failing coverage for architectural boundaries after the validation seam lands
-  Test to write:
-  Add a red structure/quality test that fails unless the new helper stays narrow and behavior-oriented.
-  The guard should prevent us from turning `oauthCore.ts` into a generic state-machine abstraction or leaking validation rules into unrelated modules.
-  Code to implement:
-  No production code yet beyond the failing guard.
-  How to verify it works:
-  Run the targeted Vitest structure coverage and show the red failure.
-  Result:
-  Used the structure guard in `src/duplicateCodeRemediation.spec.ts` to pin the helpers as narrow, local seams by requiring one named helper per grant type and limiting direct store lookups for pending consent, pending authorization, and refresh-token grants to a single call site each.
-  Verified red/green through the same focused command:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts`
-
-- [x] Task 4: Implement the boundary follow-up and final verification
-  Test to write:
-  Reuse the failing coverage from Task 3.
-  Code to implement:
-  Finish the smallest cleanup needed to keep the new seam readable and local.
-  How to verify it works:
-  Run:
-  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Then record:
-  the updated `oauthCore.ts` hotspot movement,
-  whether the OAuth/token/exchange family still looks `partially consolidated`,
-  and whether the remaining overlap now appears justified.
-  Result:
-  Final verification passed with:
-  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Current supporting metrics:
-  - whole-codebase duplication: `24.52%`
-  - `oauthCore.ts`: `89` duplicated lines, `18` clones, `17.28%`
-  - `oauthStore.ts`: `41` duplicated lines, `6` clones, `14.29%`
-  - `oauthStoreMigration.ts`: `248` duplicated lines, `31` clones, `53.45%`
-  Architectural read after this slice:
-  - The OAuth/token/exchange family is still `partially consolidated`.
-  - Pending-consent, pending-authorization, and refresh-token validation now share explicit active-grant seams inside `oauthCore.ts`.
-  - The main remaining OAuth debt is now concentrated more honestly in `oauthStoreMigration.ts` and the broader lifecycle split, which appears more justified than the previous repeated validation overlap.
-
-## Review Bar
-
-- The seam removes real repeated validation/invalidation behavior, not just a few similar lines.
-- The new helper stays inside `oauthCore.ts` unless a dedicated helper module is clearly cleaner.
-- OAuth behavior remains stable under targeted specs.
-- The result makes the OAuth lifecycle easier to reason about without hiding important branching logic.
-
-Plan ready. Approve to proceed.
-
-# OAuth Migration And Lifecycle Separation Plan
-
-## Goal
-
-Reduce the remaining architecturally unnecessary overlap in the OAuth/token/exchange family by shrinking duplicate legacy-grant conversion code in `oauthStoreMigration.ts` and by tightening the remaining repeated lifecycle transition setup in `oauthCore.ts`.
-
-## Constraints And Notes
-
-- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
-- The current overlap is no longer primarily in live store persistence. It is now concentrated in:
-  - legacy grant conversion paths in `src/oauthStoreMigration.ts`
-  - repeated lifecycle step construction in `src/oauthCore.ts`
-- The target is duplicate code for the same feature/function only. We should not merge distinct OAuth phases into one generic abstraction.
-- `oauthStoreMigration.ts` appears to repeat the same “record guard + shared required fields + optional extras + step-specific fields” pattern across pending-consent, pending-authorization, authorization-code, and refresh-token conversions.
-- `oauthCore.ts` still repeats some “advance this grant into the next lifecycle step” setup even after `replaceGrant(...)` and the `require*Grant(...)` validators.
-
-## Tasks
-
-- [ ] Task 1: Add failing coverage for shared legacy grant conversion helpers
-  Test to write:
-  Add red structural coverage in `src/duplicateCodeRemediation.spec.ts` and focused migration behavior coverage in `src/oauthStoreMigration.spec.ts` that fails unless `oauthStoreMigration.ts` routes legacy grant conversion through one shared required-fields seam plus one shared principal/upstream-token seam.
-  The coverage should pin:
-  - one helper for the common legacy grant envelope (`clientId`, `codeChallenge`, `redirectUri`, `resource`, `scopes`)
-  - one helper for the principal/upstream-token pair used by authorization-code and refresh-token migrations
-  - unchanged migration behavior for legacy consent/code/refresh records
-  Code to implement:
-  No production code in this task. Only failing tests that define the intended seam and protect current migration behavior.
-  How to verify it works:
-  Run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts` and show the red failure.
-
-- [ ] Task 2: Implement the legacy grant conversion seam
-  Test to write:
-  Reuse the red tests from Task 1.
-  Code to implement:
-  Refactor `src/oauthStoreMigration.ts` to share the common legacy grant parsing/building logic through narrow local helpers.
-  Keep the helpers local to the migration module and keep the four legacy entry points explicit so the migration paths remain readable.
-  How to verify it works:
-  Re-run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts` and show the new tests passing.
-
-- [ ] Task 3: Add failing coverage for the next lifecycle-step seam in `oauthCore.ts`
-  Test to write:
-  Add red structural coverage in `src/duplicateCodeRemediation.spec.ts` and focused behavior coverage in `src/oauthCore.spec.ts` that fails unless repeated grant-advancement setup is routed through one narrow helper.
-  The best target is the repeated “build next grant state with a generated step token and expiry” logic used when:
-  - consent becomes pending authorization
-  - pending authorization becomes authorization code
-  - authorization code becomes refresh token
-  Code to implement:
-  No production code in this task. Only failing tests that pin the seam without forcing a generic lifecycle engine.
-  How to verify it works:
-  Run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts` and show the red failure.
-
-- [ ] Task 4: Implement the lifecycle-step seam and rerun OAuth verification
-  Test to write:
-  Reuse the red tests from Task 3.
-  Code to implement:
-  Extract the smallest local helper or helper pair in `src/oauthCore.ts` that removes the repeated step-construction logic while keeping branch-specific work visible.
-  How to verify it works:
-  Run:
-  `npx vitest run src/oauthCore.spec.ts src/oauthStoreMigration.spec.ts src/oauthStore.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/duplicateCodeRemediation.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Then record:
-  - the updated `oauthStoreMigration.ts` and `oauthCore.ts` hotspot movement
-  - whether the remaining OAuth overlap now looks more justified
-  - whether the OAuth/token/exchange family is still `partially consolidated`
-
-## Review Bar
-
-- The migration refactor removes true same-feature conversion overlap without hiding the legacy formats.
-- The lifecycle refactor improves clarity without inventing a generic state machine.
-- All new helpers stay local unless a new module is clearly cleaner.
-- The resulting OAuth code should read more like separated responsibilities and less like repeated hand-built transitions.
-
-Plan ready. Approve to proceed.
-
-# Legacy OAuth Removal Plan
-
-## Goal
-
-Remove legacy OAuth state migration entirely and require re-authentication for installs that still have the old persisted OAuth schema.
-
-## Constraints And Notes
-
-- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
-- This is an intentional behavior change: older persisted OAuth state should no longer be migrated forward.
-- The new desired behavior is simpler startup logic and cleaner store ownership, even though older installs will lose in-progress OAuth state and need to re-auth.
-- The current legacy surface is concentrated in `src/oauthStoreMigration.ts` and the compatibility-loading path in `src/oauthStore.ts`.
-- We should keep support for the current version-2 persisted grant model and only remove the pre-v2 migration behavior.
-
-## Tasks
-
-- [ ] Task 1: Add failing coverage for dropping legacy OAuth state instead of migrating it
-  Test to write:
-  Update `src/oauthStoreMigration.spec.ts` and `src/duplicateCodeRemediation.spec.ts` so they fail unless:
-  - version-2 persisted state still loads correctly
-  - legacy persisted shapes no longer migrate into grants
-  - the migration module no longer exposes legacy conversion helpers
-  Code to implement:
-  No production code in this task. Only failing tests that define the new compatibility boundary.
-  How to verify it works:
-  Run `npx vitest run src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts` and show the red failure.
-
-- [ ] Task 2: Remove legacy OAuth migration behavior
-  Test to write:
-  Reuse the red tests from Task 1.
-  Code to implement:
-  Simplify `src/oauthStoreMigration.ts` so it only parses the current persisted OAuth schema.
-  Remove the legacy-state conversion path and any now-dead helpers/types.
-  Keep `src/oauthStore.ts` loading the current persisted state through the simplified parser.
-  How to verify it works:
-  Re-run `npx vitest run src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts` and show the new tests passing.
-
-- [ ] Task 3: Add failing coverage for the startup/re-auth boundary
-  Test to write:
-  Add focused coverage in `src/oauthStore.spec.ts` or `src/oauthCore.spec.ts` that proves the system behaves safely when old persisted OAuth data is effectively ignored.
-  The goal is to pin the intended fallback behavior: no migrated grants, no crash, normal re-auth flow from a clean current-state load.
-  Code to implement:
-  No production code in this task. Only failing tests that pin the re-auth boundary.
-  How to verify it works:
-  Run the focused OAuth specs and show the red failure.
-
-- [ ] Task 4: Implement any remaining cleanup, then run full OAuth verification
-  Test to write:
-  Reuse the red tests from Task 3.
-  Code to implement:
-  Finish the smallest cleanup needed after removing legacy migration, including any docs or task-log updates that clarify re-auth is now expected for old persisted state.
-  How to verify it works:
-  Run:
-  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthStoreMigration.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/duplicateCodeRemediation.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Then record:
-  - the updated OAuth overlap story
-  - whether `oauthStoreMigration.ts` is now appropriately minimal
-  - whether the OAuth/token/exchange family still looks `partially consolidated`
-
-## Review Bar
-
-- Legacy OAuth migration is fully removed, not half-kept.
-- Current version-2 persisted OAuth loading still works.
-- Old persisted OAuth state now safely falls back to re-auth instead of migration.
-- The result materially simplifies OAuth store ownership and removes duplicate legacy behavior.
-
-Plan ready. Approve to proceed.
-
-## Results
-
-- [x] Task 1: Add failing coverage for dropping legacy OAuth state instead of migrating it
-  Result:
-  Updated `src/oauthStoreMigration.spec.ts` to pin the new compatibility boundary:
-  version-2 persisted state still loads,
-  and legacy OAuth shapes now drop to an empty current-state load.
-  Tightened `src/duplicateCodeRemediation.spec.ts` so `src/oauthStoreMigration.ts` fails review if it still defines `LegacyPersistedOAuthState` or any `toLegacy*` / `migrateLegacyState(...)` helpers.
-  Verified red with:
-  `npx vitest run src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts`
-  which failed because the migration module still carried the legacy loader and conversion helpers.
-
-- [x] Task 2: Remove legacy OAuth migration behavior
-  Result:
-  Simplified `src/oauthStoreMigration.ts` to one responsibility: parse the current version-2 persisted OAuth schema.
-  Removed the legacy-state conversion path and all legacy conversion helpers/types.
-  `loadPersistedOAuthState(...)` now returns a clean empty version-2 state for any non-current persisted OAuth shape.
-  Verified green with:
-  `npx vitest run src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts`
-
-- [x] Task 3: Add failing coverage for the startup/re-auth boundary
-  Result:
-  Replaced the old migration-on-load store test in `src/oauthStore.spec.ts` with a startup boundary test that expects:
-  legacy persisted OAuth data is ignored,
-  no migrated grants survive load,
-  and the store can immediately persist a new current-model grant for a fresh re-auth flow.
-  This coverage was already green once Task 2 landed, which confirmed the simplified loader already gave us the intended startup behavior without extra production changes.
-  Verified with:
-  `npx vitest run src/oauthStore.spec.ts`
-
-- [x] Task 4: Implement any remaining cleanup, then run full OAuth verification
-  Result:
-  Final verification passed with:
-  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthStoreMigration.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/duplicateCodeRemediation.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Updated supporting metrics:
-  - whole-codebase duplication: `24.39%`
-  - `src/oauthStoreMigration.ts`: `38` duplicated lines, `9` clones, `16.89%`
-  - `src/oauthStore.ts`: `41` duplicated lines, `6` clones, `14.29%`
-  - `src/oauthCore.ts`: `89` duplicated lines, `18` clones, `17.28%`
-  Updated architectural read:
-  - `oauthStoreMigration.ts` is now appropriately minimal instead of acting as a legacy grant-conversion host.
-  - Old persisted OAuth state now safely falls back to re-auth.
-  - The OAuth/token/exchange family is still `partially consolidated`, but the remaining overlap is now mostly in current lifecycle behavior rather than backward-compatibility baggage.
-
-# OAuth Cleanliness Fix Plan
-
-## Goal
-
-Fix the highest-payoff cleanliness issues in the OAuth, token, and handoff path without forcing abstractions that blur responsibilities.
-
-## Constraints And Notes
-
-- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
-- The current architectural read is:
-  - `oauthGrantViews.ts` is clean
-  - `oauthCompatibilityGrants.ts` is clean
-  - `oauthCore.ts` is improved but still has brittle refresh-token invariants and repeated transition choreography
-  - `oauthStore.ts` is still overloaded, especially in legacy migration/parsing
-- The goal is cleaner code for the same feature/function, not maximal consolidation.
-- If implementation or verification shows this plan is wrong, stop and re-plan before continuing.
-
-## Tasks
-
-- [x] Task 1: Fail fast on missing upstream refresh-token context
-  Test to write:
-  Add red coverage in `src/oauthCore.spec.ts` proving `exchangeRefreshToken(...)` throws a local `InvalidGrantError` before calling the upstream adapter when the stored grant lacks `upstreamTokens` or `upstreamTokens.refresh_token`.
-  The test should explicitly assert the upstream refresh exchange mock is not called.
-  Code to implement:
-  Tighten `src/oauthCore.ts` so refresh-token exchange requires complete upstream refresh-token context before attempting the upstream handoff.
-  Keep the existing grant ownership, scope, and resource checks intact.
-  How to verify it works:
-  Run `npx vitest run src/oauthCore.spec.ts` and show the red failure first, then green after the implementation.
-  Result:
-  Added red coverage in `src/oauthCore.spec.ts` proving the refresh exchange must fail locally when a stored grant is missing `upstreamTokens.refresh_token`.
-  Updated `src/oauthCore.ts` so `exchangeRefreshToken(...)` deletes the invalid grant and throws `InvalidGrantError("Refresh token is missing upstream refresh-token context.")` before calling the upstream adapter.
-  Verified red with:
-  `npx vitest run src/oauthCore.spec.ts`
-  which failed because the refresh path still resolved successfully by handing an empty string upstream.
-  Verified green with:
-  `npx vitest run src/oauthCore.spec.ts`
-
-- [x] Task 2: Extract legacy OAuth migration/parsing out of `oauthStore.ts`
-  Test to write:
-  Add red structural coverage in `src/duplicateCodeRemediation.spec.ts` and focused behavior coverage in a new spec such as `src/oauthStoreMigration.spec.ts` that fails unless legacy parsing/migration is delegated to a dedicated module.
-  Preserve the existing migration contract for legacy pending consent, pending authorization, authorization code, and refresh token records.
-  Code to implement:
-  Move legacy parsing/migration helpers from `src/oauthStore.ts` into a dedicated module, likely `src/oauthStoreMigration.ts`.
-  Keep `oauthStore.ts` focused on current-state load/prune/persist/query responsibilities.
-  How to verify it works:
-  Run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts src/oauthStore.spec.ts` and show the red failure first, then green after the split.
-  Then run `npm run lint:duplicates` and record the `oauthStore.ts` hotspot movement.
-  Result:
-  Added red structural coverage in `src/duplicateCodeRemediation.spec.ts` and new behavior coverage in `src/oauthStoreMigration.spec.ts`.
-  Extracted legacy parsing and migration into `src/oauthStoreMigration.ts` and updated `src/oauthStore.ts` to delegate persisted-state loading to that module.
-  Verified red with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts`
-  which failed because `src/oauthStoreMigration.ts` did not exist yet and `oauthStore.ts` still owned inline migration helpers.
-  Verified green with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts src/oauthStore.spec.ts`
-
-- [x] Task 3: Protect architectural boundaries after the migration split
-  Test to write:
-  Add a red quality/structure test that fails unless:
-  `oauthStore.ts` no longer owns legacy migration details,
-  the migration module does not perform live persistence,
-  and the store module still owns file I/O and current grant persistence.
-  Code to implement:
-  Make the smallest follow-up cleanup needed so the split stays durable and responsibilities remain crisp.
-  How to verify it works:
-  Run the targeted Vitest structure coverage and show the red failure first, then green after the cleanup.
-  Result:
-  Added a red structural guard in `src/duplicateCodeRemediation.spec.ts` requiring deserialization to live in `src/oauthStoreMigration.ts` while `src/oauthStore.ts` keeps live file I/O.
-  Added `deserializePersistedOAuthState(...)` to `src/oauthStoreMigration.ts` and updated `src/oauthStore.ts` to stop calling `JSON.parse(...)` directly.
-  Verified red with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts`
-  which failed because `oauthStore.ts` still owned JSON deserialization.
-  Verified green with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStoreMigration.spec.ts src/oauthStore.spec.ts`
-
-- [x] Task 4: Remove one repeated lifecycle transition seam in `oauthCore.ts`
-  Test to write:
-  Add red coverage in `src/duplicateCodeRemediation.spec.ts` plus targeted OAuth behavior specs that fails unless one repeated transition path is centralized behind a narrow helper.
-  The best candidate is the repeated “validate step, delete old grant, save next grant” choreography shared across consent approval, callback handling, authorization-code exchange, and refresh-token rotation.
-  Code to implement:
-  Extract one narrow transition helper in `src/oauthCore.ts` or a dedicated focused helper module.
-  Do not build a generic OAuth engine.
-  Keep redirect building and token minting where they currently belong unless the tests show a cleaner seam.
-  How to verify it works:
-  Run targeted OAuth Vitest coverage and show the red failure first, then green after the implementation.
-  Result:
-  Added a red structural guard in `src/duplicateCodeRemediation.spec.ts` for a narrow `replaceGrant(...)` helper in `src/oauthCore.ts`.
-  Implemented `replaceGrant(...)` and routed consent approval, callback handling, authorization-code exchange, and refresh-token rotation through it.
-  Verified red with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts`
-  which failed because `oauthCore.ts` still rotated grants inline.
-  Verified green with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCore.spec.ts`
-
-- [x] Task 5: Final verification and architectural scorecard refresh
-  Test to write:
-  No new tests in this task. Use the approved red/green tests as proof.
-  Code to implement:
-  No new production behavior unless verification exposes a tightly coupled issue. If that happens, stop and re-plan.
-  How to verify it works:
-  Run:
-  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/duplicateCodeRemediation.spec.ts`
-  plus any new migration spec added in Task 2,
-  `npm run lint:duplicates`,
-  `npm run tech-debt:report`,
-  `npm run typecheck`
-  Then record:
-  the updated OAuth hotspot movement,
-  whether `oauthStore.ts` now looks primarily like a store instead of a migration host,
-  and whether the OAuth/token/exchange family remains `partially consolidated` or moves closer to `appropriately separated`.
-  Result:
-  Final verification passed with:
-  `npx vitest run src/oauthCore.spec.ts src/oauthStore.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/oauthStoreMigration.spec.ts src/duplicateCodeRemediation.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Updated OAuth hotspot movement from the latest JSCPD report:
-  `src/oauthStore.ts`: `274` duplicated lines / `34` clones / `37.59%` before -> `41` duplicated lines / `6` clones / `14.29%` after
-  `src/oauthCore.ts`: `84` duplicated lines / `17` clones / `17.28%` before -> `89` duplicated lines / `18` clones / `18.02%` after
-  `src/oauthStoreMigration.ts`: new migration-focused module with `248` duplicated lines / `31` clones / `53.45%`
-  `src/oauthCompatibilityGrants.ts`: focused helper module remains at `26` duplicated lines / `4` clones / `30.23%`
-  Updated architectural reading:
-  `oauthStore.ts` now reads primarily like a live store instead of a migration host, the refresh-token handoff is safer, and grant rotation in `oauthCore.ts` is cleaner.
-  The OAuth/token/exchange family still remains `partially consolidated`, because the migration module now holds legacy complexity and `oauthCore.ts` still has some repeated lifecycle validation/choreography that may or may not merit another seam.
-
-## Review Bar
-
-- The refresh-token path no longer performs a brittle upstream handoff with missing local context.
-- `oauthStore.ts` has fewer unrelated responsibilities and is materially easier to reason about.
-- Any new seam in `oauthCore.ts` is narrow and behavior-oriented, not a speculative abstraction.
-- The final summary explains what is now clean, what remains intentionally separate, and what debt still remains.
-
-Plan ready. Approve to proceed.
-  Code to implement:
-  Add shared helpers in `src/tools/financeToolUtils.ts` for sign-aware spending, refund treatment, transfer exclusion, and optional credit-card-payment exclusion.
-  Update these tools to use the shared logic instead of raw `Math.abs(...)`:
-  `GetFinancialSnapshotTool.ts`,
-  `GetBudgetHealthSummaryTool.ts`,
-  `GetCashFlowSummaryTool.ts`,
-  `GetCategoryTrendSummaryTool.ts`,
-  `GetSpendingAnomaliesTool.ts`,
-  and `GetBudgetRatioSummaryTool.ts`.
-  How to verify it works:
-  Re-run the Task 1 Vitest command and show the new tests passing.
-  Then run the broader touched suite:
-
-# Whole-Codebase Duplicate Scan Follow-Up
-
-## Goal
-
-Make the official duplicate-code metric a whole-codebase scan instead of the current implementation-only baseline, while keeping the report and docs aligned to that definition.
-
-## Constraints And Notes
-
-- Work stays isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
-- The user explicitly corrected the metric definition: duplicate scanning should cover the whole codebase.
-- "Whole codebase" should include maintained repo code such as `src/`, `scripts/`, `debugging/`, workflow/config files, specs, contracts, and Markdown.
-- It should still exclude generated/vendor paths like `.git/`, `node_modules/`, `dist/`, and `artifacts/`.
-- This is a config-and-contract change, so it still follows TDD before implementation.
-
-## Assumptions
-
-- `tasks/**` should now count, because it is repo-authored code/docs rather than generated output.
-- `package-lock.json` can remain excluded because it is generated dependency metadata, not maintained code.
-- The headline in `tech-debt:report` should explicitly reflect the whole-codebase number rather than the old narrowed baseline.
-
-## Tasks
-
-- [x] Task 1: Add failing coverage for whole-codebase duplicate-scan guardrails
-  Test to write:
-  Extend `src/codeQuality.spec.ts` and `src/preflight.spec.ts` so they fail unless the duplicate-scan contract matches a whole-codebase definition.
-  The red assertions should prove that [`.jscpd.json`](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/.jscpd.json) no longer excludes:
-  `**/*.spec.ts`,
-  `**/*.contract.ts`,
-  `**/*.md`,
-  or `tasks/**`.
-  Code to implement:
-  No config changes yet. Only the failing tests that pin the new boundary.
-  How to verify it works:
-  Run `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts` and show the red failure.
-  Result:
-  Tightened `src/codeQuality.spec.ts` and `src/preflight.spec.ts` so the duplicate-scan contract now rejects exclusions for `*.spec.ts`, `*.contract.ts`, `*.md`, and `tasks/**`, and requires README wording for whole-codebase duplication.
-  Verified red with:
-  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`
-  which failed because `.jscpd.json` still excluded those paths and the README still described an implementation-only baseline.
-
-- [x] Task 2: Implement the whole-codebase JSCPD scope
-  Test to write:
-  Reuse the failing coverage from Task 1.
-  Code to implement:
-  Update [`.jscpd.json`](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/.jscpd.json) so the scan covers the whole codebase, keeping only generated/vendor exclusions.
-  Update [README.md](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/README.md) so `lint:duplicates` is documented as a whole-codebase scan.
-  How to verify it works:
-  Re-run `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`, then run `npm run lint:duplicates` and capture the new whole-codebase baseline.
-  Result:
-  Updated `.jscpd.json` to keep only generated/vendor exclusions and rewrote the README command notes so `lint:duplicates` is described as a whole-codebase scan.
-  Verified green with:
-  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts`
-  and
-  `npm run lint:duplicates`
-  which raised the live whole-codebase baseline to `24.35%`.
-
-- [x] Task 3: Add failing coverage for whole-codebase tech-debt reporting
-  Test to write:
-  Extend `src/techDebtReport.spec.ts` so it fails unless the report wording and contract reflect whole-codebase duplication rather than the narrowed implementation-only baseline.
-  If needed, tighten `src/preflight.spec.ts` to require README wording that matches the new scope.
-  Code to implement:
-  No script changes yet. Only the failing tests.
-  How to verify it works:
-  Run `npx vitest run src/techDebtReport.spec.ts src/preflight.spec.ts` and show the red failure.
-  Result:
-  Tightened `src/techDebtReport.spec.ts` so the report contract now requires a `Whole-codebase duplication:` headline.
-  Verified red with:
-  `npx vitest run src/techDebtReport.spec.ts src/preflight.spec.ts`
-  which failed because the report still printed the older generic `Duplication:` label.
-
-- [x] Task 4: Implement the report/doc alignment and rerun the official metric
-  Test to write:
-  Reuse the failing coverage from Task 3.
-  Code to implement:
-  Update [scripts/tech-debt-report.mjs](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/scripts/tech-debt-report.mjs) and [README.md](/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation/README.md) so the printed duplication number is explicitly the whole-codebase scan.
-  Keep the other report metrics unchanged unless verification forces a small adjacent fix.
-  How to verify it works:
-  Run:
-  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts src/techDebtReport.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Then record the new whole-codebase duplication percentage in this file.
-  Result:
-  Updated `scripts/tech-debt-report.mjs` so the report headline is `Whole-codebase duplication:` and aligned the supporting debt-marker scan with the same whole-codebase boundary by counting Markdown and `tasks/**` content too.
-  Verified green with:
-  `npx vitest run src/codeQuality.spec.ts src/preflight.spec.ts src/techDebtReport.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Final whole-codebase duplicate/remediation snapshot:
-  - Whole-codebase duplication: `24.35%`
-  - Clones: `721`
-  - Duplicated lines: `5489`
-  - `tech-debt:report` output:
-    - Whole-codebase duplication: `24.35%`
-    - Dead exports: `0`
-    - `ts-ignore` count: `7`
-    - `eslint-disable` count: `10`
-    - `TODO/FIXME/HACK` count: `15`
-
-## Review Bar
-
-- The repo’s official duplicate scan matches the user’s whole-codebase definition.
-- Only generated/vendor paths stay excluded.
-- The report, docs, and test guardrails all describe the same scope.
-- The final number is rerun from the live config, not inferred from the previous narrowed baseline.
-
-Plan ready. Approve to proceed.
-  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/financeToolUtils.spec.ts`.
-  Result:
-  Updated `src/tools/financeToolUtils.ts` so spend-style summaries only treat negative activity as spending and added a shared credit-card-payment category helper.
-  Updated `src/tools/GetSpendingAnomaliesTool.ts` to exclude categories in the `Credit Card Payments` group from anomaly detection.
-  Verified green with:
-  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
-  and
-  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/financeToolUtils.spec.ts`
-
-- [x] Task 3: Add failing coverage for month-scoped cleanup and health excluding transfer noise
-  Test to write:
-  Extend `src/financeAdvancedTools.spec.ts` and `src/financialDiagnostics.spec.ts` so they fail unless month cleanup and health counts exclude on-budget transfers from uncategorized backlog and other cleanup metrics.
-  Include a fixture where a transfer is uncategorized by design and must not be reported as user cleanup work.
-  Code to implement:
-  No production code in this task. Only failing tests for transfer-aware cleanup semantics.
-  How to verify it works:
-  Run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the failures proving transfer transactions are currently over-counted.
-  Result:
-  Added red coverage in `src/financeAdvancedTools.spec.ts` and `src/financialDiagnostics.spec.ts` proving that uncategorized transfer transactions were still being counted as cleanup backlog.
-  Verified red with:
-  `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
-  which failed because both budget cleanup and financial health metrics counted transfer transactions as uncategorized, unapproved, and uncleared work items.
-
-- [x] Task 4: Implement transfer-aware cleanup and health query fixes
-  Test to write:
-  Reuse the red tests from Task 3.
-  Code to implement:
-  Update `GetBudgetCleanupSummaryTool.ts` and `GetFinancialHealthCheckTool.ts` to exclude transfer transactions from cleanup counts.
-  Where the contract is explicitly month-based, prefer month-specific transaction fetches or equivalent exact month filtering with the transfer-aware classifier.
-  How to verify it works:
-  Re-run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the red tests turning green.
-  Then run `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` to confirm no finance-summary regression.
-  Result:
-  Added a shared `isTransferTransaction` helper in `src/tools/financeToolUtils.ts` and used it in `src/tools/GetBudgetCleanupSummaryTool.ts` and `src/tools/GetFinancialHealthCheckTool.ts`.
-  Verified green with:
-  `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
-  and
-  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
-
-- [x] Task 5: Add failing coverage for true-income versus generic positive inflow semantics
-  Test to write:
-  Extend `src/financeAdvancedTools.spec.ts` and, if helpful, add focused helper coverage so `ynab_get_income_summary` fails unless it distinguishes real income from refund/reimbursement-like positive inflows.
-  The fixture should cover:
-  paycheck income,
-  a merchant refund,
-  and a positive non-transfer inflow that should not be labeled as income without an explicit rule.
-  Code to implement:
-  No production code in this task. Only failing tests that define the intended income contract.
-  How to verify it works:
-  Run `npx vitest run src/financeAdvancedTools.spec.ts` and show the failure demonstrating the current tool over-counts positive inflows as income.
-  Result:
-  Tightened the existing income fixtures so true income is explicitly categorized as `Inflow: Ready to Assign`, then added red coverage proving that refunds and generic positive inflows were still counted as income.
-  Verified red with:
-  `npx vitest run src/financeAdvancedTools.spec.ts`
-  which failed because `ynab_get_income_summary` still counted a positive refund and a generic positive inflow in monthly income totals.
-
-- [x] Task 6: Implement tighter income semantics and expose any unavoidable ambiguity
-  Test to write:
-  Reuse the failing specs from Task 5.
-  Code to implement:
-  Update `GetIncomeSummaryTool.ts` to use a stricter income classifier.
-  If the available API data cannot reliably separate every positive inflow type, surface that limitation explicitly in the payload or tool description rather than silently calling all positive inflows "income".
-  Keep the implementation minimal and grounded in YNAB fields that actually exist.
-  How to verify it works:
-  Re-run `npx vitest run src/financeAdvancedTools.spec.ts` and show the tests passing.
-  Then run the broader finance specs to confirm no regression in downstream summaries that reference income.
-  Result:
-  Added a shared `isReadyToAssignInflowCategory` helper in `src/tools/financeToolUtils.ts` and updated `src/tools/GetIncomeSummaryTool.ts` so only positive, non-transfer `Inflow: Ready to Assign` transactions count as income.
-  Verified green with:
-  `npx vitest run src/financeAdvancedTools.spec.ts`
-  and
-  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/financeToolUtils.spec.ts`
-
-- [x] Task 7: Add failing coverage for obligation-window forecasting semantics
-  Test to write:
-  Extend `src/financeAdvancedTools.spec.ts` and `src/financialDiagnostics.spec.ts` so they fail unless:
-  upcoming obligation outputs separate due outflows from expected inflows,
-  transfer-like scheduled transactions are excluded,
-  and repeated schedules inside a 30-day window are not silently undercounted.
-  Code to implement:
-  No production code in this task. Only failing specs that define the forecast contract.
-  How to verify it works:
-  Run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the failures proving the current obligation math mixes inflows with obligations and only counts `date_next`.
-  Result:
-  Added red coverage in `src/financeAdvancedTools.spec.ts` and `src/financialDiagnostics.spec.ts` proving that:
-  recurring weekly scheduled outflows were undercounted,
-  transfer-like schedules were still included,
-  and obligation counts still mixed inflows with true due outflows.
-  Verified red with:
-  `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
-  which failed because the current implementation only counted each schedule's `date_next` and did not separate inflow counts from obligation counts.
-
-- [x] Task 8: Implement expanded obligation forecasting and align health-check cash-risk inputs
-  Test to write:
-  Reuse the failing specs from Task 7.
-  Code to implement:
-  Update `GetUpcomingObligationsTool.ts` to expand recurring scheduled transactions across the 7/14/30 day windows, exclude transfers, and return outflows separately from inflows.
-  Update `GetFinancialHealthCheckTool.ts` so its `upcoming_30d_net` or equivalent risk input is based on the corrected obligation model.
-  How to verify it works:
-  Re-run `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts` and show the new tests passing.
-  Then run the broader finance suite to confirm the health-check output remains stable apart from the intentional semantic correction.
-  Result:
-  Added shared scheduled-occurrence expansion in `src/tools/financeToolUtils.ts` and reused it in `src/tools/GetUpcomingObligationsTool.ts` and `src/tools/GetFinancialHealthCheckTool.ts`.
-  `ynab_get_upcoming_obligations` now:
-  expands recurring schedules across the 30-day horizon,
-  excludes transfers,
-  separates `obligation_count` from `expected_inflow_count`,
-  and reports top due items by expanded occurrence date.
-  `ynab_get_financial_health_check` now bases `upcoming_30d_net` on the same expanded schedule model.
-  Verified green with:
-  `npx vitest run src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
-  and
-  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/financeToolUtils.spec.ts`
-
-- [x] Task 9: Add failing coverage for ratio and trend labels that currently overstate meaning
-  Test to write:
-  Add focused assertions in `src/financeAdvancedTools.spec.ts`, `src/financeSummaryTools.spec.ts`, `src/serverFactory.spec.ts`, or `src/codeQuality.spec.ts` so they fail unless:
-  live finance tool descriptions explain timing and classification semantics explicitly,
-  `assigned_vs_spent` fields are described as timing/buffering metrics rather than discipline scores,
-  and category/group trend summaries surface enough context to avoid silent history rewrites when group names change.
-  Code to implement:
-  No production code in this task. Only red assertions for contract wording and output clarity.
-  How to verify it works:
-  Run the targeted Vitest specs and show the failures proving the current tool contracts are semantically too loose.
-  Result:
-  Adapted this task to the current branch state, where `ynab_get_70_20_10_summary` is already removed.
-  Added red coverage in `src/serverFactory.spec.ts` for live finance-tool descriptions and in `src/financeAdvancedTools.spec.ts` for category-group trend scope metadata.
-  Verified red with:
-  `npx vitest run src/serverFactory.spec.ts src/financeAdvancedTools.spec.ts`
-  which failed because the descriptions still overstated semantics and category-group trend output did not expose name-based matching.
-
-- [x] Task 10: Implement contract/description cleanup for ratio, trend, and snapshot semantics
-  Test to write:
-  Reuse the failing specs from Task 9.
-  Code to implement:
-  Update the affected tool descriptions and payload labels in:
-  `GetCategoryTrendSummaryTool.ts`,
-  `GetCashFlowSummaryTool.ts`,
-  `GetBudgetHealthSummaryTool.ts`,
-  `GetFinancialSnapshotTool.ts`,
-  `GetIncomeSummaryTool.ts`,
-  and `GetUpcomingObligationsTool.ts`.
-  Keep this task focused on truthful semantics and output shape, not on adding brand-new analytics.
-  How to verify it works:
-  Re-run the targeted specs from Task 9 and show them passing.
-  Then inspect the registered tool metadata through the existing registrar coverage to confirm the clarified contracts are exposed at runtime.
-  Result:
-  Updated live finance tool descriptions so they explicitly describe timing/buffering semantics, cash-flow versus savings semantics, `Inflow: Ready to Assign` income classification, and obligation windows as due outflows plus expected inflows excluding transfers.
-  Updated `GetCategoryTrendSummaryTool.ts` so group-based trend payloads expose `scope.match_basis: "category_group_name"`.
-  Verified green with:
-  `npx vitest run src/serverFactory.spec.ts src/financeAdvancedTools.spec.ts`
-
-- [x] Task 11: Final verification on the audited analytics surface
-  Test to write:
-  No new tests in this task. Use the approved red/green specs as proof.
-  Code to implement:
-  No new production behavior unless verification exposes a tightly coupled issue. If that happens, stop and re-plan before continuing.
-  How to verify it works:
-  Run at minimum:
-  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/serverFactory.spec.ts`
-  and
-  `npm run typecheck`
-  Add a short results section to this file before closing out implementation.
-  Result:
-  Final verification passed with:
-  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/serverFactory.spec.ts`
-  and
-  `npm run typecheck`
 
 ## Review Bar
 
 - A single MCP tool call can answer month-by-month progress over a date range with `net_worth`, `liquid_cash`, and `debt`.
 - Historical monthly balances are reconstructed in a way that handles transfers correctly and does not erase closed-account history.
 - A single MCP tool call can answer "how did I do this month?" with a coherent payload rather than requiring the LLM to stitch together multiple fragments.
+
+# Reliability Script Plan
+
+## Goal
+
+Add a repo-local reliability script that repeatedly exercises the bridge over HTTP and produces a compact summary of:
+
+- total requests attempted
+- successes and failures
+- latency percentiles
+- unexpected status or protocol errors
+- whether the run met a defined reliability threshold
+
+The first version should be safe, deterministic, and useful for catching flaky transport or server-regression behavior during local development and CI-adjacent validation.
+
+## Constraints And Notes
+
+- The current checkout is on `fix/cors-cf-utility-dedup`, not `main`.
+- The worktree is already dirty with unrelated local changes, so I should not switch branches automatically.
+- Repo rules require a stop after this plan and approval before any code changes.
+- Repo branch rules say implementation work should start from the latest `main`, but I should pause before Task 1 if you want this isolated in a fresh branch or worktree.
+- Repo rules say not to modify files in a `tests/` directory unless explicitly asked to. The existing Vitest specs live under `src/`, so targeted spec additions there are allowed.
+- The script should default to non-destructive local behavior and should not hit real YNAB accounts or require real OAuth credentials.
+- The project already ships compiled CLIs via `dist`, so the cleanest fit is a TypeScript entry point compiled by `tsc`, plus an npm script that runs the built artifact.
+
+## Assumptions
+
+- The first reliability target should be the authless HTTP transport because it is the cheapest path to repeated end-to-end requests without needing external credentials.
+- A good first command shape is `npm run reliability:http`.
+- The script should start or target a local server instance, perform repeated `initialize`, `tools/list`, and one lightweight tool call such as `ynab_get_mcp_version`, then shut down cleanly.
+- A useful first pass is a bounded soak run with configurable request count and concurrency, not full chaos testing.
+- The script should fail with a non-zero exit code when reliability falls below a configurable threshold or when any protocol-invariant check fails.
+
+## Tasks
+
+- [ ] Task 1: Add failing coverage for reliability result aggregation and pass/fail rules
+  Test to write:
+  Add a focused red spec under `src/` for a new reliability module that proves it:
+  records request attempts, successes, and failures,
+  calculates summary metrics such as min, max, average, p95, and p99 latency,
+  captures protocol or transport failure details without throwing away the whole run,
+  and marks the run failed when the error rate exceeds the configured threshold.
+  Code to implement:
+  No production code in this task. Only failing specs that define the summary contract and threshold behavior for the reliability run.
+  How to verify it works:
+  Run a targeted Vitest command for the new reliability spec and show the failures proving the aggregation module does not exist yet.
+
+- [ ] Task 2: Implement the reliability runner core
+  Test to write:
+  Reuse the red tests from Task 1 and extend them if needed to cover concurrency windows and latency recording order.
+  Code to implement:
+  Add a small TypeScript module under `src/` that runs a bounded batch of async request probes with configurable count, concurrency, and threshold settings.
+  The module should return a structured summary object that is easy to print and easy to assert in tests.
+  Keep the implementation minimal and deterministic so unit tests do not depend on wall-clock-heavy sleeps.
+  How to verify it works:
+  Re-run the targeted Vitest command and show the tests turning green.
+
+- [ ] Task 3: Add failing coverage for the HTTP reliability scenario and CLI contract
+  Test to write:
+  Add or extend a spec under `src/` so it fails unless a CLI entry point:
+  accepts bounded request-count and concurrency arguments,
+  runs a local HTTP scenario that performs `initialize`, `tools/list`, and a lightweight tool call,
+  prints a compact summary with totals and latency metrics,
+  and exits non-zero when the reliability threshold is breached.
+  Use lightweight stubs or a locally started test server so the spec does not depend on external services.
+  Code to implement:
+  No production code in this task. Only failing specs that pin the CLI contract, arguments, and summary output.
+  How to verify it works:
+  Run the targeted Vitest command and show the failures demonstrating the HTTP reliability script does not exist yet.
+
+- [ ] Task 4: Implement the HTTP reliability script and npm entry point
+  Test to write:
+  Reuse the red tests from Task 3.
+  Code to implement:
+  Add a compiled CLI entry point under `src/` that either starts a local authless HTTP server or targets a provided local URL, executes the bounded reliability scenario, prints the summary, and returns an appropriate exit code.
+  Add the npm script entry in `package.json`.
+  Keep defaults conservative, with small request counts and moderate concurrency so the command is informative but not noisy.
+  How to verify it works:
+  Re-run the targeted Vitest command and show the tests passing.
+  Then run the new npm command locally with a small bounded configuration and confirm it completes, prints the expected summary, and shuts down cleanly.
+
+- [ ] Task 5: Document usage and verify the implementation bar
+  Test to write:
+  Add or extend a small documentation or config guard spec only if needed to pin the npm script and documented command name.
+  Code to implement:
+  Add a short README section describing:
+  what the reliability script exercises,
+  its safe defaults,
+  its key flags,
+  and what a failing run means.
+  How to verify it works:
+  Run the smallest meaningful verification set for the touched specs, then run `npm run typecheck` to confirm the new modules and CLI compile cleanly.
+
+## Review Bar
+
+- The reliability command is safe to run locally and does not require production credentials.
+- The first version exercises a real end-to-end HTTP path rather than only unit-level helper functions.
+- The summary is compact but actionable enough to spot flakiness quickly.
+- Failures produce a non-zero exit code and preserve enough detail to debug the flaky path.
+- The implementation is simple enough to extend later with OAuth-mode scenarios or longer soak runs without a redesign.
 - Tool descriptions explicitly steer the model away from misreading `assigned_vs_spent` as a behavior score.
 - Focused specs and runtime-registry verification provide proof for the new tool surface and the documentation changes.
 
 Plan ready. Approve to proceed.
 
+---
+
+# Tech Debt Assessment Follow-Up Plan
+
+## Goal
+
+Turn the repo-wide assessment into a practical execution sequence that reduces the highest-risk debt first, improves maintainability second, and opens room for new feature work without increasing architectural drag.
+
+## Constraints And Notes
+
+- The current checkout is already dirty, so implementation work should stay isolated from unrelated in-flight edits.
+- Repo workflow requires stopping after the plan and waiting for approval before runtime code changes.
+- For code changes, each task below is intended to run as its own red-green-verification slice.
+- The plan favors the highest-leverage structural work already confirmed by the code assessment and the existing roadmap.
+
+## Assumptions
+
+- The immediate goal is to create an execution plan, not to begin implementation yet.
+- The best near-term path is to prioritize durability, observability, and ownership boundaries before broader feature expansion.
+- Existing specs under `src/*.spec.ts` may be extended as part of TDD when execution begins.
+
+## Tasks
+
+- [x] Task 1: Write failing tests for shared logging sinks
+  Test to write:
+  Extend `src/oauthBroker.spec.ts` and `src/clientProfiles.spec.ts` so they fail unless OAuth and profile events flow through the shared structured logger with stable `scope`, `event`, and redaction behavior.
+  Code to implement:
+  No production code in this task. Only red tests that define the desired logging contract.
+  How to verify it works:
+  Run the focused Vitest files and show failures proving current raw console-based paths do not satisfy the structured logging assertions.
+
+- [x] Task 2: Implement the shared logging sink changes
+  Test to write:
+  Reuse the failing specs from Task 1.
+  Code to implement:
+  Update `src/oauthBroker.ts` and `src/clientProfiles/profileLogger.ts` so runtime logging uses `src/logger.ts` consistently instead of direct `console.error` paths.
+  How to verify it works:
+  Re-run the focused logging specs and show them passing, then grep the runtime paths to confirm direct console logging is removed from the affected modules.
+
+- [x] Task 3: Write failing tests for helper and header semantics
+  Test to write:
+  Add focused red specs for `src/requestContext.ts`, `src/tools/collectionToolUtils.ts`, and `src/tools/financialDiagnosticsUtils.ts`, plus any missing edge cases in `src/headerUtils.spec.ts`.
+  Code to implement:
+  No production code in this task. Only failing helper-level tests that pin the current expected semantics.
+  How to verify it works:
+  Run the new targeted helper specs and show the failures that reveal currently indirect or unpinned behavior.
+
+- [x] Task 4: Implement helper and header consistency fixes
+  Test to write:
+  Reuse the failing specs from Task 3.
+  Code to implement:
+  Centralize duplicate header parsing in `src/headerUtils.ts`, align `src/clientProfiles/requestContext.ts` and `src/cloudflareCompatibility.ts` to use it, and add the smallest helper changes required for the new direct coverage to pass.
+  How to verify it works:
+  Re-run the focused helper/header specs and show them passing, then confirm duplicate `getFirstHeaderValue` implementations are gone.
+
+- [x] Task 5: Write failing tests for cross-call plan selection bleed
+  Test to write:
+  Extend `src/planToolUtils.spec.ts` and `src/serverFactory.spec.ts` so they fail unless plan resolution is scoped per call and cannot bleed through shared API state.
+  Code to implement:
+  No production code in this task. Only red tests that define the non-mutable plan-resolution behavior.
+  How to verify it works:
+  Run the targeted plan-resolution specs and show the failing cases demonstrating the current shared `runtimePlanIdOverride` problem.
+
+- [x] Task 6: Implement per-call plan resolution
+  Test to write:
+  Reuse the failing specs from Task 5.
+  Code to implement:
+  Refactor `src/tools/planToolUtils.ts`, `src/ynabApi.ts`, `src/server.ts`, and `src/stdioServer.ts` to resolve plans per request or per call instead of mutating shared API-attached runtime state.
+  How to verify it works:
+  Re-run the targeted plan-resolution specs and affected server/tool specs, showing the bleed is gone and fallback plan resolution still works.
+
+- [x] Task 7: Write failing tests for OAuth durability and secret persistence
+  Test to write:
+  Extend `src/oauthCore.spec.ts` and `src/oauthStore.spec.ts` so they fail unless the `approveConsent`, callback, and token-exchange transitions preserve recoverable state when persistence or upstream steps fail.
+  Code to implement:
+  No production code in this task. Only red tests that define durable write semantics and any narrow assertions needed for stored-token minimization.
+  How to verify it works:
+  Run the targeted OAuth specs and show failures proving the current delete-before-save pattern is unsafe.
+
+- [x] Task 8: Implement durable OAuth transitions and reduce persisted secret material
+  Test to write:
+  Reuse the failing specs from Task 7.
+  Code to implement:
+  Rework `src/oauthCore.ts` and `src/oauthStore.ts` so replacement grant state is durable before the previous state is discarded, and stop persisting unnecessary upstream token material where possible.
+  How to verify it works:
+  Re-run the targeted OAuth specs and inspect representative serialized state to confirm the safer transition behavior and reduced secret persistence.
+
+- [x] Task 9: Write failing tests for HTTP route seams
+  Test to write:
+  Add focused red specs around ingress/profile setup, auth/OAuth routes, and MCP transport routing so the extraction seams in `src/httpServer.ts` are directly pinned.
+  Code to implement:
+  No production code in this task. Only extraction-oriented tests that make route boundaries explicit.
+  How to verify it works:
+  Run the targeted HTTP-focused specs and show the new boundary assertions failing before extraction.
+
+- [x] Task 10: Split `httpServer.ts` into smaller route-scoped modules
+  Test to write:
+  Reuse the failing specs from Task 9.
+  Code to implement:
+  Extract shared ingress/profile middleware, auth/OAuth routes, and transport-routing concerns from `src/httpServer.ts` into narrower modules while preserving behavior.
+  How to verify it works:
+  Re-run the targeted HTTP specs and the broader `src/httpServer.spec.ts` suite to show behavior stays stable after decomposition.
+
+- [x] Task 11: Write failing tests for a first-class tool-definition pattern
+  Test to write:
+  Extend `src/serverFactory.spec.ts` and representative tool specs so they fail unless tools can be declared through a shared builder with consistent metadata and execution wrapping.
+  Code to implement:
+  No production code in this task. Only red tests for the desired registration contract.
+  How to verify it works:
+  Run the targeted server/tool specs and show the current manual registration pattern is still required.
+
+- [x] Task 12: Introduce a shared tool builder and unify transaction-query behavior
+  Test to write:
+  Reuse the failing specs from Task 11 and add narrow red coverage for transaction-query consistency where needed.
+  Code to implement:
+  Add a tool-definition abstraction in `src/server.ts` and shared query behavior for the transaction family so `SearchTransactionsTool`, `ListTransactionsTool`, and related tools stop drifting in filtering, pagination, and projection semantics.
+  How to verify it works:
+  Re-run the targeted server/tool specs and the transaction-related suites to show consistent output behavior with less central boilerplate.
+
+- [x] Task 13: Write failing tests for config ownership boundaries and preflight
+  Test to write:
+  Extend `src/config.spec.ts`, `src/runtimeConfig.spec.ts`, and any small metadata checks needed so they fail unless transport, OAuth, and YNAB config concerns have clearer ownership boundaries.
+  Code to implement:
+  No production code in this task. Only red tests that define the desired config-module boundaries and CI-matching preflight contract.
+  How to verify it works:
+  Run the targeted config/quality specs and show the failures proving the current module split and package workflow are still too loose.
+
+- [x] Task 14: Split config ownership into real modules and add a CI-matching preflight
+  Test to write:
+  Reuse the failing specs from Task 13.
+  Code to implement:
+  Refactor `src/config.ts`/`src/runtimeConfig.ts` into smaller ownership modules and add a single package script that matches the intended local preflight workflow.
+  How to verify it works:
+  Re-run the targeted config specs, run typecheck, and run the new preflight command to confirm the new ownership boundaries and developer workflow hold together.
+
+## Review Bar
+
+- The highest-risk debt is reduced before broader feature work starts.
+- Shared behavior is pinned by small local tests rather than only giant integration specs.
+- HTTP, OAuth, plan resolution, and tool registration each have clearer ownership boundaries after the planned slices.
+- The plan leaves room for new features such as deployment diagnostics, composable transaction analysis, and richer client-profile compatibility support without first adding more architectural sprawl.
+
 ## Results
 
-- Added `ynab_get_net_worth_trajectory` for one-call month-by-month `net_worth`, `liquid_cash`, and `debt` across an inclusive range.
-- Added `ynab_get_monthly_review` for a one-call month summary that bundles income, cash flow, budget health, top spending, and notable spending changes.
-- Added shared month and historical-balance helpers in `src/tools/financeToolUtils.ts` to support the new finance summary surface.
-- Updated registry coverage in `src/serverFactory.spec.ts` and red/green tool coverage in `src/financeSummaryTools.spec.ts` and `src/financeAdvancedTools.spec.ts`.
-- Clarified `assigned_vs_spent` semantics in the tool descriptions and `README.md` so MCP clients and LLMs get the right interpretation by default.
-- Spending-like fields treat refunds, transfers, and credit-card-payment shuffling correctly.
-- Cleanup-style tools do not tell the LLM that normal transfers are uncategorized user mistakes.
-- Income outputs are either meaningfully constrained to real income or explicitly labeled when ambiguity remains.
-- Obligation windows reflect the full scheduled horizon, not just each item's next occurrence.
-- Tool descriptions and payload labels are truthful enough that an LLM can answer finance questions without silently overstating what the server actually computed.
+- Completed Tasks 1 through 14 in TDD order, including the logging, helper/header, plan-resolution, OAuth durability, HTTP decomposition, tool-builder, transaction-family, and config/preflight slices.
+- Targeted and broader Vitest verification passed for the touched slices.
+- `npm run typecheck` still exhausts Node's default heap in this local environment; the config/runtime split itself is green in targeted specs, but full-project typecheck did not complete under the default script before running out of memory.
+
+Plan ready. Approve to proceed.
+
+# OAuth-Persisted Client Profile Plan
+
+## Goal
+
+Stop relying on per-request heuristics alone for MCP client classification by persisting a conservative compatibility profile on the OAuth client and grant, then reusing that profile on `/token` and authenticated `/mcp` requests.
+
+## Constraints And Notes
+
+- The current checkout is on `fix/cors-cf-utility-dedup`, not `main`, and the worktree is already dirty.
+- Repo rules require stopping after the plan and waiting for approval before any non-Markdown implementation work.
+- The bridge is intentionally stateless for HTTP MCP transport, so later `tools/call` requests cannot rely on a durable server-side MCP session to remember `initialize.clientInfo`.
+- OAuth can authenticate the client and grant, but it cannot perfectly identify the MCP brand on its own; any stored profile must remain a compatibility classification, not a security boundary.
+- `initialize.clientInfo` is helpful but self-reported, so it should refine or confirm a stored profile, not replace authenticated OAuth identity.
+- The current logs show:
+  - `/mcp` can resolve as `chatgpt`
+  - `/token` often falls back to `generic`
+  - token refresh still succeeds
+  This means the main architectural gap is profile persistence, not OAuth failure.
+
+## Assumptions
+
+- The right persistence anchor is the OAuth client and its associated grants, because those survive across `/authorize`, `/token`, refresh, and authenticated `/mcp`.
+- A stored profile should be one of the existing compatibility profiles:
+  - `chatgpt`
+  - `codex`
+  - `claude`
+  - `generic`
+- When signals are weak or conflicting, we should persist or retain `generic` rather than over-claim a branded client.
+
+## Tasks
+
+- [x] Task 1: Add failing store and core coverage for persisted compatibility profiles
+  Test to write:
+  Extend `src/oauthStore.spec.ts` and `src/oauthCore.spec.ts` so they fail unless OAuth clients and grants can carry a persisted compatibility profile and that profile survives save/load, grant creation, authorization-code issuance, and refresh-token lookup.
+  Code to implement:
+  No production code in this task. Only failing specs that define the persisted-profile contract and prove it is available wherever the OAuth flow currently reloads the client or grant.
+  How to verify it works:
+  Run `npm test -- --run src/oauthStore.spec.ts src/oauthCore.spec.ts` and show the failures proving the store/core model does not yet persist profile data.
+
+- [x] Task 2: Implement conservative OAuth-side profile persistence
+  Test to write:
+  Reuse the failing coverage from Task 1.
+  Add any minimal focused assertions needed to prove weak or conflicting inputs persist `generic` instead of a branded profile.
+  Code to implement:
+  Update the OAuth data model in the smallest clean way so:
+  - OAuth clients can store a compatibility profile inferred from registration metadata and other strong OAuth-time signals
+  - grants inherit or carry that profile through authorization and refresh paths
+  - persisted state migration remains backward compatible for existing store files
+  How to verify it works:
+  Re-run `npm test -- --run src/oauthStore.spec.ts src/oauthCore.spec.ts` and show the new tests passing.
+  Run `npm run build` if the model changes affect emitted runtime code.
+
+- [x] Task 3: Add failing HTTP coverage proving `/token` and authenticated `/mcp` reuse the persisted profile
+  Test to write:
+  Extend `src/httpServer.spec.ts` so it fails unless:
+  - `/token` logs the persisted compatibility profile for a known OAuth client/grant even when request headers alone would have fallen back to `generic`
+  - authenticated `/mcp` requests can recover that stored profile from OAuth-authenticated identity rather than depending only on user-agent or `initialize`
+  - mismatched later hints do not silently override authenticated identity with a less safe branded guess
+  Code to implement:
+  No production code in this task. Only the failing end-to-end specs that pin the behavior we want across auth and MCP.
+  How to verify it works:
+  Run `npm test -- --run src/httpServer.spec.ts` and show the failures proving the HTTP layer still re-detects too much from per-request hints.
+
+- [x] Task 4: Implement HTTP resolution from authenticated OAuth identity and keep `initialize` as a hint
+  Test to write:
+  Reuse the failing coverage from Task 3.
+  Code to implement:
+  Update the HTTP/auth/profile resolution path so:
+  - `/token` prefers the persisted compatibility profile tied to the OAuth client/grant
+  - authenticated `/mcp` requests prefer the profile tied to the authenticated OAuth `clientId`
+  - `initialize.clientInfo` can confirm or refine behavior conservatively, but does not become the authentication source
+  - disagreement still falls back safely when necessary
+  How to verify it works:
+  Re-run `npm test -- --run src/httpServer.spec.ts src/oauthStore.spec.ts src/oauthCore.spec.ts src/clientProfiles.spec.ts`.
+  Confirm the relevant `/token` and `/mcp` profile-log assertions now pass without weakening existing generic-fallback behavior.
+
+- [x] Task 5: Verify end-to-end behavior against the reported incident shape
+  Test to write:
+  No new tests unless a gap appears during execution.
+  Code to implement:
+  Minimal cleanup only if needed after Tasks 1 through 4.
+  How to verify it works:
+  Run the focused suite:
+  `npm test -- --run src/oauthStore.spec.ts src/oauthCore.spec.ts src/httpServer.spec.ts src/clientProfiles.spec.ts`
+  Then run `npm run build`.
+  If deployment is in scope after approval, rebuild/restart the service and confirm the journal shows `/token` reusing the persisted profile rather than repeatedly logging `fallback:generic` for the same authenticated client.
+
+## Review Bar
+
+- Client classification is tied to authenticated OAuth identity, not just transient headers.
+- The bridge still treats profile as compatibility metadata, not authentication truth.
+- Weak or conflicting signals degrade to `generic` instead of over-fitting a branded client.
+- `/token` and authenticated `/mcp` stop re-guessing from scratch for the same OAuth client.
+
+Plan ready. Approve to proceed.
 
 ## Results
 
-- Spend-style helpers now treat only negative activity as spending and exclude `Credit Card Payments` categories from anomaly detection.
-- Cleanup and health metrics now exclude transfer transactions from uncategorized, unapproved, and uncleared backlog counts.
-- Income summaries now count only positive, non-transfer `Inflow: Ready to Assign` transactions as income.
-- Upcoming obligations now expand recurring schedules across the full horizon, exclude transfers, and separate outflow obligation counts from expected inflow counts.
-- Health-check `upcoming_30d_net` now uses the same expanded schedule model as the obligations tool.
-- Tool descriptions now explicitly explain timing/buffering semantics and income/obligation classification boundaries.
-- Category-group trend summaries now expose `scope.match_basis: "category_group_name"` so name-based matching is visible in the payload.
+- Added persisted OAuth client compatibility profiles and carried them through grant creation, authorization-code exchange, and refresh rotation.
+- Inferred a conservative compatibility profile at OAuth client registration time from stable client metadata such as redirect URIs and client name.
+- Updated `/token` profile detection to reuse the stored OAuth client profile when the request would otherwise fall back to `generic`.
+- Updated authenticated `/mcp` handling to recover the compatibility profile from the authenticated OAuth `clientId` so stateless follow-up requests do not have to re-identify themselves from scratch.
+- Preserved stronger request-level hints when they are explicit, so ChatGPT and Codex user-agent flows still log their original per-request detection reasons instead of being overwritten unnecessarily.
+
+## Verification
+
+- `npm test -- --run src/oauthStore.spec.ts src/oauthCore.spec.ts`
+- `npm test -- --run src/httpServer.spec.ts`
+- `npm test -- --run src/oauthStore.spec.ts src/oauthCore.spec.ts src/httpServer.spec.ts src/clientProfiles.spec.ts`
+- `npm run build`
+
+# PR 150 CI Fix Plan
+
+# Tool Logic Fix Plan
+
+## Goal
+
+Fix the tool-logic issues found in review:
+
+- normalize `"current"` month handling so tools either resolve it to a real month key or never feed it into date math directly
+- scope month-based cleanup and health queries to the requested month instead of "since month start"
+- stop projection-only collection requests from silently truncating to the default page size
+- make compact getter amount fields consistent with the rest of the MCP surface
+
+## Constraints And Notes
+
+- The current checkout is on `fix/cors-cf-utility-dedup`, not `main`.
+- The worktree is already dirty with unrelated local changes.
+- Per repo rules, I should not switch branches automatically in a way that could disturb this checkout. If you approve implementation here, I will keep changes minimal and work with the current tree unless you want me to isolate the work first.
+- The repo instructions also say not to modify files in a `tests/` directory unless explicitly asked to. The existing Vitest files are under `src/`, so targeted spec updates there are allowed.
+
+## Tasks
+
+- [x] Task 1: Add failing coverage for month default normalization and exact month scoping
+  Test to write:
+  Extend the focused finance/diagnostic specs in `src/financeSummaryTools.spec.ts`, `src/financeAdvancedTools.spec.ts`, and `src/financialDiagnostics.spec.ts` so they fail unless:
+  month-range tools accept omitted month inputs without crashing,
+  `"current"` is resolved before date math is applied,
+  and `ynab_get_financial_health_check` plus `ynab_get_budget_cleanup_summary` exclude transactions that fall after the requested month.
+  Code to implement:
+  No production code in this task. Only the red tests that pin the broken behavior discovered in review.
+  How to verify it works:
+  Run the smallest targeted Vitest command covering those specs and show the failures proving the current implementation mishandles `"current"` and over-counts later transactions.
+  Result:
+  Added focused red tests in `src/financeSummaryTools.spec.ts`, `src/financeAdvancedTools.spec.ts`, and `src/financialDiagnostics.spec.ts`.
+  Verified red with:
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
+  which failed on `"current"` month normalization and exact-month cleanup counts as expected.
+
+- [x] Task 2: Implement shared month normalization and true month-bound filtering
+  Test to write:
+  Reuse the failing specs from Task 1 as the red signal.
+  Code to implement:
+  Add a shared helper for resolving month inputs to concrete ISO month keys where needed, update month-range/date-math tools to use that normalized value, and constrain health/cleanup transaction counts to the requested month window instead of relying on a since-date API call alone.
+  How to verify it works:
+  Re-run the targeted Task 1 specs and show them passing. Then run the broader finance tool specs that cover month-based summaries to confirm the new helper does not regress existing behavior.
+  Result:
+  Added shared month normalization helpers in `src/tools/financeToolUtils.ts` and updated the month-sensitive summary and cleanup tools to use concrete month keys and exact month-range filtering.
+  Verified green with:
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts`
+
+- [x] Task 3: Add failing coverage for projection-only collection requests and amount-format consistency
+  Test to write:
+  Extend `src/planReadTools.spec.ts` and other relevant `src/*Tools.spec.ts` files so they fail unless:
+  list tools return the full collection when only `fields` or `includeIds` are provided without `limit`/`offset`,
+  and compact getters such as account/category/month-category return formatted decimal amounts consistent with the transaction and list tools.
+  Code to implement:
+  No production code in this task. Only the failing expectations needed to lock the intended behavior.
+  How to verify it works:
+  Run the targeted Vitest specs and show the failures caused by implicit pagination and raw milliunit outputs.
+  Result:
+  Added projection-only list tests in `src/planReadTools.spec.ts` and `src/additionalReadTools.spec.ts`, and tightened compact getter expectations so amount fields must be decimal strings.
+  Verified red with:
+  `npx vitest run src/planReadTools.spec.ts src/additionalReadTools.spec.ts`
+  which failed on implicit pagination metadata and raw milliunit outputs.
+
+- [x] Task 4: Implement collection-control and amount-format fixes
+  Test to write:
+  Reuse the red tests from Task 3.
+  Code to implement:
+  Refine the collection helper logic so pagination only occurs when pagination is actually requested, and update the compact getter tools to serialize amount fields using the same decimal formatting convention already used elsewhere.
+  How to verify it works:
+  Re-run the targeted Task 3 specs and show them passing. Then run the broader read/finance tool specs to confirm the response shapes remain stable.
+  Result:
+  Split collection controls into pagination vs projection behavior in `src/tools/collectionToolUtils.ts`, updated the list tools to support full-length projected responses without pagination metadata, and formatted compact getter amounts in the account/category/month-category tools.
+  Verified green with:
+  `npx vitest run src/planReadTools.spec.ts src/additionalReadTools.spec.ts`
+
+- [x] Task 5: Do final verification on the touched tool surface
+  Test to write:
+  No new tests in this task. Use the updated focused specs as the proof.
+  Code to implement:
+  No new production behavior unless verification exposes an additional issue tightly coupled to the approved fixes. If that happens, stop and re-plan before expanding scope.
+  How to verify it works:
+  Run at minimum:
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/planReadTools.spec.ts`
+  and, if the touched files justify it, `npm run typecheck`.
+  Add a short results section to this file before closing out.
+  Result:
+  Final verification passed with:
+  `npx vitest run src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/financialDiagnostics.spec.ts src/planReadTools.spec.ts src/additionalReadTools.spec.ts src/aiToolOptimization.spec.ts`
+  and
+  `npm run typecheck`
+
+## Results
+
+- `"current"` month defaults are now normalized before date math or transaction since-date queries run.
+- Month-scoped cleanup and health summaries now exclude later-month transactions instead of counting everything after the month start.
+- Projection-only list requests now return full projected collections without implicit `limit: 50` pagination metadata.
+- Compact account/category/month-category getters now serialize amount fields as decimal strings consistent with the rest of the read surface.
+
+## Review Bar
+
+- Omitted month inputs no longer break tools that advertise `"current"` support.
+- Month-scoped cleanup and health metrics are based only on transactions inside the requested month.
+- Projection-only collection requests do not silently paginate to 50 rows.
+- Compact getter amount fields use the same decimal-string convention as the other read tools.
+- Focused specs and verification give proof for each fix, not just implementation changes.
+
+Plan ready. Approve to proceed.
+
+## Failure Summary
+
+- PR: `https://github.com/mossipcams/ynab-mcp-bridge/pull/150`
+- Failing run:
+  - `validate (24.x)` -> `https://github.com/mossipcams/ynab-mcp-bridge/actions/runs/23445008099/job/68206178132`
+  - `validate (22.x)` was cancelled after the 24.x failure -> `https://github.com/mossipcams/ynab-mcp-bridge/actions/runs/23445008099/job/68206178088`
+- GitHub Actions failure snippet from the March 23, 2026 run shows four failed tests:
+  - `src/httpServer.spec.ts` chatgpt profile logging assertion
+  - `src/httpServer.spec.ts` codex profile logging assertion
+  - `src/oauthBroker.spec.ts` callback failure logging assertion
+  - `src/releasePlease.spec.ts` release metadata invariant
+- Local reproduction notes:
+  - The current checkout is not the PR head and already contains unrelated dirty changes, including local edits in some of the same files.
+  - A full local Node 24 run reproduces the `src/oauthBroker.spec.ts` and `src/releasePlease.spec.ts` failures.
+  - The two `src/httpServer.spec.ts` failures from GitHub did not reproduce locally on Node 24 against the current mixed checkout, so implementation must start from an isolated PR-head worktree to avoid chasing a false local state.
+
+## Constraints And Notes
+
+- The current branch is `fix/cors-cf-utility-dedup`, not `main`, and the worktree is dirty.
+- Per repo rules, implementation should happen in an isolated worktree or branch from the PR head so current local work is not disturbed.
+- If the isolated PR-head reproduction does not show the `httpServer` failures, we should not guess at a fix for them. We should fix the two reproducible failures first, rerun Node 24 validation, and then recheck PR status. If `httpServer` still fails remotely after that, stop and re-plan with the fresh failure proof.
+
+## Tasks
+
+- [x] Task 1: Isolate PR 150 head and capture the exact red test set on Node 24
+  Test to write:
+  No new test in this task. Use the existing failing specs as the red signal in the isolated PR-head checkout:
+  `src/httpServer.spec.ts`,
+  `src/oauthBroker.spec.ts`,
+  and `src/releasePlease.spec.ts`.
+  Code to implement:
+  Create an isolated worktree or branch from PR 150 head commit `9f1bea828b043f5573704587c78f17e73bc8cca8`, install dependencies there, and run the targeted Node 24 suite so we have a clean reproduction that is not polluted by the current checkout.
+  How to verify it works:
+  Run the targeted Node 24 Vitest command in the isolated checkout and record exactly which specs fail. If the failure set differs from the GitHub run in a way that changes the plan materially, stop and re-plan before editing code.
+  Result:
+  Verified in isolated worktree `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-pr150-ci` with
+  `npx -y node@24 ./node_modules/vitest/vitest.mjs --run src/httpServer.spec.ts src/oauthBroker.spec.ts src/releasePlease.spec.ts`.
+  The clean PR-head reproduction matches GitHub's March 23, 2026 failure set:
+  two failing assertions in `src/httpServer.spec.ts`, one failing assertion in `src/oauthBroker.spec.ts`, and one failing assertion in `src/releasePlease.spec.ts`.
+
+- [ ] Task 2: Restore structured shared logging for OAuth callback failures
+  Test to write:
+  Use the existing failing test `src/oauthBroker.spec.ts` -> `logs callback failures through the shared oauth logger` as the red test.
+  Code to implement:
+  Change the callback failure path in `src/oauthBroker.ts` to emit through the shared structured logger path instead of writing a raw `console.error` tuple, while preserving the current redacted error details and the request correlation fields.
+  How to verify it works:
+  Re-run `npx -y node@24 ./node_modules/vitest/vitest.mjs --run src/oauthBroker.spec.ts` and show the callback logging assertion passing. Then confirm the emitted entry still contains `scope: "oauth"`, `event: "callback.failed"`, `errorMessage`, `correlationId`, and `requestId`.
+
+- [ ] Task 3: Bring release metadata back in line with published tags
+  Test to write:
+  Use the existing failing test `src/releasePlease.spec.ts` -> `keeps release metadata ahead of published tags without rollback pins` as the red test.
+  Code to implement:
+  Update the release metadata files required by the invariant, likely `package.json`, `package-lock.json`, and `.release-please-manifest.json`, and update `CHANGELOG.md` if the chosen version bump or release baseline requires it.
+  How to verify it works:
+  Re-run `npx -y node@24 ./node_modules/vitest/vitest.mjs --run src/releasePlease.spec.ts` and show it passing. Confirm the checked-in package version and manifest are no longer behind the highest published `ynab-mcp-bridge-v*` tag.
+
+- [ ] Task 4: Re-run the PR validation slice and only fix `httpServer` if the isolated PR head still proves it is broken
+  Test to write:
+  No new test unless the isolated Node 24 reproduction still fails in `src/httpServer.spec.ts`. If it does, use those existing failing assertions as the red test and add only the smallest missing coverage needed to pin the real regression.
+  Code to implement:
+  Re-run the full Node 24 suite, plus the targeted `httpServer` assertions, in the isolated checkout after Tasks 2 and 3. If `httpServer` still fails, implement the minimal fix from the reproduction. If it no longer fails, do not make speculative changes there.
+  How to verify it works:
+  Run `npx -y node@24 ./node_modules/vitest/vitest.mjs --run`.
+  If that passes, re-check PR 150 with `gh pr checks 150` and summarize whether the branch is ready for a rerun or whether any external/non-reproducible failure remains.
+
+## Review Bar
+
+- The current dirty checkout stays untouched by implementation work.
+- OAuth callback failures are emitted through the shared structured logger with correlation fields intact.
+- Release metadata is no longer behind the highest published release tag.
+- We only change `httpServer` behavior if we can prove the failure from an isolated PR-head reproduction on Node 24.
+
+Plan ready. Approve to proceed.
 
 # Remove 70/20/10 Tool Plan
 
@@ -1181,12 +1315,13 @@ Remove the `ynab_get_70_20_10_summary` tool from the server registry so it is no
 
 ## Constraints And Notes
 
-- Work is isolated in `/Users/matt/Desktop/Projects/ynab-mcp-bridge-remove-70-20-10` on branch `fix/remove-70-20-10-tool` from `origin/main`.
-- The original checkout remains untouched because it had unrelated local changes on a non-`main` branch.
+- The current checkout is on `fix/cors-cf-utility-dedup`, not `main`.
+- The worktree is dirty with unrelated changes already present.
+- Per repo rules, implementation should not switch branches automatically in a way that could disturb this checkout. If you approve implementation, I will pause once more before code changes if we need to isolate the work in a fresh branch or worktree from `main`.
 
 ## Tasks
 
-- [x] Task 1: Add a failing registry test that proves the tool is still exposed today
+- [ ] Task 1: Add a failing registry test that proves the tool is still exposed today
   Test to write:
   Update `src/serverFactory.spec.ts` so it fails unless the registered tool count and tool name lists exclude `ynab_get_70_20_10_summary`, and so the explicit registration assertion no longer expects the `Get 70/20/10 Summary` tool metadata.
   Code to implement:
@@ -1194,7 +1329,7 @@ Remove the `ynab_get_70_20_10_summary` tool from the server registry so it is no
   How to verify it works:
   Run `npm test -- --run src/serverFactory.spec.ts` and show the failure caused by the tool still being registered.
 
-- [x] Task 2: Remove the tool from the server registry and implementation surface
+- [ ] Task 2: Remove the tool from the server registry and implementation surface
   Test to write:
   Reuse the failing expectations from Task 1 as the red test.
   Code to implement:
@@ -1202,29 +1337,21 @@ Remove the `ynab_get_70_20_10_summary` tool from the server registry so it is no
   How to verify it works:
   Re-run `npm test -- --run src/serverFactory.spec.ts` and show it passing. Then run `npm run typecheck` to confirm there are no dangling imports or type errors from the removal.
 
-- [x] Task 3: Remove direct tool coverage that no longer applies and verify behavior stays clean
+- [ ] Task 3: Remove direct tool coverage that no longer applies and verify behavior stays clean
   Test to write:
-  Update `src/financeAdvancedTools.spec.ts` and `src/pureV4Refactor.spec.ts` by removing expectations that require the `70/20/10` tool.
+  Update `src/financeAdvancedTools.spec.ts` by removing the `70/20/10` tool case so the suite reflects the supported advanced tools only.
   Code to implement:
-  Delete the obsolete spec block and file-list entry, plus any now-unused imports.
+  Delete the obsolete spec block and clean up any now-unused imports in that spec file.
   How to verify it works:
-  Run `npm test -- --run src/financeAdvancedTools.spec.ts src/pureV4Refactor.spec.ts` and then `npm run build` if the targeted tests and typecheck pass, to confirm the repo still compiles without the removed tool.
+  Run `npm test -- --run src/financeAdvancedTools.spec.ts` and then `npm run build` if the targeted tests and typecheck pass, to confirm the repo still compiles without the removed tool.
 
 ## Review Bar
 
 - The tool name is absent from the runtime registry.
-- No source file imports or references the removed tool in `src/`.
+- No source file imports or references the removed tool.
 - Targeted tests, typecheck, and build provide proof that the removal is complete.
 
-## Results
-
-- Removed the `ynab_get_70_20_10_summary` registry entry and deleted the corresponding source tool module.
-- Removed obsolete spec coverage and tool-file inventory expectations that referenced the deleted tool.
-- Verified with:
-  `npm test -- --run src/serverFactory.spec.ts`
-  `npm run typecheck`
-  `npm test -- --run src/financeAdvancedTools.spec.ts src/pureV4Refactor.spec.ts`
-  `npm run build`
+Plan ready. Approve to proceed.
 
 # Type Discipline Implementation Plan
 
@@ -1243,7 +1370,7 @@ This first slice will enforce the discipline in config and shared/public types, 
 
 ## Tasks
 
-- [x] Task 1: Add quality guardrail tests for strict config and lint policy
+- [ ] Task 1: Add quality guardrail tests for strict config and lint policy
   Test to write:
   Add or extend a repo-quality spec in `src/codeQuality.spec.ts` that fails unless:
   `package.json` declares TypeScript 5.9,
@@ -1255,7 +1382,7 @@ This first slice will enforce the discipline in config and shared/public types, 
   How to verify it works:
   Run the new targeted Vitest spec and show it failing before config changes. Confirm the failure points at the missing flags/rules rather than unrelated issues.
 
-- [x] Task 2: Tighten TypeScript compiler configuration to the agreed strict baseline
+- [ ] Task 2: Tighten TypeScript compiler configuration to the agreed strict baseline
   Test to write:
   Use the failing guardrail test from Task 1 as the red test for config requirements.
   Code to implement:
@@ -1267,7 +1394,7 @@ This first slice will enforce the discipline in config and shared/public types, 
   How to verify it works:
   Re-run the targeted guardrail spec to green, then run `npm run typecheck` to expose any real breakages introduced by the stricter config.
 
-- [x] Task 3: Make ESLint policy explicit for type assertions and unsafe operations
+- [ ] Task 3: Make ESLint policy explicit for type assertions and unsafe operations
   Test to write:
   Extend the same quality spec so it fails unless `eslint.config.mjs` explicitly sets `@typescript-eslint/consistent-type-assertions` to `"never"` and preserves the type-aware unsafe-operation rules.
   Code to implement:
@@ -1276,7 +1403,7 @@ This first slice will enforce the discipline in config and shared/public types, 
   How to verify it works:
   Run the targeted spec again, then run `npm run lint`. If lint surfaces new unsafe patterns, capture them and stop to re-plan if the fix set expands beyond the planned slice.
 
-- [x] Task 4: Introduce shared branded-type primitives and readonly-first helper types
+- [ ] Task 4: Introduce shared branded-type primitives and readonly-first helper types
   Test to write:
   Add a compile-time contract file in `src/` that uses `// @ts-expect-error` and assignability checks to prove:
   plain `string` is not assignable to branded IDs,
@@ -1292,7 +1419,7 @@ This first slice will enforce the discipline in config and shared/public types, 
   How to verify it works:
   Run `npm run typecheck` and show the contract file passing. Confirm no emitted runtime code or tooling additions are needed.
 
-- [x] Task 5: Migrate the highest-value public/domain boundaries to the new types
+- [ ] Task 5: Migrate the highest-value public/domain boundaries to the new types
   Test to write:
   Add or extend targeted specs around the most important entry points, likely config resolution and one or two representative tools/helpers, so they fail when mutable arrays or raw strings are still accepted where branded/readonly types should be used.
   Prefer adding specs under `src/*.spec.ts` rather than any `tests/` directory.
@@ -1305,7 +1432,7 @@ This first slice will enforce the discipline in config and shared/public types, 
   How to verify it works:
   Run the targeted specs for the migrated modules, then `npm run typecheck` to prove the branded/readonly constraints hold across real call sites.
 
-- [~] Task 6: Clean up strictness fallout and complete full verification
+- [ ] Task 6: Clean up strictness fallout and complete full verification
   Test to write:
   Use the existing failing tests/lint/typecheck output as the red signal for any fallout caused by Tasks 2 through 5.
   Do not weaken assertions; fix implementation and types instead.
@@ -1327,812 +1454,227 @@ This first slice will enforce the discipline in config and shared/public types, 
 - Do not modify files under a `tests/` directory.
 - If stricter TS flags create repo-wide churn beyond the planned slice, stop after the first failing proof, summarize the expansion, and re-plan before continuing.
 
+---
+
+# PR 145 CI Fix Plan
+
+## Failure Summary
+
+- PR: `https://github.com/mossipcams/ynab-mcp-bridge/pull/145`
+- Failing checks:
+  - `validate (22.x)` -> `https://github.com/mossipcams/ynab-mcp-bridge/actions/runs/23347102744/job/67915348397`
+  - `validate (24.x)` -> `https://github.com/mossipcams/ynab-mcp-bridge/actions/runs/23347102744/job/67915348487`
+- Shared failure:
+  - Tests and dependency rules pass.
+  - `npm run lint` aborts in GitHub Actions with `FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory`.
+- Local safety note:
+  - The current checkout is on `fix/cors-cf-utility-dedup` with unrelated uncommitted changes, while PR 145 head is `chore/type-discipline`.
+  - Implementation should happen in an isolated branch or worktree so current local work is not disturbed.
+
+## Tasks
+
+- [ ] Task 1: Isolate the PR branch and add a failing guardrail for the lint strategy
+  Test to write:
+  Extend `src/codeQuality.spec.ts` so it fails unless the repo encodes the chosen CI-safe lint strategy while preserving type-aware linting. The guardrail should verify the exact `lint` script and, if needed, the CI workflow lint step.
+  Code to implement:
+  Create an isolated worktree or branch for PR 145, then update the guardrail spec only. Do not change production config in this task.
+  How to verify it works:
+  Run the targeted spec and show it failing for the current PR state before any implementation changes.
+
+- [ ] Task 2: Implement the minimal lint-memory fix without weakening coverage
+  Test to write:
+  Use the failing guardrail from Task 1 as the red test.
+  Code to implement:
+  Update the lint configuration with the smallest change that avoids the GitHub Actions OOM while keeping type-aware linting in place. Prefer reducing lint workload or TS program overhead over simply masking the problem; only use a workflow-level memory bump if the cleaner fix is insufficient.
+  How to verify it works:
+  Re-run the targeted spec to green, then run `npm run lint`. When useful, also run a constrained-memory lint invocation locally to approximate the CI failure mode.
+
+- [ ] Task 3: Prove the CI path still validates the repo end to end
+  Test to write:
+  Reuse or extend `src/codeQuality.spec.ts` so the workflow still runs the intended validation order and invokes the updated lint command/path.
+  Code to implement:
+  Apply any small workflow or config follow-up needed for the CI path, keeping the change reviewable and focused on the lint failure.
+  How to verify it works:
+  Run `npm run test -- --run src/codeQuality.spec.ts`, `npm run lint`, and `npm run typecheck`. If those pass, re-check PR 145 status with `gh pr checks 145` and summarize whether the repo is ready for the next CI rerun.
+
+## Review Bar
+
+- Before closing the fix, sanity-check whether the final change meets a staff-engineer review bar:
+  - root cause addressed rather than hidden,
+  - current local worktree left untouched,
+  - CI guardrails updated so the same class of failure is less likely to recur.
+
+---
+
+# Correlation IDs And MCP Dispatch Visibility Plan
+
+## Goal
+
+Add end-to-end request correlation and bridge-side dispatch telemetry so we can distinguish:
+
+- request reached `/mcp`
+- MCP transport handoff occurred
+- a `tools/call` was requested for a specific tool
+- tool execution started, succeeded, or failed
+- OAuth refresh activity belongs to the same user-visible incident when applicable
+
+This is the bridge-scoped slice of the broader link-readiness and catalog-recovery design in `tasks/link-readiness-correlation-design.md`.
+
+## Scope
+
+- In scope:
+  - structured correlation IDs for bridge ingress, MCP handoff, tool execution, and OAuth logs
+  - targeted tests proving those fields are present and stable through a request
+  - safe propagation into existing log events without leaking secrets
+- Out of scope for this repo:
+  - platform-side link catalog caching
+  - forced catalog rehydrate and retry on `Resource not found`
+  - link readiness state machine outside the bridge boundary
+
+## Tasks
+
+- [x] Task 1: Add failing logging specs for correlation fields on `/mcp` and `/token`
+  Test to write:
+  Extend `src/httpServer.spec.ts` so it fails unless `request.received`, `transport.handoff`, and `token.refresh.succeeded` style logs include a generated or propagated `correlationId` and a per-request `requestId`.
+  Code to implement:
+  No production code in this task. Only the focused spec expectations and any small test helpers needed in `src/httpServer.spec.ts`.
+  How to verify it works:
+  Run `npm test -- --run src/httpServer.spec.ts` and show the failure proving the correlation fields are currently missing.
+
+- [x] Task 2: Implement bridge ingress correlation and request IDs
+  Test to write:
+  Reuse the failing assertions from Task 1 as the red test for ingress logging.
+  Code to implement:
+  Update `src/httpServer.ts` so every incoming request gets:
+  - a `requestId`
+  - a validated `correlationId` from an inbound header when present or a generated fallback when absent
+  Include both fields in the existing HTTP and profile log events and expose the effective correlation ID on the response when appropriate.
+  How to verify it works:
+  Re-run `npm test -- --run src/httpServer.spec.ts` and show the updated logging assertions passing for both `/mcp` and `/token` requests.
+
+- [x] Task 3: Add tool lifecycle logging with correlation context
+  Test to write:
+  Add or extend a focused spec, likely in `src/serverFactory.spec.ts` or `src/httpServer.spec.ts`, so it fails unless a `tools/call` request emits `tool.call.started` and `tool.call.succeeded` with `correlationId`, `requestId`, and `toolName`, and emits `tool.call.failed` on execution errors.
+  Code to implement:
+  Update the server registration wrapper in `src/server.ts` to log tool lifecycle events around each tool execution while preserving the existing result behavior and keeping secrets out of logs.
+  How to verify it works:
+  Run the smallest targeted spec covering the new lifecycle events, then run `npm test -- --run src/httpServer.spec.ts src/serverFactory.spec.ts` to confirm the bridge logs now distinguish dispatch from execution.
+
+- [x] Task 4: Correlate OAuth refresh logs to incident flows
+  Test to write:
+  Extend the existing refresh success and failure coverage in `src/httpServer.spec.ts` so it fails unless `token.refresh.succeeded` and `token.refresh.failed` include the active `correlationId` and `requestId`.
+  Code to implement:
+  Update the OAuth logging path in `src/oauthBroker.ts` and any request-context plumbing needed so refresh logs inherit the current correlation context when the refresh is request-driven.
+  How to verify it works:
+  Re-run the focused refresh-related specs in `src/httpServer.spec.ts` and show both success and failure assertions passing with correlation-aware fields.
+
+- [x] Task 5: Add a dispatch-gap signal for incidents that stop before tool execution
+  Test to write:
+  Add a focused spec proving the bridge logs enough information to tell whether a request stopped before tool execution, for example by asserting a distinct log event or explicit field when a request is handed to transport but no `tool.call.started` follows.
+  Code to implement:
+  Add the smallest bridge-side signal that closes the current observability gap without changing request behavior, likely in `src/httpServer.ts`.
+  How to verify it works:
+  Run the targeted spec and then `npm test -- --run src/httpServer.spec.ts` to confirm we can now separate transport receipt from tool execution absence.
+
+## Review Bar
+
+- Every `/mcp` and `/token` log path includes `correlationId` and `requestId`.
+- A single `tools/call` can be traced from ingress to tool completion in logs.
+- OAuth refresh logs can be tied back to the same incident flow when request-driven.
+- No secrets or tokens are added to logs.
+- The resulting telemetry is strong enough to tell whether a failure happened before MCP execution, during dispatch, or inside a tool.
+
+Plan ready. Approve to proceed.
+
 ## Results
 
-- Added guardrail coverage in `src/codeQuality.spec.ts` for TS 5.9, strict compiler flags, explicit `consistent-type-assertions`, and effective `no-unsafe-*` lint rules.
-- Tightened `tsconfig.json` with `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noPropertyAccessFromIndexSignature`, and `noImplicitOverride`.
-- Made ESLint explicitly forbid type assertions in main TS files while keeping spec-file overrides.
-- Added shared zero-runtime branded and readonly helper types in `src/typeUtils.ts`, branded YNAB IDs in `src/ynabTypes.ts`, and compile-time contracts in `src/typeUtils.contract.ts`.
-- Migrated high-value boundaries toward readonly/branded usage across config/runtime context, client profile types, plan resolution, and several finance/helper modules.
-- Reworked `src/server.ts` into an explicit registry that preserves source-level clarity without whole-module registry indirection.
-- Fixed `src/ynabApi.ts` to match the current YNAB SDK `_configuration` shape and keep runtime config normalization branded internally.
+- Implemented request-scoped correlation context in `src/requestContext.ts` and propagated `correlationId` plus `requestId` through HTTP ingress, profile detection, and OAuth request-driven logs.
+- Added `tool.call.started`, `tool.call.succeeded`, and `tool.call.failed` telemetry in `src/server.ts` with request correlation and `toolName`.
+- Added `tool.dispatch.absent` in `src/httpServer.ts` so incidents that reach MCP transport but never start a wrapped tool are visible in logs.
+- Kept log payloads free of secrets and token values while extending existing structured and raw diagnostic events.
 
 ## Verification
 
-- Passed: `npm run test -- --run src/codeQuality.spec.ts`
-- Passed: `npm run test -- --run src/ynabApi.spec.ts src/config.spec.ts src/serverFactory.spec.ts`
-- Passed: `npm run test -- --run src/planReadTools.spec.ts`
-- Passed: `npm run test -- --run src/httpServer.spec.ts`
-- Attempted: focused ESLint, `npm run build`, and broader TypeScript verification with increased heap.
-- Remaining caveat: full `eslint`/`tsc`/`build` runs in this environment remained extremely slow and previously hit Node heap limits before producing a final clean exit, so full static verification is not yet proven locally.
-## Reliability Suite Expansion Plan
+- `npm test -- --run src/httpServer.spec.ts`
+- `npm test -- --run src/serverFactory.spec.ts`
+- `npm test -- --run src/httpServer.spec.ts src/serverFactory.spec.ts`
+- `npm run typecheck`
 
-### Goal
-
-Upgrade the new reliability testing work from a small local smoke probe into a more thorough reliability suite that can:
-
-- validate a quick smoke run locally
-- establish repeatable baseline performance
-- exercise higher load and short spikes
-- run longer soak-style checks for degradation over time
-- enforce pass/fail thresholds using latency percentiles and error-rate budgets
-- emit machine-readable results for regression comparisons
-
-### Research Notes
-
-- Google SRE says load tests are invaluable for both reliability and capacity planning and are required for most launches because overload behavior is hard to predict from first principles.
-  Source: https://sre.google/sre-book/reliable-product-launches/
-- Grafana k6 recommends always creating smoke tests first, then average-load tests for baseline comparisons, and separately running stress, spike, and soak tests according to goal.
-  Sources:
-  https://grafana.com/docs/k6/latest/testing-guides/automated-performance-testing/
-  https://grafana.com/load-testing/types-of-load-testing/
-- Grafana k6 thresholds are the pass/fail criteria, should codify SLO-style goals, and can drive non-zero exits and early aborts.
-  Source: https://grafana.com/docs/k6/latest/using-k6/thresholds/
-- Microsoft guidance recommends defining measurable thresholds, using percentiles such as P95 and P99 instead of averages alone, creating realistic baseline traffic, and repeating baseline validation after changes.
-  Sources:
-  https://learn.microsoft.com/en-us/azure/well-architected/performance-efficiency/performance-targets
-  https://learn.microsoft.com/en-us/azure/architecture/guide/testing/mission-critical-deployment-testing
-- Microsoft load-testing guidance also calls out warmup periods, multiple concurrency levels, and realistic traffic/query mixes.
-  Source: https://learn.microsoft.com/en-us/azure/databricks/vector-search/vector-search-endpoint-load-test
-
-### Constraints And Notes
-
-- Work is isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-reliability-script` on branch `feat/reliability-script` from `origin/main`.
-- The current worktree already contains the new lightweight reliability probe implementation and its tests. The expansion should build on that work rather than replace it blindly.
-- Repo rules require TDD for code changes, one task at a time, with a stop after each task.
-- The existing `npm run reliability:http` command is a good smoke-level probe, but it is not sufficient for stress, spike, or soak workloads by itself.
-- A homegrown Node loop is acceptable for smoke checks and local regression probes, but “test a lot” is better served by a dedicated load-testing engine and explicit thresholds.
-- The safest architecture is:
-  - keep the current Node-based command as a fast smoke probe
-  - add a dedicated load-test suite for heavier profiles instead of trying to stretch the smoke runner into a full load generator
-
-### Assumptions
-
-- The best next step is to add a k6-based HTTP reliability suite alongside the existing smoke probe, not to replace the smoke probe.
-- The suite should support at least these profiles:
-  - `smoke`
-  - `baseline`
-  - `stress`
-  - `spike`
-  - `soak`
-- The first implementation can target authless local HTTP or a provided local/staging URL.
-- Thresholds should be explicit and profile-specific, including:
-  - max error rate
-  - p95 latency
-  - p99 latency
-  - optional abort-on-fail for heavier profiles
-- The scenario mix should exercise at least:
-  - `initialize`
-  - `tools/list`
-  - a lightweight tool call such as `ynab_get_mcp_version`
-- The suite should emit both a concise console summary and a machine-readable artifact for regression tracking.
-
-### Tasks
-
-- [ ] Task 1: Add failing coverage for reliability profile definitions and threshold contracts
-  Test to write:
-  Add focused red tests under `src/` proving a new reliability profile module defines distinct `smoke`, `baseline`, `stress`, `spike`, and `soak` profiles with:
-  explicit duration or iteration settings,
-  explicit concurrency/load settings,
-  and explicit pass/fail threshold targets for error rate and percentile latency.
-  The tests should fail unless the profile metadata is concrete and machine-readable rather than implied by prose.
-  Code to implement:
-  No production code in this task. Only failing tests that pin the profile and threshold contract.
-  How to verify it works:
-  Run a targeted Vitest command for the new profile spec and show the failures proving the richer profile model does not exist yet.
-
-- [ ] Task 2: Implement reliability profile and threshold configuration
-  Test to write:
-  Reuse the red tests from Task 1.
-  Code to implement:
-  Add a TypeScript module that defines the reliability profiles, threshold schema, and parsing helpers for selecting a profile from CLI inputs.
-  Keep the current smoke runner compatible by mapping it to the new `smoke` profile.
-  How to verify it works:
-  Re-run the targeted Vitest command and show the tests turning green.
-
-- [ ] Task 3: Add failing coverage for machine-readable summaries and regression-friendly output
-  Test to write:
-  Extend the reliability specs so they fail unless the suite can emit:
-  per-profile summary metadata,
-  attempts/successes/failures,
-  p50/p95/p99 latency,
-  threshold pass/fail states,
-  and structured failure samples grouped by operation.
-  Include assertions for a JSON artifact format suitable for CI storage and later baseline comparison.
-  Code to implement:
-  No production code in this task. Only failing tests for the output contract.
-  How to verify it works:
-  Run the targeted Vitest command and show the failures proving the richer reporting contract does not exist yet.
-
-- [ ] Task 4: Implement structured reporting and artifact output
-  Test to write:
-  Reuse the red tests from Task 3.
-  Code to implement:
-  Extend the current summary code so it can emit:
-  human-readable console output for local runs,
-  JSON result files for CI or manual diffing,
-  and explicit threshold evaluation results per profile.
-  Keep the local smoke path concise while making deeper results machine-readable.
-  How to verify it works:
-  Re-run the targeted Vitest command and show the tests passing.
-  Then run the local smoke command and confirm both console and JSON outputs work.
-
-- [ ] Task 5: Add failing coverage for a dedicated load-test suite entrypoint
-  Test to write:
-  Add a red spec that fails unless the repo exposes a dedicated load-test suite interface with:
-  profile selection,
-  target URL selection,
-  optional warmup,
-  and explicit exit behavior based on thresholds.
-  The tests should pin the config handoff and command naming, not the internals of the external load generator.
-  Code to implement:
-  No production code in this task. Only failing tests that define the load-suite entrypoint contract.
-  How to verify it works:
-  Run the targeted Vitest command and show the failure proving the dedicated load-test suite does not exist yet.
-
-- [ ] Task 6: Implement a dedicated heavier-weight load suite
-  Test to write:
-  Reuse the failing specs from Task 5.
-  Code to implement:
-  Add a dedicated load-testing suite using a standard engine such as k6 for the heavier `baseline`, `stress`, `spike`, and `soak` profiles.
-  The suite should:
-  reuse the same operation mix,
-  encode thresholds as pass/fail criteria,
-  support warmup where appropriate,
-  and target either a started local server or a provided URL.
-  Keep the existing Node command as the fast smoke test and add separate npm commands or profile flags for the heavier suite.
-  How to verify it works:
-  Re-run the targeted tests and show them passing.
-  Then run the smoke profile and one heavier profile with intentionally small local settings as the smallest meaningful proof.
-
-- [ ] Task 7: Add failing coverage for baseline and comparison workflows
-  Test to write:
-  Extend the reliability specs so they fail unless a baseline comparison flow can:
-  load a prior JSON artifact,
-  compare key metrics such as error rate, p95, and p99,
-  and fail when regression exceeds configured tolerances.
-  Code to implement:
-  No production code in this task. Only failing tests for baseline comparison semantics.
-  How to verify it works:
-  Run the targeted Vitest command and show the failure proving regression comparison is not implemented yet.
-
-- [ ] Task 8: Implement baseline comparison and document best-practice workflows
-  Test to write:
-  Reuse the failing specs from Task 7.
-  Code to implement:
-  Add support for comparing a new run with a stored baseline artifact and surfacing regressions clearly in console and JSON outputs.
-  Document recommended usage in the README, including:
-  smoke on local changes,
-  baseline on a stable environment,
-  stress/spike before high-risk releases,
-  and soak on a scheduled cadence.
-  How to verify it works:
-  Re-run the targeted tests and show them passing.
-  Then run typecheck and the relevant local reliability commands.
-
-### Review Bar
-
-- The quick smoke command remains simple and local-friendly.
-- Heavier profiles use explicit, named workloads instead of ad hoc “run more requests” knobs.
-- Pass/fail logic is based on error rate and percentile thresholds, not averages alone.
-- The suite produces machine-readable artifacts that enable later baseline comparison.
-- The docs make it clear when to use smoke, baseline, stress, spike, and soak profiles.
-
-## Reliability Edge-Case Plan
-
-### Goal
-
-Add focused edge-case coverage to the new reliability suite so it is resilient around degenerate inputs, threshold boundaries, artifact compatibility, and dry-run/CLI failure handling.
-
-### Constraints And Notes
-
-- Work is isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-reliability-script` on branch `feat/reliability-script` from `origin/main`.
-- Repo rules require TDD for code changes, one task at a time, with a stop after the plan and approval before implementation.
-- The existing reliability specs cover the main happy paths and a few failing paths, but not many boundary conditions.
-- The repo rules say not to modify files in a `tests/` directory unless explicitly asked to. The relevant specs live under `src/`, so targeted spec additions there are allowed.
-
-### Assumptions
-
-- The highest-value edge cases are:
-  - zero-result summary behavior
-  - threshold equality boundaries
-  - repeated failure grouping and default error messages
-  - invalid or partially missing artifact/baseline inputs
-  - unsupported profile and missing argument handling
-  - dry-run/load-suite behavior when output paths or external runner responses are unusual
-- We can add these without broadening the feature set further.
-
-### Tasks
-
-- [ ] Task 1: Add failing coverage for runner and artifact edge cases
-  Test to write:
-  Extend `src/reliabilityRunner.spec.ts` and `src/reliabilityArtifact.spec.ts` with red cases that prove:
-  an empty run produces zeroed metrics without throwing,
-  threshold equality counts as pass rather than fail,
-  repeated failures on one operation are grouped with unique sample messages,
-  missing `errorMessage` values fall back to the default text,
-  and baseline comparison ignores non-regressing metrics even when other metrics regress.
-  Code to implement:
-  No production code in this task. Only failing specs that pin the edge-case contract for summaries and artifacts.
-  How to verify it works:
-  Run `npx vitest run src/reliabilityRunner.spec.ts src/reliabilityArtifact.spec.ts` and show the failures proving these edge behaviors are not fully pinned yet.
-
-- [ ] Task 2: Implement runner and artifact edge-case handling
-  Test to write:
-  Reuse the failing specs from Task 1.
-  Code to implement:
-  Tighten the summary and artifact code only where needed so the new edge cases pass without weakening any existing assertions.
-  Keep the changes minimal and avoid changing the public shape unless a spec explicitly requires it.
-  How to verify it works:
-  Re-run `npx vitest run src/reliabilityRunner.spec.ts src/reliabilityArtifact.spec.ts` and show the tests turning green.
-
-- [ ] Task 3: Add failing coverage for HTTP CLI and load-suite edge cases
-  Test to write:
-  Extend `src/reliabilityHttp.spec.ts`, `src/reliabilityProfiles.spec.ts`, and `src/reliabilityLoadSuite.spec.ts` with red cases that prove:
-  unsupported profile names fail clearly,
-  invalid numeric flags are rejected,
-  baseline artifact reads fail with actionable errors,
-  smoke JSON artifact writing behaves correctly when there are no failures,
-  load-suite dry run rejects unsupported `smoke` profile usage,
-  and non-zero external runner exits still preserve deterministic CLI behavior.
-  Code to implement:
-  No production code in this task. Only failing specs that define the CLI and entrypoint edge cases.
-  How to verify it works:
-  Run `npx vitest run src/reliabilityHttp.spec.ts src/reliabilityProfiles.spec.ts src/reliabilityLoadSuite.spec.ts` and show the failures proving the edge cases are not fully covered yet.
-
-- [ ] Task 4: Implement HTTP CLI and load-suite edge-case handling
-  Test to write:
-  Reuse the failing specs from Task 3.
-  Code to implement:
-  Tighten argument parsing, baseline artifact handling, and load-suite guardrails so the red cases pass.
-  Keep the smoke path concise and preserve the current command behavior unless the new spec requires a clearer error path.
-  How to verify it works:
-  Re-run `npx vitest run src/reliabilityHttp.spec.ts src/reliabilityProfiles.spec.ts src/reliabilityLoadSuite.spec.ts` and show the tests passing.
-
-- [ ] Task 5: Final verification of the expanded reliability edge-case coverage
-  Test to write:
-  No new tests in this task. Use the approved red/green specs as proof.
-  Code to implement:
-  No new production behavior unless verification exposes a tightly related issue. If it does, stop and re-plan before expanding scope.
-  How to verify it works:
-  Run:
-  `npx vitest run src/reliabilityRunner.spec.ts src/reliabilityHttp.spec.ts src/reliabilityProfiles.spec.ts src/reliabilityArtifact.spec.ts src/reliabilityLoadSuite.spec.ts`
-  and
-  `npm run typecheck:all`
-  Then run the local smoke command plus the load-suite dry run again as the smallest meaningful end-to-end proof.
-
-### Review Bar
-
-- Degenerate and boundary-case inputs do not crash the reliability suite.
-- CLI errors are explicit and deterministic.
-- Failure grouping and artifact output remain stable under repeated or partially missing failure data.
-- Baseline comparison remains strict about regressions without inventing false positives.
-
-## K6 Runtime Compatibility Fix Plan
-
-- [ ] Task 1: Add failing coverage for real k6 scenario compatibility
-  Test to write:
-  Extend `src/reliabilityLoadSuite.spec.ts` with a red assertion that fails unless the generated `ramping-vus` script excludes arrival-rate-only fields such as `preAllocatedVUs` and `maxVUs`.
-  Code to implement:
-  No production code in this task. Only the failing spec that captures the real runtime incompatibility exposed by `k6 v1.6.1`.
-  How to verify it works:
-  Run `npx vitest run src/reliabilityLoadSuite.spec.ts` and show the failure.
-
-- [ ] Task 2: Implement the k6 scenario fix
-  Test to write:
-  Reuse the red spec from Task 1.
-  Code to implement:
-  Update `src/reliabilityLoadSuite.ts` so the generated `ramping-vus` scenario uses only fields supported by that executor while preserving the warmup and steady-state stages.
-  How to verify it works:
-  Re-run `npx vitest run src/reliabilityLoadSuite.spec.ts` and show it passing.
-
-- [ ] Task 3: Re-run the real baseline load profile
-  Test to write:
-  No new automated tests in this task. Use the real `k6` execution as the proof.
-  Code to implement:
-  No new code unless the live run exposes another scoped compatibility bug. If it does, stop and re-plan before broadening the change.
-  How to verify it works:
-  Start the local HTTP bridge, run:
-  `npm run reliability:load -- --profile baseline --url http://127.0.0.1:3000/mcp --json-out artifacts/reliability/baseline-live.json`
-  and capture the pass/fail result plus the exported artifact path.
-
-## MCP Session Reuse Plan
-
-### Goal
-
-Stop rebuilding the MCP server and transport on every `/mcp` request so ChatGPT can reuse a server-side session instead of showing a full reconnect-style "Connecting to app" experience for each tool call.
-
-### Constraints And Notes
-
-- The current HTTP path in `src/httpServer.ts` always creates a fresh `createServer(config)` plus `StreamableHTTPServerTransport` for every request and only validates `Mcp-Session-Id`; it does not reuse it.
-- OAuth should remain token-based and request-authenticated. The goal is not to skip bearer verification, but to reuse the MCP transport/session after auth succeeds.
-- The MCP SDK already has streamable HTTP transport support, so the cleanest change is likely to add a small session registry around the existing transport rather than inventing a parallel protocol path.
-- ChatGPT and other clients may omit or vary session headers in discovery/auth flows, so the session-reuse behavior should be scoped to `/mcp` POST handling only.
-
-### Updated Design Note
-
-- The original plan assumed we needed to build session reuse entirely ourselves.
-- During implementation prep, I verified the MCP SDK's `StreamableHTTPServerTransport` already supports stateful sessions when `sessionIdGenerator` is set.
-- That means the cleaner first pass is to let the SDK issue and validate `Mcp-Session-Id` values, then add bounded lifecycle management around those managed transports on our side.
-
-### Assumptions
-
-- The server should switch from stateless transport creation to SDK-backed stateful sessions by providing a `sessionIdGenerator`.
-- Clients like ChatGPT should then receive `Mcp-Session-Id` on initialize and reuse it on later `/mcp` requests.
-- A bounded in-memory registry is still useful for idle expiry and shutdown cleanup, but it should wrap the SDK session behavior instead of replacing it.
-- Malformed multi-value session headers should still be rejected, and bearer auth must still run before the MCP request is handed off.
-
-### Tasks
-
-- [x] Task 1: Add failing coverage for SDK-backed stateful MCP sessions
-  Test to write:
-  Extend `src/httpServer.spec.ts` with red cases proving that:
-  initialize returns an `Mcp-Session-Id`,
-  a follow-up `/mcp` request with that session id succeeds without creating a fresh transport,
-  and requests with unknown session ids are rejected according to the SDK stateful transport contract.
-  Code to implement:
-  No production code in this task. Only the failing specs that pin the intended reuse and fallback contract.
-  How to verify it works:
-  Run `npx vitest run src/httpServer.spec.ts` with a focused filter or targeted assertions and show the failures proving session reuse is not implemented yet.
-  Result:
-  Added red coverage in `src/httpServer.spec.ts` proving initialize had no session id and unknown session ids were incorrectly accepted before implementation.
-  Verified red with:
-  `npx vitest run src/httpServer.spec.ts -t "issues an MCP session id on initialize and accepts follow-up requests with that session id|rejects unknown MCP session ids for non-initialize requests"`
-
-- [x] Task 2: Implement SDK-backed stateful session reuse
-  Test to write:
-  Reuse the failing specs from Task 1.
-  Code to implement:
-  Update `src/httpServer.ts` so managed MCP requests are created in stateful mode with SDK-issued session ids and reused across later requests.
-  Preserve the current invalid multi-value session-header rejection and keep the change local to the HTTP transport layer.
-  How to verify it works:
-  Re-run the targeted `src/httpServer.spec.ts` coverage and show the reuse tests passing.
-  Result:
-  Updated `src/httpServer.ts` to create stateful SDK transports for initialize requests, reuse managed sessions by `Mcp-Session-Id`, and reject unknown session ids with the SDK-compatible `404/-32001` contract while preserving one-shot stateless POST handling when no session header is present.
-  Verified green with:
-  `npx vitest run src/httpServer.spec.ts -t "issues an MCP session id on initialize and accepts follow-up requests with that session id|rejects unknown MCP session ids for non-initialize requests"`
-
-- [x] Task 3: Add failing coverage for session cleanup and expiry
-  Test to write:
-  Extend `src/httpServer.spec.ts` with red cases proving that:
-  expired idle sessions are cleaned up,
-  reused sessions survive normal request completion,
-  and server shutdown closes all tracked managed sessions.
-  Code to implement:
-  No production code in this task. Only failing specs that define cleanup expectations.
-  How to verify it works:
-  Run the targeted `src/httpServer.spec.ts` coverage and show the cleanup tests failing before implementation.
-  Result:
-  Added red tests for idle session expiry and explicit `DELETE /mcp` session termination in `src/httpServer.spec.ts`.
-  Verified red with:
-  `npx vitest run src/httpServer.spec.ts -t "expires idle MCP sessions and rejects follow-up requests after the timeout|terminates an issued MCP session with DELETE and rejects later requests for that session"`
-
-- [x] Task 4: Implement cleanup, expiry, and close-all behavior
-  Test to write:
-  Reuse the failing specs from Task 3.
-  Code to implement:
-  Extend the session registry in `src/httpServer.ts` with:
-  idle timeout tracking,
-  eviction of expired sessions,
-  and full cleanup during `startHttpServer(...).close()`.
-  Use a small, testable abstraction rather than scattering timers across the request path.
-  How to verify it works:
-  Re-run the targeted `src/httpServer.spec.ts` cases and show them passing.
-  Result:
-  Added a bounded in-memory session registry with idle timers, explicit `DELETE` session termination, transport-close cleanup, and full tracked-session shutdown cleanup in `src/httpServer.ts`.
-  Verified green with:
-  `npx vitest run src/httpServer.spec.ts -t "expires idle MCP sessions and rejects follow-up requests after the timeout|terminates an issued MCP session with DELETE and rejects later requests for that session"`
-
-- [x] Task 5: Add a focused ChatGPT-oriented regression test
-  Test to write:
-  Add a red or focused spec in `src/httpServer.spec.ts` proving that repeated authenticated ChatGPT-style `/mcp` requests can reuse the issued session id instead of staying permanently sessionless.
-  Code to implement:
-  Reuse the Task 2/4 implementation; only add code if the new test reveals a specific gap.
-  How to verify it works:
-  Run the targeted `src/httpServer.spec.ts` case and show it passing.
-  Result:
-  Added `reuses one issued session across repeated ChatGPT-style tool calls` in `src/httpServer.spec.ts` and updated older sessionless assumptions to the new SDK-backed session contract.
-  Verified green as part of:
-  `npx vitest run src/httpServer.spec.ts`
-
-- [x] Task 6: Final verification of session reuse behavior
-  Test to write:
-  No new tests in this task. Use the approved red/green specs as proof.
-  Code to implement:
-  No new production behavior unless verification reveals a tightly related issue. If it does, stop and re-plan before broadening scope.
-  How to verify it works:
-  Run at minimum:
-  `npx vitest run src/httpServer.spec.ts`
-  and
-  `npm run typecheck:all`
-  Then do one small manual proof by exercising repeated `/mcp` requests and confirming session reuse in logs or instrumentation.
-  Result:
-  Final verification passed with:
-  `npx vitest run src/httpServer.spec.ts`
-  `npm run typecheck:all`
-  `npm run build`
-  plus a built-server manual proof that returned one issued `Mcp-Session-Id` and reused it successfully for both `tools/list` and `tools/call`, with `cleanup: false` handoff logs on both follow-up requests.
-
-### Review Bar
-
-- Initialize responses issue `Mcp-Session-Id` in stateful mode.
-- Repeated `/mcp` requests with the same session id reuse one managed MCP session.
-- Unknown or malformed session ids follow the SDK contract cleanly.
-- Session cleanup is bounded and deterministic.
-- OAuth and bearer verification remain request-scoped and are not bypassed.
-- The implementation reduces reconnect/setup churn without introducing cross-session leakage.
-
-# Duplicate-Feature Consolidation Plan
+# OAuth Token Profile Detection Verification Plan
 
 ## Goal
 
-Reduce duplicate code by consolidating overlapping feature families, starting with the parts of the product surface where multiple tools appear to answer the same class of question with repeated fetch, shaping, and summary logic.
+Confirm and finish the ChatGPT OAuth profile-detection fix so `POST /token` stops logging `fallback:generic` when the request belongs to the OpenAI MCP flow, then verify the deployed service is actually running the corrected behavior.
 
 ## Constraints And Notes
 
-- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
-- The current official duplicate metric is whole-codebase duplication, but this plan prioritizes production feature overlap over pure clone-count reduction.
-- The highest-value overlap appears to be in:
-  - finance summary tools
-  - transaction browsing/query tools
-  - then supporting lifecycle internals like OAuth
-- Repo rules still require TDD, one task at a time, with a stop after each completed task during execution.
+- The current checkout is on `fix/cors-cf-utility-dedup`, not `main`, and the worktree is already dirty with relevant uncommitted changes in the profile-detection area.
+- Repo rules require stopping after the plan and waiting for approval before any non-Markdown implementation work.
+- Local inspection shows the worktree already contains targeted profile-detection changes in:
+  - `src/clientProfiles/chatgptProfile.ts`
+  - `src/clientProfiles/codexProfile.ts`
+  - `src/clientProfiles/detectClient.ts`
+  - `src/clientProfiles/requestContext.ts`
+  - `src/clientProfiles/types.ts`
+  - `src/clientProfiles.spec.ts`
+  - `src/httpServer.spec.ts`
+- The focused local verification already succeeds on the current worktree:
+  - `npm test -- --run src/clientProfiles.spec.ts src/httpServer.spec.ts`
+- Because the deployed log still shows `POST /token` as `generic`, the remaining risk is one of:
+  - the server on Linux is not running this newer code/build
+  - the real `POST /token` request does not carry the ChatGPT signal the current matcher expects
+- If deployment verification shows the token request truly has no reusable ChatGPT signal, we must stop and re-plan before adding a stronger cross-request propagation mechanism.
 
 ## Assumptions
 
-- “Duplicate features” here means multiple tools or modules with materially overlapping user-facing purpose, not just textually similar code.
-- We should prefer extracting shared summary/query engines before removing tool surface area, unless tests prove some tools are actually redundant enough to merge.
-- Test duplication alone is not a primary target unless it blocks the feature-level consolidation work.
+- The smallest correct fix is to keep request-level pre-auth detection for ChatGPT and Codex based on safe request signals already present on OAuth routes.
+- The new detection must not weaken Claude precedence or broaden generic OAuth handling.
+- The immediate next step after approval should be to work with the existing dirty changes rather than rewriting them from scratch.
 
 ## Tasks
 
-- [x] Task 1: Add failing coverage for the finance-summary consolidation seam
+- [ ] Task 1: Prove the regression coverage is the right one for the reported `/token` behavior
   Test to write:
-  Add red structural and behavior coverage in the finance summary specs that fails unless the overlapping month-summary tools share one common summary-building seam.
-  Focus on tools like:
-  `GetMonthlyReviewTool.ts`,
-  `GetSpendingSummaryTool.ts`,
-  `GetCashFlowSummaryTool.ts`,
-  `GetBudgetHealthSummaryTool.ts`,
-  and `GetIncomeSummaryTool.ts`.
-  The red test should prove they derive overlapping month-level metrics from one shared builder or engine rather than each reshaping the same ideas independently.
+  Reuse the existing focused cases in `src/clientProfiles.spec.ts` and `src/httpServer.spec.ts` that assert ChatGPT/OpenAI-style OAuth requests, including `POST /token`, resolve to `chatgpt` instead of `generic`.
+  If those tests are not isolated enough once we start execution, tighten them minimally without weakening any assertions.
   Code to implement:
-  No production refactor yet. Only failing tests that pin the expected shared seam and preserve current payload behavior.
+  No production code in this task unless the current focused specs reveal a small missing assertion.
+  The purpose is to establish the red/green target and confirm the current coverage matches the production symptom.
   How to verify it works:
-  Run the targeted finance summary Vitest coverage and show the red failure.
+  Run the targeted Vitest command and show the relevant assertions around `POST /token` and OAuth-route profile logs.
+  If needed for strict TDD proof, validate the same coverage against the pre-change baseline in an isolated way before continuing.
 
-- [x] Task 2: Implement the finance-summary shared seam
+- [ ] Task 2: Finalize the minimal profile-detection implementation already in flight
   Test to write:
-  Reuse the failing coverage from Task 1.
+  Use the failing coverage from Task 1.
   Code to implement:
-  Extract the smallest clean shared builder/engine for overlapping month-summary calculations and migrate the targeted finance tools onto it without changing their public payload contracts.
+  Keep the implementation narrowly scoped to the existing request-level detection plumbing:
+  `src/clientProfiles/chatgptProfile.ts`,
+  `src/clientProfiles/codexProfile.ts`,
+  `src/clientProfiles/detectClient.ts`,
+  `src/clientProfiles/requestContext.ts`,
+  and `src/clientProfiles/types.ts`.
+  Ensure `POST /token`, `GET /authorize`, `GET /oauth/callback`, and OpenID/discovery routes log actionable detection reasons without disturbing Claude precedence.
   How to verify it works:
-  Re-run the targeted finance specs, then `npm run lint:duplicates` and capture the duplicate delta in the affected production files.
+  Re-run `npm test -- --run src/clientProfiles.spec.ts src/httpServer.spec.ts` and show the targeted tests passing.
+  Run `npm run build` so the runtime artifact matches the source behavior.
 
-- [x] Task 3: Add failing coverage for the transaction-browsing consolidation seam
+- [ ] Task 3: Verify the runtime artifact and deployed service, then confirm the log outcome
   Test to write:
-  Add red structural and behavior coverage around:
-  `SearchTransactionsTool.ts`,
-  `ListTransactionsTool.ts`,
-  and the `GetTransactionsBy*` family
-  so the repo fails unless they share a coherent transaction query/rendering pipeline rather than repeating overlapping filtering and response-shaping patterns.
+  No new unit tests unless deployment verification reveals a missing runtime assertion.
   Code to implement:
-  No production refactor yet beyond the failing tests.
+  If needed, update only the build artifact or deployment-facing pieces required to get the already-tested fix onto the Linux host.
+  Do not broaden scope into a new propagation design unless Task 2 verification shows the live token request lacks all current detection signals.
   How to verify it works:
-  Run the narrow transaction-tool Vitest coverage and show the red failure.
-
-- [x] Task 4: Implement the transaction-browsing shared seam
-  Test to write:
-  Reuse the failing coverage from Task 3.
-  Code to implement:
-  Consolidate the overlapping transaction retrieval and rendering logic behind one shared query/render layer while preserving each tool’s contract.
-  Prefer extending the existing transaction helper path rather than adding another parallel abstraction.
-  How to verify it works:
-  Re-run the targeted transaction specs, then `npm run lint:duplicates` and capture the duplicate delta in the transaction-tool family.
-
-- [x] Task 5: Add failing coverage for feature-overlap review and tool-surface clarity
-  Test to write:
-  Add quality/spec coverage that fails unless overlapping finance and transaction tools have clear differentiated descriptions or documented roles after consolidation.
-  The red test should protect against keeping multiple nearly-identical tools with unclear positioning.
-  Code to implement:
-  No production metadata/doc updates yet. Only failing tests that pin the clarity requirement.
-  How to verify it works:
-  Run the targeted registrar/quality coverage and show the red failure.
-
-- [x] Task 6: Implement tool-surface clarification
-  Test to write:
-  Reuse the failing coverage from Task 5.
-  Code to implement:
-  Update tool descriptions and, if needed, README notes so overlapping tools clearly state when to use each one after the shared refactors.
-  How to verify it works:
-  Re-run the targeted quality/registry specs and inspect the registered metadata for the consolidated feature families.
-
-- [x] Task 7: Add failing coverage for the next non-user-facing duplicate-feature seam
-  Test to write:
-  Add red coverage around the highest-value internal overlap that remains after finance and transaction consolidation, likely:
-  `oauthStore.ts` plus `oauthCore.ts`
-  or the reliability runner/artifact pair.
-  The red test should force one shared lifecycle or reporting seam rather than repeated internal state handling.
-  Code to implement:
-  No production refactor yet beyond the failing tests.
-  How to verify it works:
-  Run the narrow targeted Vitest coverage and show the red failure.
-
-- [x] Task 8: Implement the next internal consolidation seam and finish verification
-  Test to write:
-  Reuse the failing coverage from Task 7.
-  Code to implement:
-  Refactor the chosen internal overlap behind a single clean seam, then rerun the official duplicate/report commands.
-  How to verify it works:
-  Run:
-  `npx vitest run` for all touched targeted suites
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Then record the before/after whole-codebase duplication and the affected feature-family hotspots in this file.
+  Rebuild and deploy the narrow fix, restart `ynab-mcp-bridge`, and inspect `journalctl -u ynab-mcp-bridge -n 200`.
+  The expected proof is that the relevant `/token` request logs `profileId: 'chatgpt'` with a concrete reason instead of `fallback:generic`.
+  If the live `/token` request still logs `generic`, capture the exact request signal gap and stop for a re-plan.
 
 ## Review Bar
 
-- At least two overlapping user-facing feature families are consolidated behind shared engines/builders.
-- Tool contracts stay stable while implementation overlap drops.
-- Tool descriptions become clearer where feature overlap remains intentional.
-- The next internal duplicate-feature seam is reduced only after the user-facing overlaps are cleaned up.
-- The final verification includes both behavior proofs and the official whole-codebase duplicate metric.
-
-Plan ready. Approve to proceed.
-
-## Results
-
-- Finance-summary overlap is now reduced through `buildBudgetHealthMonthSummary(...)` in `src/tools/financeToolUtils.ts`, with `GetMonthlyReviewTool.ts` and `GetBudgetHealthSummaryTool.ts` sharing one month budget-health shaping seam.
-- Transaction browse tools now share `transactionFields` plus `toDisplayTransactions(...)` in `src/tools/transactionToolUtils.ts`, and `SearchTransactionsTool.ts` now uses the same collection rendering path as `ListTransactionsTool.ts`.
-- Transaction tool descriptions now differentiate overview, filtered drill-down, and “already know the ID/month” lookup use cases in the registry metadata.
-- Reliability summary math is centralized in `src/reliabilitySummaryUtils.ts`, with both `reliabilityRunner.ts` and `reliabilityArtifact.ts` delegating percentile, failure-group, threshold, and totals shaping to one helper.
-- Whole-codebase duplication improved during this plan from `24.35%` to `24.04%`, with the current scan reporting `720` clones and `5489` duplicated lines.
-- Final verification on the current branch state passed with:
-  `npx vitest run src/financeToolUtils.spec.ts src/financeSummaryTools.spec.ts src/financeAdvancedTools.spec.ts src/transactionToolUtils.spec.ts src/aiToolOptimization.spec.ts src/additionalReadTools.spec.ts src/serverFactory.spec.ts src/reliabilitySummaryUtils.spec.ts src/reliabilityRunner.spec.ts src/reliabilityArtifact.spec.ts src/duplicateCodeRemediation.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-- Current tech-debt report output:
-  whole-codebase duplication `24.04%`
-  dead exports `0`
-  `ts-ignore` count `7`
-  `eslint-disable` count `10`
-  `TODO/FIXME/HACK` count `15`
-
-# OAuth Duplicate-Feature Follow-Up Plan
-
-## Goal
-
-Reduce the largest remaining production duplicate hotspot by consolidating overlapping OAuth lifecycle/state-handling code in `src/oauthStore.ts` and `src/oauthCore.ts`.
-
-## Metric Correction
-
-- The JSCPD whole-codebase percentage is useful as a secondary clone signal, but it is not the primary baseline for this branch anymore.
-- The primary baseline for this effort should be duplicate features/functions: overlapping user-facing or internal behavioral seams that are implemented more than once.
-- Going forward, branch progress should be described first in terms of which duplicate feature families were consolidated and how their overlapping responsibilities shrank.
-- JSCPD percentages and duplicated-line counts should still be recorded, but only as supporting evidence.
-
-## Why This Hotspot
-
-- The latest whole-codebase JSCPD scan still shows `src/oauthStore.ts` as the largest non-test production hotspot on this branch.
-- `src/oauthCore.ts` is the paired internal seam with the clearest overlap in record validation, threshold checks, and repeated transition/report shaping.
-- This is a better next target than test-heavy files because it removes real implementation duplication instead of mostly fixture repetition.
-
-## Tasks
-
-- [x] Task 1: Add failing coverage for a shared OAuth lifecycle seam
-  Test to write:
-  Add red structural and behavior coverage in OAuth-focused specs so the repo fails unless `oauthStore.ts` and `oauthCore.ts` delegate one repeated lifecycle/reporting path to a shared helper.
-  Prefer the smallest seam that currently appears in both modules, such as repeated state transition shaping, stale/invalid-state handling, or repeated summary record construction.
-  Code to implement:
-  No production refactor yet. Only failing tests that pin the seam and preserve current OAuth behavior.
-  How to verify it works:
-  Run the narrow OAuth Vitest coverage and show the red failure.
-
-- [x] Task 2: Implement the shared OAuth lifecycle seam
-  Test to write:
-  Reuse the failing coverage from Task 1.
-  Code to implement:
-  Extract the smallest clean shared helper/module for the repeated OAuth lifecycle logic and migrate only the overlapping paths onto it.
-  Keep OAuth contracts and persistence behavior stable.
-  How to verify it works:
-  Re-run the targeted OAuth specs, then `npm run lint:duplicates` and capture the duplicate delta in `src/oauthStore.ts` and `src/oauthCore.ts`.
-
-- [x] Task 3: Add failing coverage for OAuth tool-surface or internal clarity where overlap remains
-  Test to write:
-  Add a narrow quality/structure test that fails unless the remaining OAuth responsibilities are more clearly separated after the shared seam lands.
-  This can be a structural guard that prevents the same repeated helper from being re-inlined in both modules again.
-  Code to implement:
-  No production change yet beyond the failing guard.
-  How to verify it works:
-  Run the targeted OAuth/structure Vitest coverage and show the red failure.
-
-- [x] Task 4: Implement the clarity follow-up and final verification
-  Test to write:
-  Reuse the failing coverage from Task 3.
-  Code to implement:
-  Finish the minimal follow-up refactor or metadata/structure cleanup needed to keep the new seam durable and easy to review.
-  How to verify it works:
-  Run:
-  `npx vitest run` for all touched OAuth suites
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Then record the before/after duplicate numbers and the remaining top production hotspots in this file.
-
-## Review Bar
-
-- The next largest production duplicate cluster is reduced in real implementation code, not just in tests.
-- OAuth behavior stays stable under targeted specs.
-- The extracted seam is narrow and readable, not a large speculative abstraction.
-- The final proof includes both behavior tests and an updated duplicate/report baseline.
-
-Plan ready. Approve to proceed.
-
-## Results
-
-- OAuth grant record projection now lives in `src/oauthGrantViews.ts`, and both `src/oauthStore.ts` and `src/oauthCore.ts` delegate consent, pending-authorization, authorization-code, and refresh-token record shaping to that helper.
-- `src/oauthCore.ts` now centralizes authorization-code grant validation behind `requireAuthorizationCodeGrant(...)` instead of repeating the same ownership and expiry checks in multiple call sites.
-- Targeted OAuth verification passed with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthGrantViews.spec.ts src/oauthStore.spec.ts src/oauthCore.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-- Whole-codebase duplication improved from `24.04%` to `23.85%` during this follow-up.
-- Feature/function baseline improvement:
-  the OAuth lifecycle family now has one shared grant-view seam and one shared authorization-code validation seam instead of duplicating those responsibilities across `oauthStore.ts` and `oauthCore.ts`.
-- OAuth hotspot movement from the latest JSCPD report:
-  `src/oauthStore.ts`: `386` duplicated lines / `48` clones / `44.11%` before -> `310` duplicated lines / `38` clones / `39.14%` after
-  `src/oauthCore.ts`: `132` duplicated lines / `21` clones / `26.04%` before -> `84` duplicated lines / `17` clones / `17.28%` after
-- Current tech-debt report output:
-  whole-codebase duplication `23.85%`
-  dead exports `0`
-  `ts-ignore` count `7`
-  `eslint-disable` count `11`
-  `TODO/FIXME/HACK` count `18`
-
-## Architecturally-Unnecessary Duplicate Feature/Function Scorecard
-
-Primary status scale for this branch:
-- `not started`: the family still has architecturally unnecessary duplicate feature/function code and no intentional shared seam yet
-- `partially consolidated`: at least one real shared behavioral seam is in place, but some architecturally unnecessary overlap still remains
-- `appropriately separated`: the remaining differences appear justified by responsibility boundaries, so more consolidation would likely hurt the architecture
-
-Scoring rule:
-- The primary baseline is not raw JSCPD percentage. It is whether the codebase still implements the same feature/function multiple times without an architectural reason.
-- JSCPD remains supporting evidence for lexical overlap and hotspot discovery, not the main success metric.
-- Similar code should stay separate when the responsibilities are genuinely different.
-
-Current branch scorecard:
-- OAuth, token, and exchange lifecycle family: `partially consolidated`
-  Shared seams now exist for grant-record views and authorization-code validation.
-  This still looks like the largest remaining duplicate-feature debt area because grant transitions, token persistence, exchange validation, and legacy compatibility paths are split across overlapping code in `src/oauthStore.ts` and `src/oauthCore.ts`.
-- Finance summary family: `partially consolidated`
-  Shared seam now exists for month budget-health shaping via `buildBudgetHealthMonthSummary(...)`.
-  Remaining overlap still exists across spending, income, cash-flow, and broader monthly summary behavior, but some separation may still be architecturally correct if the tools are intentionally different.
-- Transaction browsing family: `partially consolidated`
-  Shared browse rendering now exists through `transactionFields` and `toDisplayTransactions(...)`, and the tool surface is clearer.
-  Remaining overlap still exists between broad search/list behavior and narrower transaction query helpers, but this family should only be pushed further where the shared seam improves clarity rather than blurring tool responsibilities.
-- Reliability reporting family: `partially consolidated`
-  Shared summary math now exists through `summarizeReliabilityResults(...)`.
-  Remaining overlap still exists in surrounding CLI/report orchestration and related reliability surfaces, though some of that separation may be appropriate.
-
-Working branch baseline:
-- `0` families are clearly `appropriately separated`
-- `4` families remain `partially consolidated`
-- largest likely tech-debt area: OAuth, tokens, and exchange flow
-- highest-value next step is to reduce architecturally unnecessary overlap in the OAuth/token/exchange family before forcing more consolidation elsewhere
-
-# OAuth/Token/Exchange Duplicate-Feature Remediation Plan
-
-## Goal
-
-Reduce architecturally unnecessary duplicate code in the OAuth, token, and exchange lifecycle without collapsing responsibilities that should remain distinct.
-
-## Constraints And Notes
-
-- Work remains isolated in `/Users/matt/Desktop/Projects/_codex_worktrees/ynab-mcp-bridge-duplicate-code-remediation` on branch `fix/duplicate-code-remediation`.
-- The primary success metric is not raw JSCPD percentage. The main question is whether the same OAuth/token/exchange behavior is still implemented multiple times without an architectural reason.
-- Existing work already introduced two real shared seams:
-  - grant-record projection in `src/oauthGrantViews.ts`
-  - authorization-code validation in `src/oauthCore.ts`
-- The biggest remaining overlap appears to be:
-  - grant transition and persistence shaping across `src/oauthStore.ts`
-  - token/exchange validation and update flow across `src/oauthCore.ts`
-  - legacy compatibility/import paths that rebuild similar grant state in parallel
-- The repo requires TDD for code changes, one task at a time, with a stop after each task once execution begins.
-
-## Assumptions
-
-- We should only extract shared seams where the same lifecycle responsibility is genuinely being implemented in more than one place.
-- Consent handling, authorization-code exchange, refresh-token rotation, and legacy persistence compatibility may share some mechanics but should not be forced into one oversized abstraction.
-- A good next seam is likely a narrow grant-transition or token-state updater helper rather than a general-purpose "OAuth engine".
-
-## Tasks
-
-- [x] Task 1: Add failing coverage for the next shared OAuth/token/exchange seam
-  Test to write:
-  Add red structural and behavior coverage in `src/duplicateCodeRemediation.spec.ts` plus the narrow OAuth suites that fails unless one remaining repeated lifecycle path is routed through a shared helper.
-  Target one specific overlap, likely:
-  repeated grant-state persistence shaping,
-  repeated token update application,
-  or repeated legacy grant normalization.
-  Code to implement:
-  No production code in this task. Only failing tests that pin the next seam and preserve current OAuth/token/exchange behavior.
-  How to verify it works:
-  Run the targeted OAuth Vitest coverage and show the red failure.
-  Result:
-  Added red coverage in `src/duplicateCodeRemediation.spec.ts` and new helper-behavior coverage in `src/oauthCompatibilityGrants.spec.ts`.
-  The next seam is now pinned around the four compatibility grant builders still inlined in `src/oauthStore.ts`.
-  Verified red with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCompatibilityGrants.spec.ts`
-  which failed because `src/oauthCompatibilityGrants.ts` does not exist yet and `oauthStore.ts` still persists compat grants by rebuilding four near-identical `normalizeGrant({...})` objects inline.
-
-- [x] Task 2: Implement the narrow shared seam
-  Test to write:
-  Reuse the failing tests from Task 1.
-  Code to implement:
-  Extract the smallest clean shared helper/module for the chosen overlap and migrate only the duplicated responsibility onto it.
-  Keep grant ownership, token rotation rules, exchange validation, and persistence semantics stable.
-  How to verify it works:
-  Re-run the targeted OAuth specs and show them passing.
-  Then run `npm run lint:duplicates` and record the hotspot movement for `src/oauthStore.ts` and `src/oauthCore.ts`.
-  Result:
-  Added `src/oauthCompatibilityGrants.ts` with four narrow compatibility-grant builders for authorization-code, pending-authorization, pending-consent, and refresh-token persistence.
-  Updated `src/oauthStore.ts` to use those builders instead of rebuilding four near-identical `normalizeGrant(...)` payloads inline.
-  Verified green with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthCompatibilityGrants.spec.ts src/oauthStore.spec.ts`
-
-- [x] Task 3: Add failing coverage for architectural boundaries after the seam lands
-  Test to write:
-  Add a narrow structure/quality test that fails unless the remaining OAuth/token/exchange responsibilities stay clearly separated.
-  The goal is to prevent a cleanup from turning into an over-broad abstraction that mixes persistence, validation, and exchange orchestration.
-  Code to implement:
-  No production code yet beyond the failing guard.
-  How to verify it works:
-  Run the targeted OAuth/structure Vitest coverage and show the red failure.
-  Result:
-  Added a red structural guard in `src/duplicateCodeRemediation.spec.ts` requiring compatibility persistence to stay local to `oauthStore.ts` behind one narrow save helper and requiring `src/oauthCompatibilityGrants.ts` to remain pure.
-  Verified red with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts`
-  which failed because `oauthStore.ts` still repeated the compatibility grant save/persist path inline and did not define `saveCompatibilityGrant(...)`.
-
-- [x] Task 4: Implement the follow-up cleanup and final verification
-  Test to write:
-  Reuse the failing coverage from Task 3.
-  Code to implement:
-  Finish the smallest follow-up cleanup needed to keep the new seam durable and architecturally honest.
-  Update docs or task notes only if verification changes the architectural reading of the family.
-  How to verify it works:
-  Run:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthGrantViews.spec.ts src/oauthStore.spec.ts src/oauthCore.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  Then record:
-  the before/after OAuth hotspot movement,
-  the updated scorecard status for the OAuth/token/exchange family,
-  and whether the remaining overlap now looks `partially consolidated` or `appropriately separated`.
-  Result:
-  Added `saveCompatibilityGrant(...)` inside `src/oauthStore.ts` so compatibility persistence remains store-owned without expanding the shared helper beyond pure grant shaping.
-  Final verification passed with:
-  `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthGrantViews.spec.ts src/oauthCompatibilityGrants.spec.ts src/oauthStore.spec.ts src/oauthCore.spec.ts`
-  `npm run lint:duplicates`
-  `npm run tech-debt:report`
-  `npm run typecheck`
-  OAuth hotspot movement from the latest JSCPD report:
-  `src/oauthStore.ts`: `310` duplicated lines / `38` clones / `39.14%` before -> `274` duplicated lines / `34` clones / `37.59%` after
-  `src/oauthCore.ts`: `84` duplicated lines / `17` clones / `17.28%` before -> `84` duplicated lines / `17` clones / `17.28%` after
-  `src/oauthCompatibilityGrants.ts`: new focused helper module with `26` duplicated lines / `4` clones / `30.23%`
-  Updated architectural reading:
-  the OAuth/token/exchange family is still `partially consolidated`, but one more architecturally unnecessary overlap is now removed and compatibility persistence is cleaner without forcing orchestration and storage into one abstraction.
-
-## Review Bar
-
-- The chosen seam removes a real duplicate OAuth/token/exchange responsibility, not just a few similar lines.
-- OAuth behavior stays stable under targeted specs.
-- The extraction is narrow and readable, not a speculative framework.
-- The final summary explains what overlap was removed and what overlap remains intentionally separate.
+- The repo has focused regression coverage for the exact `/token` symptom from the journal.
+- The implementation remains minimal and profile-specific instead of introducing broad OAuth heuristics.
+- The built artifact matches the tested source.
+- The deployed service shows the corrected profile log behavior, or we have enough concrete evidence to re-plan intelligently instead of guessing.
 
 Plan ready. Approve to proceed.

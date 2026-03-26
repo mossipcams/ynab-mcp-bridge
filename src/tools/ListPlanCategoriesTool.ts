@@ -56,9 +56,9 @@ export async function execute(
     if (!hasPaginationControls(input)) {
       return toTextResult({
         category_groups: groups.map((group) => compactObject({
-          id: input.includeIds === false ? undefined : group["id"],
-          name: requestedFields.has("name") ? group["name"] : undefined,
-          categories: requestedFields.has("categories") ? group["categories"] : undefined,
+          id: input.includeIds === false ? undefined : group.id,
+          name: requestedFields.has("name") ? group.name : undefined,
+          categories: requestedFields.has("categories") ? group.categories : undefined,
         })),
         category_group_count: groups.length,
       });
@@ -68,9 +68,9 @@ export async function execute(
 
     return toTextResult({
       category_groups: pagedGroups.entries.map((group) => compactObject({
-        id: input.includeIds === false ? undefined : group["id"],
-        name: requestedFields.has("name") ? group["name"] : undefined,
-        categories: requestedFields.has("categories") ? group["categories"] : undefined,
+        id: input.includeIds === false ? undefined : group.id,
+        name: requestedFields.has("name") ? group.name : undefined,
+        categories: requestedFields.has("categories") ? group.categories : undefined,
       })),
       category_group_count: groups.length,
       ...pagedGroups.metadata,

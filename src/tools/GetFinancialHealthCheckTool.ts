@@ -3,6 +3,7 @@ import * as ynab from "ynab";
 
 import {
   compactRisk,
+  daysUntil,
   formatAmount,
   formatPercent,
   getTodayIsoDate,
@@ -12,8 +13,7 @@ import {
   totalDebtMilliunits,
   spreadPercent,
 } from "./financialDiagnosticsUtils.js";
-import { isTransferTransaction, isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
-import { expandScheduledOccurrences } from "./financeToolUtils.js";
+import { isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 type Risk = {
@@ -64,7 +64,6 @@ export async function execute(
       const underfundedCategories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden && (category.goal_under_funded ?? 0) > 0);
       const transactions = transactionsResponse.data.transactions.filter(
         (transaction) => !transaction.deleted
-          && !isTransferTransaction(transaction)
           && (typeof transaction.date !== "string" || isWithinMonthRange(transaction.date, monthKey, monthKey)),
       );
       const uncategorizedTransactionCount = transactions.filter((transaction) => !transaction.category_id).length;
@@ -72,11 +71,13 @@ export async function execute(
       const unclearedTransactionCount = transactions.filter((transaction) => transaction.cleared === "uncleared").length;
       const recentIncomeMonths = recentMonths(monthsResponse.data.months, monthKey, 3);
       const incomeVolatility = spreadPercent(recentIncomeMonths.map((entry) => entry.income ?? 0));
-      const upcoming30dNet = expandScheduledOccurrences(
-        scheduledResponse.data.scheduled_transactions.filter((transaction) => !transaction.deleted),
-        asOfDate,
-        30,
-      ).reduce((sum, transaction) => sum + transaction.amount, 0);
+      const upcoming30dNet = scheduledResponse.data.scheduled_transactions
+        .filter((transaction) => !transaction.deleted)
+        .filter((transaction) => {
+          const dueInDays = daysUntil(asOfDate, transaction.date_next);
+          return dueInDays >= 0 && dueInDays <= 30;
+        })
+        .reduce((sum, transaction) => sum + transaction.amount, 0);
 
       const risks: Risk[] = [];
       if (upcoming30dNet < -liquidCash) {

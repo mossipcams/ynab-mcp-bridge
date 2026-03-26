@@ -1,20 +1,15 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import {
-  formatAmountMilliunits,
-  renderCollectionResult,
-} from "./collectionToolUtils.js";
+import { formatAmountMilliunits } from "./collectionToolUtils.js";
 import { compactObject } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { toDisplayTransactions, transactionFields } from "./transactionToolUtils.js";
-
-const sortableValues = [
-  "date_asc",
-  "date_desc",
-  "amount_asc",
-  "amount_desc",
-] as const;
+import {
+  buildPagedTransactionCollectionResult,
+  toSortedTransactionRows,
+  transactionFields,
+  transactionSortValues,
+} from "./transactionQueryUtils.js";
 
 type SearchableTransaction = {
   id: string;
@@ -50,7 +45,7 @@ export const inputSchema = {
   offset: z.number().int().min(0).default(0).describe("Number of matching transactions to skip."),
   includeIds: z.boolean().optional().describe("When false, omits transaction ids from the output."),
   fields: z.array(z.enum(transactionFields)).optional().describe("Optional transaction fields to include in each row."),
-  sort: z.enum(sortableValues).default("date_desc").describe("Sort order for matching transactions."),
+  sort: z.enum(transactionSortValues).default("date_desc").describe("Sort order for matching transactions."),
 };
 
 function matchesFilters(
@@ -66,35 +61,44 @@ function matchesFilters(
     maxAmount?: number;
     includeTransfers?: boolean;
   },
-): boolean {
-  return [
-    input.includeTransfers !== false || !transaction.transfer_account_id,
-    !input.toDate || transaction.date <= input.toDate,
-    !input.payeeId || transaction.payee_id === input.payeeId,
-    !input.accountId || transaction.account_id === input.accountId,
-    !input.categoryId || transaction.category_id === input.categoryId,
-    input.approved === undefined || transaction.approved === input.approved,
-    !input.cleared || transaction.cleared === input.cleared,
-    input.minAmount === undefined || transaction.amount >= input.minAmount,
-    input.maxAmount === undefined || transaction.amount <= input.maxAmount,
-  ].every(Boolean);
-}
-
-function compareTransactions(
-  left: Pick<SearchableTransaction, "amount" | "date" | "id">,
-  right: Pick<SearchableTransaction, "amount" | "date" | "id">,
-  sort: (typeof sortableValues)[number],
 ) {
-  switch (sort) {
-    case "date_asc":
-      return left.date.localeCompare(right.date) || left.id.localeCompare(right.id);
-    case "date_desc":
-      return right.date.localeCompare(left.date) || left.id.localeCompare(right.id);
-    case "amount_asc":
-      return left.amount - right.amount || right.date.localeCompare(left.date);
-    case "amount_desc":
-      return right.amount - left.amount || right.date.localeCompare(left.date);
+  if (input.includeTransfers === false && transaction.transfer_account_id) {
+    return false;
   }
+
+  if (input.toDate && transaction.date > input.toDate) {
+    return false;
+  }
+
+  if (input.payeeId && transaction.payee_id !== input.payeeId) {
+    return false;
+  }
+
+  if (input.accountId && transaction.account_id !== input.accountId) {
+    return false;
+  }
+
+  if (input.categoryId && transaction.category_id !== input.categoryId) {
+    return false;
+  }
+
+  if (input.approved !== undefined && transaction.approved !== input.approved) {
+    return false;
+  }
+
+  if (input.cleared && transaction.cleared !== input.cleared) {
+    return false;
+  }
+
+  if (input.minAmount !== undefined && transaction.amount < input.minAmount) {
+    return false;
+  }
+
+  if (input.maxAmount !== undefined && transaction.amount > input.maxAmount) {
+    return false;
+  }
+
+  return true;
 }
 
 export async function execute(
@@ -114,7 +118,7 @@ export async function execute(
     offset?: number;
     includeIds?: boolean;
     fields?: Array<(typeof transactionFields)[number]>;
-    sort?: (typeof sortableValues)[number];
+    sort?: (typeof transactionSortValues)[number];
   },
   api: ynab.API,
 ) {
@@ -129,20 +133,15 @@ export async function execute(
       undefined,
     ));
 
-    const matchingTransactions = response.data.transactions
-      .filter((transaction) => !transaction.deleted)
-      .filter((transaction) => matchesFilters(transaction, input))
-      .sort((left, right) => compareTransactions(left, right, sort));
-    const transactions = toDisplayTransactions(matchingTransactions);
+    const transactions = toSortedTransactionRows(
+      response.data.transactions
+        .filter((transaction) => !transaction.deleted)
+        .filter((transaction) => matchesFilters(transaction as SearchableTransaction, input)),
+      sort,
+    );
 
     return toTextResult({
-      ...renderCollectionResult(
-        transactions,
-        transactionFields,
-        input,
-        "transactions",
-        "match_count",
-      ),
+      ...buildPagedTransactionCollectionResult(transactions, input),
       filters: compactObject({
         from_date: input.fromDate,
         to_date: input.toDate,

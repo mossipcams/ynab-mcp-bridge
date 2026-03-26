@@ -302,6 +302,15 @@ describe("resolveRuntimeConfig", () => {
       },
     });
   });
+
+  it("owns runtime config resolution directly instead of acting as a passthrough re-export", () => {
+    const source = readFileSync(new URL("./runtimeConfig.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("export function resolveRuntimeConfig");
+    expect(source).toContain("export function assertBackendEnvironment");
+    expect(source).not.toContain('from "./config.js"');
+  });
+
   it("throws for invalid ports", () => {
     expect(() => resolveRuntimeConfig(["--port", "abc"], {})).toThrow(
       "Invalid port: abc",

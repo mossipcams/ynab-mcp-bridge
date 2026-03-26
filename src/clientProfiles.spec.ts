@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -7,9 +8,9 @@ import {
   reconcileClientProfile,
 } from "./clientProfiles/detectClient.js";
 import { getClientProfile } from "./clientProfiles/index.js";
+import { setLoggerDestinationForTests } from "./logger.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
-import { setLoggerDestinationForTests } from "./logger.js";
 
 describe("client profiles", () => {
   function createBufferedDestination() {
@@ -365,7 +366,7 @@ describe("client profiles", () => {
     });
 
     logClientProfileEvent("profile.detected", {
-      apiToken: "secret-token",
+      accessToken: "top-secret",
       path: "/.well-known/oauth-authorization-server/sse",
       profileId: "codex",
       reason: "path:codex-oauth-probe",
@@ -373,7 +374,7 @@ describe("client profiles", () => {
 
     expect(sink.readEntries()).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        apiToken: "[Redacted]",
+        accessToken: "[Redacted]",
         event: "profile.detected",
         msg: "profile.detected",
         path: "/.well-known/oauth-authorization-server/sse",

@@ -1,7 +1,13 @@
 import { getYnabApiRuntimeContext } from "../ynabApi.js";
-import type { PlanId } from "../ynabTypes.js";
-import { toPlanId } from "../ynabTypes.js";
 import { getErrorMessage } from "./errorUtils.js";
+
+function _getPlanId(inputPlanId?: string, configuredPlanId?: string): string {
+  const planId = inputPlanId?.trim() || configuredPlanId?.trim() || "";
+  if (!planId) {
+    throw new Error("No plan ID provided. Please provide a plan ID or set YNAB_PLAN_ID.");
+  }
+  return planId;
+}
 
 type PlanResolverApi = {
   plans: {
@@ -15,50 +21,26 @@ type PlanResolverApi = {
 };
 
 type ResolvePlanIdOptions = {
-  excludePlanIds?: readonly PlanId[] | undefined;
+  excludePlanIds?: string[];
   ignoreConfiguredPlanId?: boolean;
-  ignoreRuntimePlanIdOverride?: boolean;
 };
 
 function getApiConfiguredPlanId(api: object) {
-  return getYnabApiRuntimeContext(api)?.config.planId;
+  return getYnabApiRuntimeContext(api)?.config.planId?.trim();
 }
 
-function getRuntimePlanIdOverride(api: object) {
-  return getYnabApiRuntimeContext(api)?.runtimePlanIdOverride;
-}
-
-function setRuntimePlanIdOverride(api: object, planId: PlanId) {
-  const runtimeContext = getYnabApiRuntimeContext(api);
-
-  if (!runtimeContext) {
-    return;
-  }
-
-  runtimeContext.runtimePlanIdOverride = planId;
-}
-
-function getConfiguredPlanId(
-  inputPlanId: string | undefined,
-  api: object,
-  options: ResolvePlanIdOptions,
-): PlanId | undefined {
-  const explicitPlanId = toPlanId(inputPlanId);
+function getConfiguredPlanId(inputPlanId: string | undefined, api: object, options: ResolvePlanIdOptions) {
+  const explicitPlanId = inputPlanId?.trim();
 
   if (explicitPlanId) {
     return explicitPlanId;
   }
 
-  const runtimePlanIdOverride = getRuntimePlanIdOverride(api);
-  if (!options.ignoreRuntimePlanIdOverride && runtimePlanIdOverride) {
-    return runtimePlanIdOverride;
-  }
-
   if (!options.ignoreConfiguredPlanId) {
-    return getApiConfiguredPlanId(api);
+    return getApiConfiguredPlanId(api) ?? "";
   }
 
-  return undefined;
+  return "";
 }
 
 function pickResolvedPlanId(
@@ -66,29 +48,17 @@ function pickResolvedPlanId(
   defaultPlanId: string | undefined,
   excludedPlanIds: Set<string>,
 ) {
-  const normalizedDefaultPlanId = toPlanId(defaultPlanId);
-
-  if (normalizedDefaultPlanId && !excludedPlanIds.has(normalizedDefaultPlanId)) {
-    return normalizedDefaultPlanId;
+  if (defaultPlanId && !excludedPlanIds.has(defaultPlanId)) {
+    return defaultPlanId;
   }
 
-  const remainingPlans = plans
-    .map((plan) => ({ ...plan, id: toPlanId(plan.id) }))
-    .filter((plan): plan is { id: PlanId } => plan.id !== undefined)
-    .filter((plan) => !excludedPlanIds.has(plan.id));
+  const remainingPlans = plans.filter((plan) => !excludedPlanIds.has(plan.id));
 
   if (remainingPlans.length === 1) {
-    const [remainingPlan] = remainingPlans;
-    return remainingPlan?.id;
+    return remainingPlans[0].id;
   }
 
   return undefined;
-}
-
-function rememberRuntimePlanId(api: object, planId: PlanId, inputPlanId?: string) {
-  if (!inputPlanId) {
-    setRuntimePlanIdOverride(api, planId);
-  }
 }
 
 function isMissingPlanError(error: unknown) {
@@ -100,8 +70,8 @@ async function resolvePlanId(
   inputPlanId: string | undefined,
   api: PlanResolverApi,
   options: ResolvePlanIdOptions = {},
-): Promise<PlanId> {
-  const excludedPlanIds = new Set<PlanId>(options.excludePlanIds ?? []);
+): Promise<string> {
+  const excludedPlanIds = new Set(options.excludePlanIds ?? []);
   const configuredPlanId = getConfiguredPlanId(inputPlanId, api, options);
 
   if (configuredPlanId && !excludedPlanIds.has(configuredPlanId)) {
@@ -112,7 +82,6 @@ async function resolvePlanId(
   const resolvedPlanId = pickResolvedPlanId(response.data.plans, response.data.default_plan?.id, excludedPlanIds);
 
   if (resolvedPlanId) {
-    rememberRuntimePlanId(api, resolvedPlanId, inputPlanId);
     return resolvedPlanId;
   }
 
@@ -124,7 +93,7 @@ async function resolvePlanId(
 export async function withResolvedPlan<T>(
   inputPlanId: string | undefined,
   api: PlanResolverApi,
-  operation: (planId: PlanId) => Promise<T>,
+  operation: (planId: string) => Promise<T>,
 ) {
   const planId = await resolvePlanId(inputPlanId, api);
 
@@ -138,10 +107,8 @@ export async function withResolvedPlan<T>(
     const recoveredPlanId = await resolvePlanId(undefined, api, {
       excludePlanIds: [planId],
       ignoreConfiguredPlanId: true,
-      ignoreRuntimePlanIdOverride: true,
     });
 
-    rememberRuntimePlanId(api, recoveredPlanId);
     return operation(recoveredPlanId);
   }
 }

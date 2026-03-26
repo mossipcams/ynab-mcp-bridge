@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { registerServerTools } from "./server.js";
 import * as GetBudgetCleanupSummaryTool from "./tools/GetBudgetCleanupSummaryTool.js";
+import * as GetBudgetRatioSummaryTool from "./tools/GetBudgetRatioSummaryTool.js";
 import * as GetCategoryTrendSummaryTool from "./tools/GetCategoryTrendSummaryTool.js";
 import * as GetGoalProgressSummaryTool from "./tools/GetGoalProgressSummaryTool.js";
 import * as GetIncomeSummaryTool from "./tools/GetIncomeSummaryTool.js";
@@ -9,22 +9,6 @@ import * as GetUpcomingObligationsTool from "./tools/GetUpcomingObligationsTool.
 
 function parseText(result: Awaited<ReturnType<typeof GetUpcomingObligationsTool.execute>>) {
   return JSON.parse(result.content[0].text);
-}
-
-function registerHandlers(api: unknown) {
-  const handlers = new Map<string, (input: Record<string, unknown>) => Promise<unknown>>();
-
-  registerServerTools(
-    {
-      registerTool: ((name: string, _metadata: unknown, handler: (input: Record<string, unknown>) => Promise<unknown>) => {
-        handlers.set(name, handler);
-        return {} as any;
-      }) as any,
-    },
-    api as any,
-  );
-
-  return handlers;
 }
 
 describe("advanced finance tools", () => {
@@ -93,29 +77,25 @@ describe("advanced finance tools", () => {
     expect(api.scheduledTransactions.getScheduledTransactions).toHaveBeenCalledWith("plan-1", undefined);
     expect(parseText(result)).toEqual({
       as_of_date: "2026-03-16",
-      obligation_count: 3,
-      expected_inflow_count: 1,
+      obligation_count: 4,
       windows: {
         "7d": {
           upcoming_inflows: "0.00",
           upcoming_outflows: "225.00",
           net_upcoming: "-225.00",
           obligation_count: 2,
-          expected_inflow_count: 0,
         },
         "14d": {
           upcoming_inflows: "250.00",
           upcoming_outflows: "225.00",
           net_upcoming: "25.00",
-          obligation_count: 2,
-          expected_inflow_count: 1,
+          obligation_count: 3,
         },
         "30d": {
           upcoming_inflows: "250.00",
           upcoming_outflows: "237.00",
           net_upcoming: "13.00",
-          obligation_count: 3,
-          expected_inflow_count: 1,
+          obligation_count: 4,
         },
       },
       top_due: [
@@ -148,72 +128,6 @@ describe("advanced finance tools", () => {
         },
       ],
     });
-  });
-
-  it("expands recurring obligations across the window while separating inflows and excluding transfers", async () => {
-    const api = {
-      scheduledTransactions: {
-        getScheduledTransactions: vi.fn().mockResolvedValue({
-          data: {
-            scheduled_transactions: [
-              {
-                id: "sched-weekly",
-                date_next: "2026-03-18",
-                frequency: "weekly",
-                amount: -10000,
-                deleted: false,
-                transfer_account_id: null,
-                payee_name: "Allowance Card",
-                category_name: "Kids",
-                account_name: "Checking",
-              },
-              {
-                id: "sched-income",
-                date_next: "2026-03-20",
-                frequency: "monthly",
-                amount: 50000,
-                deleted: false,
-                transfer_account_id: null,
-                payee_name: "Employer",
-                category_name: "Inflow: Ready to Assign",
-                account_name: "Checking",
-              },
-              {
-                id: "sched-transfer",
-                date_next: "2026-03-22",
-                frequency: "monthly",
-                amount: -30000,
-                deleted: false,
-                transfer_account_id: "acct-savings",
-                payee_name: "Transfer : Savings",
-                category_name: null,
-                account_name: "Checking",
-              },
-            ],
-          },
-        }),
-      },
-    };
-
-    const result = await GetUpcomingObligationsTool.execute(
-      { planId: "plan-1", asOfDate: "2026-03-16", topN: 5 },
-      api as any,
-    );
-
-    expect(parseText(result as any)).toEqual(expect.objectContaining({
-      as_of_date: "2026-03-16",
-      obligation_count: 5,
-      expected_inflow_count: 1,
-      windows: expect.objectContaining({
-        "30d": expect.objectContaining({
-          upcoming_inflows: "50.00",
-          upcoming_outflows: "50.00",
-          net_upcoming: "0.00",
-          obligation_count: 5,
-          expected_inflow_count: 1,
-        }),
-      }),
-    }));
   });
 
   it("builds a compact goal progress summary for a month", async () => {
@@ -535,86 +449,6 @@ describe("advanced finance tools", () => {
     });
   });
 
-  it("excludes transfer transactions from budget cleanup backlog counts", async () => {
-    const api = {
-      transactions: {
-        getTransactions: vi.fn().mockResolvedValue({
-          data: {
-            transactions: [
-              {
-                id: "tx-transfer",
-                date: "2026-03-04",
-                amount: -50000,
-                deleted: false,
-                approved: false,
-                cleared: "uncleared",
-                category_id: null,
-                transfer_account_id: "acct-savings",
-                payee_name: "Transfer : Savings",
-                account_name: "Checking",
-              },
-              {
-                id: "tx-real",
-                date: "2026-03-06",
-                amount: -20000,
-                deleted: false,
-                approved: false,
-                cleared: "uncleared",
-                category_id: null,
-                transfer_account_id: null,
-                payee_name: "Unknown Store",
-                account_name: "Checking",
-              },
-            ],
-          },
-        }),
-      },
-      months: {
-        getPlanMonth: vi.fn().mockResolvedValue({
-          data: {
-            month: {
-              month: "2026-03-01",
-              deleted: false,
-              categories: [],
-            },
-          },
-        }),
-      },
-    };
-
-    const result = await GetBudgetCleanupSummaryTool.execute(
-      { planId: "plan-1", month: "2026-03-01", topN: 5 },
-      api as any,
-    );
-
-    expect(parseText(result as any)).toEqual({
-      month: "2026-03-01",
-      uncategorized_transaction_count: 1,
-      unapproved_transaction_count: 1,
-      uncleared_transaction_count: 1,
-      overspent_category_count: 0,
-      hidden_problem_category_count: 0,
-      top_uncategorized_transactions: [
-        {
-          id: "tx-real",
-          date: "2026-03-06",
-          payee_name: "Unknown Store",
-          account_name: "Checking",
-          amount: "20.00",
-        },
-      ],
-      top_unapproved_transactions: [
-        {
-          id: "tx-real",
-          date: "2026-03-06",
-          payee_name: "Unknown Store",
-          amount: "20.00",
-        },
-      ],
-      top_overspent_categories: [],
-    });
-  });
-
   it("builds a compact income summary across a month range", async () => {
     const api = {
       transactions: {
@@ -627,7 +461,6 @@ describe("advanced finance tools", () => {
                 amount: 300000,
                 deleted: false,
                 transfer_account_id: null,
-                category_name: "Inflow: Ready to Assign",
                 payee_id: "payee-1",
                 payee_name: "Employer",
               },
@@ -637,7 +470,6 @@ describe("advanced finance tools", () => {
                 amount: 500000,
                 deleted: false,
                 transfer_account_id: null,
-                category_name: "Inflow: Ready to Assign",
                 payee_id: "payee-1",
                 payee_name: "Employer",
               },
@@ -647,7 +479,6 @@ describe("advanced finance tools", () => {
                 amount: 300000,
                 deleted: false,
                 transfer_account_id: null,
-                category_name: "Inflow: Ready to Assign",
                 payee_id: "payee-1",
                 payee_name: "Employer",
               },
@@ -657,7 +488,6 @@ describe("advanced finance tools", () => {
                 amount: 100000,
                 deleted: false,
                 transfer_account_id: null,
-                category_name: "Inflow: Ready to Assign",
                 payee_id: "payee-2",
                 payee_name: "Freelance Client",
               },
@@ -716,78 +546,6 @@ describe("advanced finance tools", () => {
         {
           month: "2026-03-01",
           income: "400.00",
-        },
-      ],
-    });
-  });
-
-  it("excludes refunds and generic positive inflows from income totals", async () => {
-    const api = {
-      transactions: {
-        getTransactions: vi.fn().mockResolvedValue({
-          data: {
-            transactions: [
-              {
-                id: "tx-income",
-                date: "2026-03-05",
-                amount: 250000,
-                deleted: false,
-                transfer_account_id: null,
-                category_name: "Inflow: Ready to Assign",
-                payee_id: "payee-1",
-                payee_name: "Employer",
-              },
-              {
-                id: "tx-refund",
-                date: "2026-03-06",
-                amount: 30000,
-                deleted: false,
-                transfer_account_id: null,
-                category_name: "Groceries",
-                payee_id: "payee-2",
-                payee_name: "Trader Joe's",
-              },
-              {
-                id: "tx-generic",
-                date: "2026-03-07",
-                amount: 50000,
-                deleted: false,
-                transfer_account_id: null,
-                category_name: null,
-                payee_id: "payee-3",
-                payee_name: "Opening Balance",
-              },
-            ],
-          },
-        }),
-      },
-    };
-
-    const result = await GetIncomeSummaryTool.execute(
-      { planId: "plan-1", fromMonth: "2026-03-01", toMonth: "2026-03-01", topN: 5 },
-      api as any,
-    );
-
-    expect(parseText(result as any)).toEqual({
-      from_month: "2026-03-01",
-      to_month: "2026-03-01",
-      income_total: "250.00",
-      average_monthly_income: "250.00",
-      median_monthly_income: "250.00",
-      income_month_count: 1,
-      volatility_percent: "0.00",
-      top_income_sources: [
-        {
-          id: "payee-1",
-          name: "Employer",
-          amount: "250.00",
-          transaction_count: 1,
-        },
-      ],
-      months: [
-        {
-          month: "2026-03-01",
-          income: "250.00",
         },
       ],
     });
@@ -910,7 +668,6 @@ describe("advanced finance tools", () => {
       scope: {
         type: "category_group",
         name: "Living",
-        match_basis: "category_group_name",
       },
       average_spent: "356.67",
       peak_month: "2026-02-01",
@@ -933,338 +690,6 @@ describe("advanced finance tools", () => {
           assigned: "360.00",
           spent: "340.00",
           available: "20.00",
-        },
-      ],
-    });
-  });
-
-  it("builds a bundled monthly review for one-call month analysis", async () => {
-    const api = {
-      transactions: {
-        getTransactions: vi.fn().mockResolvedValue({
-          data: {
-            transactions: [
-              {
-                id: "tx-income",
-                date: "2026-03-02",
-                amount: 500000,
-                deleted: false,
-                transfer_account_id: null,
-                category_id: "cat-income",
-                category_name: "Inflow: Ready to Assign",
-                payee_name: "Employer",
-                account_id: "acct-checking",
-                account_name: "Checking",
-              },
-              {
-                id: "tx-rent",
-                date: "2026-03-03",
-                amount: -200000,
-                deleted: false,
-                transfer_account_id: null,
-                category_id: "cat-rent",
-                category_name: "Rent",
-                payee_name: "Landlord",
-                account_id: "acct-checking",
-                account_name: "Checking",
-              },
-              {
-                id: "tx-food",
-                date: "2026-03-10",
-                amount: -70000,
-                deleted: false,
-                transfer_account_id: null,
-                category_id: "cat-food",
-                category_name: "Groceries",
-                payee_name: "Grocer",
-                account_id: "acct-checking",
-                account_name: "Checking",
-              },
-              {
-                id: "tx-coffee",
-                date: "2026-03-14",
-                amount: -15000,
-                deleted: false,
-                transfer_account_id: null,
-                category_id: "cat-fun",
-                category_name: "Coffee",
-                payee_name: "Cafe",
-                account_id: "acct-checking",
-                account_name: "Checking",
-              },
-              {
-                id: "tx-transfer",
-                date: "2026-03-15",
-                amount: -50000,
-                deleted: false,
-                transfer_account_id: "acct-savings",
-                category_id: null,
-                category_name: null,
-                payee_name: "Transfer : Savings",
-                account_id: "acct-checking",
-                account_name: "Checking",
-              },
-            ],
-          },
-        }),
-      },
-      months: {
-        getPlanMonth: vi
-          .fn()
-          .mockResolvedValueOnce({
-            data: {
-              month: {
-                month: "2026-01-01",
-                income: 400000,
-                budgeted: 280000,
-                activity: -220000,
-                to_be_budgeted: 40000,
-                age_of_money: 30,
-                deleted: false,
-                categories: [
-                  {
-                    id: "cat-rent",
-                    name: "Rent",
-                    deleted: false,
-                    hidden: false,
-                    activity: -190000,
-                    balance: 0,
-                    goal_under_funded: 0,
-                  },
-                  {
-                    id: "cat-food",
-                    name: "Groceries",
-                    deleted: false,
-                    hidden: false,
-                    activity: -50000,
-                    balance: 5000,
-                    goal_under_funded: 0,
-                  },
-                ],
-              },
-            },
-          })
-          .mockResolvedValueOnce({
-            data: {
-              month: {
-                month: "2026-02-01",
-                income: 450000,
-                budgeted: 300000,
-                activity: -240000,
-                to_be_budgeted: 50000,
-                age_of_money: 32,
-                deleted: false,
-                categories: [
-                  {
-                    id: "cat-rent",
-                    name: "Rent",
-                    deleted: false,
-                    hidden: false,
-                    activity: -200000,
-                    balance: 0,
-                    goal_under_funded: 0,
-                  },
-                  {
-                    id: "cat-food",
-                    name: "Groceries",
-                    deleted: false,
-                    hidden: false,
-                    activity: -55000,
-                    balance: 5000,
-                    goal_under_funded: 0,
-                  },
-                  {
-                    id: "cat-fun",
-                    name: "Coffee",
-                    deleted: false,
-                    hidden: false,
-                    activity: -5000,
-                    balance: 0,
-                    goal_under_funded: 0,
-                  },
-                ],
-              },
-            },
-          })
-          .mockResolvedValueOnce({
-            data: {
-              month: {
-                month: "2026-03-01",
-                income: 500000,
-                budgeted: 360000,
-                activity: -285000,
-                to_be_budgeted: 65000,
-                age_of_money: 35,
-                deleted: false,
-                categories: [
-                  {
-                    id: "cat-rent",
-                    name: "Rent",
-                    deleted: false,
-                    hidden: false,
-                    activity: -200000,
-                    balance: 0,
-                    goal_under_funded: 0,
-                  },
-                  {
-                    id: "cat-food",
-                    name: "Groceries",
-                    deleted: false,
-                    hidden: false,
-                    activity: -70000,
-                    balance: -10000,
-                    goal_under_funded: 0,
-                  },
-                  {
-                    id: "cat-fun",
-                    name: "Coffee",
-                    deleted: false,
-                    hidden: false,
-                    activity: -15000,
-                    balance: -5000,
-                    goal_under_funded: 0,
-                  },
-                  {
-                    id: "cat-trip",
-                    name: "Vacation",
-                    deleted: false,
-                    hidden: false,
-                    activity: 0,
-                    balance: 20000,
-                    goal_under_funded: 25000,
-                  },
-                  {
-                    id: "cat-buffer",
-                    name: "Car Maintenance",
-                    deleted: false,
-                    hidden: false,
-                    activity: 0,
-                    balance: 20000,
-                    goal_under_funded: 0,
-                  },
-                ],
-              },
-            },
-          }),
-      },
-      plans: {
-        getPlans: vi.fn().mockResolvedValue({
-          data: {
-            plans: [{ id: "plan-1" }],
-            default_plan: { id: "plan-1" },
-          },
-        }),
-      },
-    };
-
-    const handlers = registerHandlers(api);
-    const handler = handlers.get("ynab_get_monthly_review");
-
-    expect(handler).toBeDefined();
-    if (!handler) {
-      return;
-    }
-
-    const result = await handler({
-      planId: "plan-1",
-      month: "2026-03-01",
-      baselineMonths: 2,
-      topN: 2,
-    });
-
-    expect(api.transactions.getTransactions).toHaveBeenCalledWith("plan-1", "2026-03-01", undefined, undefined);
-    expect(api.months.getPlanMonth).toHaveBeenNthCalledWith(1, "plan-1", "2026-01-01");
-    expect(api.months.getPlanMonth).toHaveBeenNthCalledWith(2, "plan-1", "2026-02-01");
-    expect(api.months.getPlanMonth).toHaveBeenNthCalledWith(3, "plan-1", "2026-03-01");
-    expect(parseText(result as any)).toEqual({
-      month: "2026-03-01",
-      income: "500.00",
-      inflow: "500.00",
-      outflow: "285.00",
-      net_flow: "215.00",
-      ready_to_assign: "65.00",
-      assigned: "360.00",
-      spent: "285.00",
-      assigned_vs_spent: "75.00",
-      available_total: "40.00",
-      overspent_total: "15.00",
-      underfunded_total: "25.00",
-      overspent_category_count: 2,
-      underfunded_category_count: 1,
-      top_spending_categories: [
-        {
-          id: "cat-rent",
-          name: "Rent",
-          amount: "200.00",
-          transaction_count: 1,
-        },
-        {
-          id: "cat-food",
-          name: "Groceries",
-          amount: "70.00",
-          transaction_count: 1,
-        },
-      ],
-      anomalies: [
-        {
-          category_id: "cat-fun",
-          category_name: "Coffee",
-          latest_spent: "15.00",
-          baseline_average: "2.50",
-          change_percent: "500.00",
-        },
-      ],
-    });
-  });
-
-  it("does not count positive refund activity as spending in category trends", async () => {
-    const api = {
-      months: {
-        getPlanMonth: vi.fn().mockResolvedValue({
-          data: {
-            month: {
-              month: "2026-03-01",
-              deleted: false,
-              categories: [
-                {
-                  id: "cat-1",
-                  name: "Medical Reimbursement",
-                  category_group_name: "Reimbursements",
-                  deleted: false,
-                  hidden: false,
-                  budgeted: 0,
-                  activity: 12000,
-                  balance: 12000,
-                },
-              ],
-            },
-          },
-        }),
-      },
-    };
-
-    const result = await GetCategoryTrendSummaryTool.execute(
-      { planId: "plan-1", fromMonth: "2026-03-01", toMonth: "2026-03-01", categoryGroupName: "Reimbursements" },
-      api as any,
-    );
-
-    expect(parseText(result as any)).toEqual({
-      from_month: "2026-03-01",
-      to_month: "2026-03-01",
-      scope: {
-        type: "category_group",
-        name: "Reimbursements",
-        match_basis: "category_group_name",
-      },
-      average_spent: "0.00",
-      peak_month: "2026-03-01",
-      spent_change: "0.00",
-      periods: [
-        {
-          month: "2026-03-01",
-          assigned: "0.00",
-          spent: "0.00",
-          available: "12.00",
         },
       ],
     });
@@ -1313,7 +738,6 @@ describe("advanced finance tools", () => {
         scope: {
           type: "category_group",
           name: "Living",
-          match_basis: "category_group_name",
         },
         average_spent: "150.00",
         peak_month: "2026-03-01",
@@ -1330,5 +754,153 @@ describe("advanced finance tools", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("builds a compact 70/20/10-style allocation summary", async () => {
+    const api = {
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              income: 1000000,
+              deleted: false,
+              categories: [
+                {
+                  id: "cat-1",
+                  name: "Rent",
+                  category_group_name: "Needs",
+                  deleted: false,
+                  hidden: false,
+                  budgeted: 350000,
+                  activity: -350000,
+                },
+                {
+                  id: "cat-2",
+                  name: "Groceries",
+                  category_group_name: "Needs",
+                  deleted: false,
+                  hidden: false,
+                  budgeted: 150000,
+                  activity: -130000,
+                },
+                {
+                  id: "cat-3",
+                  name: "Dining Out",
+                  category_group_name: "Wants",
+                  deleted: false,
+                  hidden: false,
+                  budgeted: 90000,
+                  activity: -80000,
+                },
+                {
+                  id: "cat-4",
+                  name: "Vacation",
+                  category_group_name: "Wants",
+                  deleted: false,
+                  hidden: false,
+                  budgeted: 70000,
+                  activity: -60000,
+                },
+                {
+                  id: "cat-5",
+                  name: "Emergency Fund",
+                  category_group_name: "Savings",
+                  deleted: false,
+                  hidden: false,
+                  budgeted: 130000,
+                  activity: 0,
+                },
+                {
+                  id: "cat-6",
+                  name: "Extra Debt Payment",
+                  category_group_name: "Debt",
+                  deleted: false,
+                  hidden: false,
+                  budgeted: 80000,
+                  activity: -75000,
+                },
+              ],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetBudgetRatioSummaryTool.execute(
+      {
+        planId: "plan-1",
+        month: "2026-03-01",
+        needsGroupNames: ["Needs"],
+        wantsGroupNames: ["Wants"],
+        savingsDebtGroupNames: ["Savings", "Debt"],
+        topN: 2,
+      },
+      api as any,
+    );
+
+    expect(api.months.getPlanMonth).toHaveBeenCalledWith("plan-1", "2026-03-01");
+    expect(parseText(result as any)).toEqual({
+      month: "2026-03-01",
+      income: "1000.00",
+      buckets: {
+        needs: {
+          amount: "480.00",
+          actual_percent: "48.00",
+          target_percent: "70.00",
+          variance_percent: "-22.00",
+        },
+        wants: {
+          amount: "140.00",
+          actual_percent: "14.00",
+          target_percent: "20.00",
+          variance_percent: "-6.00",
+        },
+        savings_debt: {
+          amount: "210.00",
+          actual_percent: "21.00",
+          target_percent: "10.00",
+          variance_percent: "11.00",
+        },
+      },
+      top_categories: {
+        needs: [
+          {
+            id: "cat-1",
+            name: "Rent",
+            amount: "350.00",
+          },
+          {
+            id: "cat-2",
+            name: "Groceries",
+            amount: "130.00",
+          },
+        ],
+        wants: [
+          {
+            id: "cat-3",
+            name: "Dining Out",
+            amount: "80.00",
+          },
+          {
+            id: "cat-4",
+            name: "Vacation",
+            amount: "60.00",
+          },
+        ],
+        savings_debt: [
+          {
+            id: "cat-5",
+            name: "Emergency Fund",
+            amount: "130.00",
+          },
+          {
+            id: "cat-6",
+            name: "Extra Debt Payment",
+            amount: "80.00",
+          },
+        ],
+      },
+    });
   });
 });
