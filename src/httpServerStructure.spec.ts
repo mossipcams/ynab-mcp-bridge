@@ -7,8 +7,10 @@ describe("http server structure", () => {
     const source = readFileSync(new URL("./httpServer.ts", import.meta.url), "utf8");
 
     expect(source).toContain('from "./httpServerOAuthRoutes.js"');
-    expect(source).toContain('from "./httpServerMcpRoute.js"');
-    expect(source).toContain("installOAuthRoutes(");
-    expect(source).toContain("installMcpPostRoute(");
+    expect(source).toContain('from "./httpServerIngress.js"');
+    expect(source).toContain('from "./httpServerTransportRoutes.js"');
+    expect(source).toContain("registerHttpServerIngress(");
+    expect(source).toContain("registerOAuthHttpRoutes(");
+    expect(source).toContain("registerMcpTransportRoutes(");
   });
 });
