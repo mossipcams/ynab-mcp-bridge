@@ -162,6 +162,48 @@ describe("createServer", () => {
     }));
   });
 
+  it("registers a compatibility URI alias for each discovery resource without changing its metadata contract", async () => {
+    const server = createServer(
+      {
+        apiToken: "test-token",
+      },
+      undefined,
+      {
+        discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
+      },
+    );
+    const registeredResources = (server as any)._registeredResources as Record<string, {
+      name: string;
+      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
+    }>;
+
+    const categoryEntries = Object.entries(registeredResources)
+      .filter(([, resource]) => resource.name === "ynab_list_categories");
+
+    expect(categoryEntries.map(([uri]) => uri)).toEqual(expect.arrayContaining([
+      "ynab-tool://ynab_list_categories",
+      "https://mcp.example.com/mcp/resources/ynab_list_categories",
+    ]));
+
+    const payloads = await Promise.all(categoryEntries.map(async ([uri, resource]) => (
+      JSON.parse((await resource.readCallback(new URL(uri), {})).contents[0].text) as Record<string, unknown>
+    )));
+
+    expect(payloads).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: "List Categories",
+        toolName: "ynab_list_categories",
+      }),
+    ]));
+    expect(new Set(payloads.map((payload) => JSON.stringify({
+      annotations: payload.annotations,
+      description: payload.description,
+      inputSchema: payload.inputSchema,
+      title: payload.title,
+      toolName: payload.toolName,
+    })))).toHaveLength(1);
+  });
+
   it("registers the toolset through a reusable SDK-native registrar", () => {
     const registerTool = vi.fn();
 

@@ -4,9 +4,11 @@ import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { readFileSync } from "node:fs";
 import { createServer as createNodeHttpServer, request as httpRequest } from "node:http";
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startHttpServer } from "./httpTransport.js";
+import { setLoggerDestinationForTests } from "./logger.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
@@ -22,6 +24,27 @@ describe("startHttpServer", () => {
   const ynab = {
     apiToken: "test-token",
   } as const;
+
+  function createBufferedDestination() {
+    const destination = new PassThrough();
+    const chunks: string[] = [];
+
+    destination.on("data", (chunk) => {
+      chunks.push(chunk.toString("utf8"));
+    });
+
+    return {
+      destination,
+      readEntries() {
+        return chunks
+          .join("")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+      },
+    };
+  }
 
   function getStructuredLogEntry(call: unknown[]) {
     if (call.length !== 1 || typeof call[0] !== "string") {
@@ -85,6 +108,30 @@ describe("startHttpServer", () => {
         matcher(details as Record<string, unknown>);
     });
   }
+
+  function findMcpLogCall(
+    spy: ReturnType<typeof vi.spyOn>,
+    event: string,
+    matcher: (details: Record<string, unknown>) => boolean = () => true,
+  ) {
+    return spy.mock.calls.find((call) => {
+      const structuredEntry = getStructuredLogEntry(call);
+
+      if (structuredEntry) {
+        return structuredEntry.scope === "mcp" &&
+          structuredEntry.event === event &&
+          matcher(structuredEntry);
+      }
+
+      const [scope, loggedEvent, details] = call;
+
+      return scope === "[mcp]" &&
+        loggedEvent === event &&
+        typeof details === "object" &&
+        details !== null &&
+        matcher(details as Record<string, unknown>);
+    });
+  }
   function findOAuthLogCall(
     spy: ReturnType<typeof vi.spyOn>,
     event: string,
@@ -125,6 +172,25 @@ describe("startHttpServer", () => {
     return typeof details === "object" && details !== null
       ? details as Record<string, unknown>
       : undefined;
+  }
+
+  async function sendJsonRpcRequest(url: string, options: {
+    body: Record<string, unknown>;
+    correlationId?: string;
+    headers?: Record<string, string>;
+  }) {
+    return await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        ...(options.correlationId ? { "X-Correlation-Id": options.correlationId } : {}),
+        ...options.headers,
+      },
+      body: JSON.stringify(options.body),
+    });
   }
 
   async function sendRawHttpRequest(url: string, options: {
@@ -259,6 +325,7 @@ describe("startHttpServer", () => {
     }
 
     process.env = { ...originalEnv };
+    setLoggerDestinationForTests();
   });
 
   it("serves MCP over authless streamable HTTP", async () => {
@@ -309,6 +376,209 @@ describe("startHttpServer", () => {
       "ynab_list_categories",
       "ynab_list_accounts",
     ]));
+
+    await transport.close();
+  });
+
+  it("logs advertised and requested discovery resource URIs", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const client = new Client({
+      name: "ynab-mcp-bridge-resource-logging-test",
+      version: "1.0.0",
+    });
+    const transport = new StreamableHTTPClientTransport(new URL(httpServer.url));
+
+    await client.connect(transport);
+
+    const listResult = await client.listResources();
+    const categoryResource = listResult.resources.find((resource) => resource.name === "ynab_list_categories");
+
+    expect(categoryResource).toBeDefined();
+
+    await client.readResource({
+      uri: categoryResource!.uri,
+    });
+
+    const advertisedCall = findLogCall(consoleErrorSpy, "resource.list.advertised", (details) => (
+      details.jsonRpcMethod === "resources/list" &&
+      Array.isArray(details.resourceUris) &&
+      details.resourceUris.includes(categoryResource!.uri)
+    ));
+    const readRequestedCall = findLogCall(consoleErrorSpy, "resource.read.requested", (details) => (
+      details.jsonRpcMethod === "resources/read" &&
+      details.resourceUri === categoryResource!.uri
+    ));
+    const readSucceededCall = findMcpLogCall(consoleErrorSpy, "resource.read.succeeded", (details) => (
+      details.resourceName === "ynab_list_categories" &&
+      details.resourceUri === categoryResource!.uri
+    ));
+
+    expect(advertisedCall).toBeTruthy();
+    expect(readRequestedCall).toBeTruthy();
+    expect(readSucceededCall).toBeTruthy();
+
+    await transport.close();
+  });
+
+  it("captures a ChatGPT-style discovery sequence that lists resources without reading one", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const correlationId = "corr-chatgpt-discovery-123";
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const initializeResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId,
+      headers: {
+        "User-Agent": "chatgpt",
+      },
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "ChatGPT",
+            version: "1.0.0",
+          },
+        },
+      },
+    });
+    expect(initializeResponse.status).toBe(200);
+
+    const initializedResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId,
+      headers: {
+        "User-Agent": "chatgpt",
+      },
+      body: {
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+      },
+    });
+    expect(initializedResponse.status).toBe(202);
+
+    const toolsListResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId,
+      headers: {
+        "User-Agent": "chatgpt",
+      },
+      body: {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      },
+    });
+    expect(toolsListResponse.status).toBe(200);
+
+    const resourcesListResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId,
+      headers: {
+        "User-Agent": "chatgpt",
+      },
+      body: {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "resources/list",
+        params: {},
+      },
+    });
+    expect(resourcesListResponse.status).toBe(200);
+
+    const toolCallResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId,
+      headers: {
+        "User-Agent": "chatgpt",
+      },
+      body: {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      },
+    });
+    expect(toolCallResponse.status).toBe(200);
+
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.correlationId === correlationId &&
+      details.jsonRpcMethod === "initialize"
+    ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.correlationId === correlationId &&
+      details.jsonRpcMethod === "tools/list"
+    ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "resource.list.advertised", (details) => (
+      details.correlationId === correlationId &&
+      details.jsonRpcMethod === "resources/list"
+    ))).toBeTruthy();
+    expect(findMcpLogCall(consoleErrorSpy, "tool.call.started", (details) => (
+      details.correlationId === correlationId &&
+      details.toolName === "ynab_get_mcp_version"
+    ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "resource.read.requested", (details) => (
+      details.correlationId === correlationId
+    ))).toBeFalsy();
+  });
+
+  it("serves absolute compatibility discovery URLs directly and keeps them aligned with MCP reads", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const client = new Client({
+      name: "ynab-mcp-bridge-resource-direct-fetch-test",
+      version: "1.0.0",
+    });
+    const transport = new StreamableHTTPClientTransport(new URL(httpServer.url));
+
+    await client.connect(transport);
+
+    const listResult = await client.listResources();
+    const categoryCompatibilityResource = listResult.resources.find((resource) => (
+      resource.name === "ynab_list_categories" &&
+      resource.uri.startsWith("http://")
+    ));
+
+    expect(categoryCompatibilityResource).toBeDefined();
+
+    const mcpReadResult = await client.readResource({
+      uri: categoryCompatibilityResource!.uri,
+    });
+    const directFetchResponse = await fetch(categoryCompatibilityResource!.uri);
+
+    expect(directFetchResponse.status).toBe(200);
+    expect(await directFetchResponse.json()).toEqual(
+      JSON.parse(mcpReadResult.contents[0].text),
+    );
 
     await transport.close();
   });
@@ -1425,6 +1695,70 @@ describe("startHttpServer", () => {
 
     expect(typeof gapDetails?.requestId).toBe("string");
     expect(gapDetails?.requestId).not.toBe("");
+  });
+
+  it("separates search-transaction validation failures from executed search calls", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
+    const invalidCorrelationId = "corr-search-validation-123";
+    const validCorrelationId = "corr-search-executed-123";
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const invalidResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId: invalidCorrelationId,
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "ynab_search_transactions",
+          arguments: {
+            limit: 0,
+          },
+        },
+      },
+    });
+
+    expect(invalidResponse.status).toBe(200);
+    await invalidResponse.text();
+
+    const validResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId: validCorrelationId,
+      body: {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "ynab_search_transactions",
+          arguments: {},
+        },
+      },
+    });
+
+    expect(validResponse.status).toBe(200);
+    await validResponse.text();
+
+    const entries = sink.readEntries();
+
+    expect(entries.find((entry) => (
+      entry.scope === "http" &&
+      entry.event === "tool.call.validation_failed" &&
+      entry.correlationId === invalidCorrelationId &&
+      entry.toolName === "ynab_search_transactions"
+    ))).toBeTruthy();
+    expect(entries.find((entry) => (
+      entry.scope === "mcp" &&
+      entry.event === "tool.call.started" &&
+      entry.correlationId === validCorrelationId &&
+      entry.toolName === "ynab_search_transactions"
+    ))).toBeTruthy();
   });
 
   it("rejects repeated MCP session headers using the SDK transport contract", async () => {
