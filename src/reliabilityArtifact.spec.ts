@@ -125,6 +125,7 @@ describe("reliability artifacts", () => {
           tolerance: 250,
         },
       ],
+      requiredImprovements: [],
     });
   });
 

@@ -135,13 +135,6 @@ function getToolDiscoveryUris(toolName, options = {}) {
     }
     return uris;
 }
-function getToolRegistration(toolName) {
-    const tool = toolRegistrations.find((candidate) => candidate.name === toolName);
-    if (!tool) {
-        throw new Error(`Unknown discovery resource tool: ${toolName}`);
-    }
-    return tool;
-}
 function buildDiscoveryResourceDocument(tool, uri) {
     const invocationGuidance = discoveryInvocationGuidanceByToolName[tool.name];
     return {
@@ -157,22 +150,6 @@ function buildDiscoveryResourceDocument(tool, uri) {
             requiredArguments: invocationGuidance.requiredArguments,
         } : {}),
     };
-}
-export function getDiscoveryResourceSummaries(options = {}) {
-    return toolRegistrations.flatMap((tool) => (getToolDiscoveryUris(tool.name, options).map((uri) => ({
-        description: tool.description,
-        name: tool.name,
-        title: tool.title,
-        uri,
-    }))));
-}
-export function getDiscoveryResourceDocument(toolName, uri, options = {}) {
-    const tool = getToolRegistration(toolName);
-    const validUris = getToolDiscoveryUris(toolName, options);
-    if (!validUris.includes(uri)) {
-        throw new Error(`Discovery resource URI does not match tool ${toolName}: ${uri}`);
-    }
-    return buildDiscoveryResourceDocument(tool, uri);
 }
 export function defineTool(title, tool) {
     return {
@@ -229,6 +206,52 @@ const toolRegistrations = [
     defineTool("Get Recurring Expense Summary", GetRecurringExpenseSummaryTool),
     defineTool("Get Category Trend Summary", GetCategoryTrendSummaryTool),
 ];
+const discoveryCatalogByBaseUrl = new Map();
+function getDiscoveryCatalog(options = {}) {
+    const normalizedBaseUrl = getDiscoveryResourceBaseUrl(options.discoveryResourceBaseUrl);
+    const cacheKey = normalizedBaseUrl ?? "";
+    const cachedCatalog = discoveryCatalogByBaseUrl.get(cacheKey);
+    if (cachedCatalog) {
+        return cachedCatalog;
+    }
+    const summaries = [];
+    const documentsByUri = new Map();
+    const toolNameByUri = new Map();
+    for (const tool of toolRegistrations) {
+        for (const uri of getToolDiscoveryUris(tool.name, options)) {
+            summaries.push({
+                description: tool.description,
+                name: tool.name,
+                title: tool.title,
+                uri,
+            });
+            documentsByUri.set(uri, buildDiscoveryResourceDocument(tool, uri));
+            toolNameByUri.set(uri, tool.name);
+        }
+    }
+    const catalog = {
+        documentsByUri,
+        summaries,
+        toolNameByUri,
+    };
+    discoveryCatalogByBaseUrl.set(cacheKey, catalog);
+    return catalog;
+}
+export function getDiscoveryResourceSummaries(options = {}) {
+    return getDiscoveryCatalog(options).summaries;
+}
+export function getDiscoveryResourceDocument(toolName, uri, options = {}) {
+    const catalog = getDiscoveryCatalog(options);
+    const resolvedToolName = catalog.toolNameByUri.get(uri);
+    if (resolvedToolName !== toolName) {
+        throw new Error(`Discovery resource URI does not match tool ${toolName}: ${uri}`);
+    }
+    const document = catalog.documentsByUri.get(uri);
+    if (!document) {
+        throw new Error(`Discovery resource URI does not match tool ${toolName}: ${uri}`);
+    }
+    return document;
+}
 function registerTool(registrar, tool, api) {
     registrar.registerTool(tool.name, {
         title: tool.title,
@@ -271,10 +294,10 @@ export function registerServerTools(registrar, api) {
 }
 function registerServerResources(server, options = {}) {
     const registeredResourceUris = [];
-    for (const { name, uri } of getDiscoveryResourceSummaries(options)) {
+    for (const { description, name, title, uri } of getDiscoveryResourceSummaries(options)) {
         server.registerResource(name, uri, {
-            title: getToolRegistration(name).title,
-            description: getToolRegistration(name).description,
+            title,
+            description,
             mimeType: "application/json",
         }, async () => {
             logAppEvent("mcp", "resource.read.started", {

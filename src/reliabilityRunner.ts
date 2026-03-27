@@ -1,5 +1,6 @@
 import { summarizeReliabilityResults } from "./reliabilitySummaryUtils.js";
 import type { ReliabilityProbeResult } from "./reliabilitySummaryUtils.js";
+import type { ReliabilityOperationSummary } from "./reliabilitySummaryUtils.js";
 
 export type { ReliabilityProbeResult } from "./reliabilitySummaryUtils.js";
 
@@ -55,6 +56,7 @@ export type ReliabilityRunSummary = {
       target: number;
     };
   };
+  operations: Record<string, ReliabilityOperationSummary>;
   failures: Array<{
     operation: string;
     latencyMs: number;

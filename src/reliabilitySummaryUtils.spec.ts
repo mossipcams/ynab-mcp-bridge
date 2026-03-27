@@ -55,6 +55,44 @@ describe("reliabilitySummaryUtils", () => {
         p95: 800,
         p99: 800,
       },
+      operations: {
+        initialize: {
+          count: 1,
+          errorRate: 0,
+          latencyMs: {
+            min: 100,
+            max: 100,
+            average: 100,
+            p50: 100,
+            p95: 100,
+            p99: 100,
+          },
+        },
+        "tools/call": {
+          count: 1,
+          errorRate: 1,
+          latencyMs: {
+            min: 800,
+            max: 800,
+            average: 800,
+            p50: 800,
+            p95: 800,
+            p99: 800,
+          },
+        },
+        "tools/list": {
+          count: 2,
+          errorRate: 1,
+          latencyMs: {
+            min: 700,
+            max: 750,
+            average: 725,
+            p50: 700,
+            p95: 750,
+            p99: 750,
+          },
+        },
+      },
       thresholds: {
         maxErrorRate: {
           actual: 0.75,

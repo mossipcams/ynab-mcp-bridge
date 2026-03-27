@@ -4,7 +4,13 @@ import { PassThrough } from "node:stream";
 
 import { setLoggerDestinationForTests } from "./logger.js";
 import { runWithRequestContext } from "./requestContext.js";
-import { createServer, defineTool, registerServerTools } from "./serverRuntime.js";
+import {
+  createServer,
+  defineTool,
+  getDiscoveryResourceDocument,
+  getDiscoveryResourceSummaries,
+  registerServerTools,
+} from "./serverRuntime.js";
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
 import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
 
@@ -257,6 +263,25 @@ describe("createServer", () => {
       month: "2026-03-01",
       categoryId: "category-123",
     }));
+  });
+
+  it("reuses cached discovery summaries and documents for repeated base-url lookups", () => {
+    const options = {
+      discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
+    };
+
+    const firstSummaries = getDiscoveryResourceSummaries(options);
+    const secondSummaries = getDiscoveryResourceSummaries(options);
+
+    expect(firstSummaries).toBe(secondSummaries);
+
+    const categorySummary = firstSummaries.find((summary) => summary.name === "ynab_list_categories" && summary.uri.startsWith("https://"));
+    expect(categorySummary).toBeDefined();
+
+    const firstDocument = getDiscoveryResourceDocument("ynab_list_categories", categorySummary!.uri, options);
+    const secondDocument = getDiscoveryResourceDocument("ynab_list_categories", categorySummary!.uri, options);
+
+    expect(firstDocument).toBe(secondDocument);
   });
 
   it("uses concrete date and id examples for the remaining flaky discovery tools", async () => {

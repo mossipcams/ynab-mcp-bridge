@@ -59,6 +59,7 @@ type HttpServerOptions = {
 
 type HttpServerDependencies = {
   createApi?: (config: YnabConfig) => API | object;
+  createServer?: typeof createServer;
   onManagedRequestCreated?: () => void;
 };
 
@@ -75,6 +76,17 @@ type ManagedRequest = {
   close: () => Promise<void>;
   discoveryResources: Array<{ name: string; uri: string }>;
   transport: StreamableHTTPServerTransport;
+};
+
+type ManagedRequestRuntime = {
+  busy: boolean;
+  mcpServer: ReturnType<typeof createServer>;
+};
+
+type ManagedRequestRuntimePool = {
+  acquire: () => ManagedRequestRuntime;
+  close: () => Promise<void>;
+  release: (runtime: ManagedRequestRuntime) => void;
 };
 
 type RequestResolution =
@@ -627,23 +639,71 @@ function isPayloadTooLargeError(error: unknown) {
     );
 }
 
-async function createManagedRequest(config: YnabConfig, api: API | object, options: {
-  discoveryResourceBaseUrl?: string;
-}) {
+function createManagedRequestRuntimePool(
+  config: YnabConfig,
+  api: API | object,
+  options: {
+    discoveryResourceBaseUrl?: string;
+  },
+  createServerInstance: typeof createServer,
+): ManagedRequestRuntimePool {
+  const runtimes: ManagedRequestRuntime[] = [];
+
+  return {
+    acquire() {
+      const idleRuntime = runtimes.find((runtime) => !runtime.busy);
+
+      if (idleRuntime) {
+        idleRuntime.busy = true;
+        return idleRuntime;
+      }
+
+      const runtime: ManagedRequestRuntime = {
+        busy: true,
+        mcpServer: createServerInstance(config, api, options),
+      };
+      runtimes.push(runtime);
+      return runtime;
+    },
+    release(runtime) {
+      runtime.busy = false;
+    },
+    async close() {
+      await Promise.all(runtimes.map(async (runtime) => {
+        await runtime.mcpServer.close();
+      }));
+    },
+  };
+}
+
+async function createManagedRequestFromRuntimePool(
+  runtimePool: ManagedRequestRuntimePool,
+  options: {
+    discoveryResourceBaseUrl?: string;
+  },
+) {
+  const runtime = runtimePool.acquire();
   const discoveryResources = getDiscoveryResourceSummaries(options);
-  const mcpServer = createServer(config, api, options);
   const transport = new StreamableHTTPServerTransport({
     enableJsonResponse: true,
   });
 
-  await mcpServer.connect(new StreamableTransportAdapter(transport));
+  try {
+    await runtime.mcpServer.connect(new StreamableTransportAdapter(transport));
+  } catch (error) {
+    runtimePool.release(runtime);
+    throw error;
+  }
 
   return {
     discoveryResources: discoveryResources.map(({ name, uri }) => ({ name, uri })),
     transport,
     close: async () => {
-      await transport.close();
-      await mcpServer.close();
+      try {
+        await transport.close();
+      } finally {
+        runtimePool.release(runtime);
+      }
     },
   } satisfies ManagedRequest;
 }
@@ -1067,11 +1127,12 @@ export async function startHttpServer(
 
   installMcpPostRoute({
     app,
-    createManagedRequest: () => createManagedRequest(
-      ynab,
-      sharedApi,
-      discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {},
-    ),
+    createManagedRequest: () => {
+      return createManagedRequestFromRuntimePool(
+        runtimePool,
+        discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {},
+      );
+    },
     getInitializeParams,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
@@ -1157,6 +1218,12 @@ export async function startHttpServer(
     ? new URL(auth.publicUrl).origin
     : `http://${host}:${resolvedAddress.port}`;
   const discoveryResourceBaseUrl = new URL(`${path.replace(/\/$/, "")}/resources/`, resourceOrigin).toString();
+  const runtimePool = createManagedRequestRuntimePool(
+    ynab,
+    sharedApi,
+    { discoveryResourceBaseUrl },
+    dependencies.createServer ?? createServer,
+  );
 
   return {
     host,
@@ -1170,6 +1237,7 @@ export async function startHttpServer(
 
       closed = true;
       await closeNodeServer(server);
+      await runtimePool?.close();
     },
   };
 }

@@ -54,6 +54,11 @@ type ExecuteReliabilityHttpCliDependencies = {
   ynab?: YnabConfig;
 };
 
+type RequiredLatencyReduction = {
+  minimumReductionRatio: number;
+  operation: string;
+};
+
 type RunHttpReliabilityScenarioDependencies = {
   runSequence?: typeof runMeasuredHttpSequence;
 };
@@ -173,6 +178,103 @@ function getErrorMessage(error: unknown) {
   }
 
   return String(error);
+}
+
+function getRequiredLatencyReductions(artifact: ReliabilityArtifact): RequiredLatencyReduction[] {
+  const defaultOperations = [
+    "initialize",
+    "tools/list",
+  ];
+  const toolCallOperations = Object.keys(artifact.summary.operations)
+    .filter((operation) => operation.startsWith("tools/call:"))
+    .sort((left, right) => left.localeCompare(right));
+
+  return [...new Set([...defaultOperations, ...toolCallOperations])]
+    .filter((operation) => operation in artifact.summary.operations)
+    .map((operation) => ({
+      operation,
+      minimumReductionRatio: 0.2,
+    }));
+}
+
+function formatCliReliabilitySummary(artifact: ReliabilityArtifact): ReliabilityRunSummary {
+  return {
+    passed: !artifact.summary.failed,
+    maxErrorRate: artifact.profile.thresholds.maxErrorRate,
+    errorRate: artifact.summary.thresholds.maxErrorRate.actual,
+    failureGroups: artifact.summary.failureGroups,
+    totals: artifact.summary.totals,
+    latencyMs: artifact.summary.latencyMs,
+    thresholds: artifact.summary.thresholds,
+    operations: artifact.summary.operations,
+    failures: artifact.summary.failures,
+  };
+}
+
+async function writeArtifactIfRequested(
+  artifact: ReliabilityArtifact,
+  jsonOut: string | undefined,
+  writeLine: (line: string) => void,
+) {
+  if (!jsonOut) {
+    return;
+  }
+
+  await writeFile(jsonOut, JSON.stringify(artifact, null, 2), "utf8");
+  writeLine(`artifact=${jsonOut}`);
+}
+
+async function readBaselineArtifactOrThrow(baselineArtifactPath: string) {
+  try {
+    return await readBaselineArtifact(baselineArtifactPath);
+  } catch (error) {
+    throw new Error(`Failed to read baseline artifact: ${baselineArtifactPath}. ${getErrorMessage(error)}`);
+  }
+}
+
+function writeRequiredImprovements(
+  comparison: ReturnType<typeof compareReliabilityArtifacts>,
+  writeLine: (line: string) => void,
+) {
+  for (const improvement of comparison.requiredImprovements) {
+    const reductionPct = Number.isFinite(improvement.reductionRatio)
+      ? (improvement.reductionRatio * 100).toFixed(2)
+      : "n/a";
+    writeLine(
+      `baseline_latency_reduction operation=${improvement.operation} ` +
+      `status=${improvement.passed ? "pass" : "fail"} ` +
+      `reduction_pct=${reductionPct} ` +
+      `target_pct=${(improvement.minimumReductionRatio * 100).toFixed(2)} ` +
+      `baseline_avg_ms=${Number.isFinite(improvement.baselineAverage) ? improvement.baselineAverage.toFixed(2) : "n/a"} ` +
+      `current_avg_ms=${Number.isFinite(improvement.currentAverage) ? improvement.currentAverage.toFixed(2) : "n/a"}`,
+    );
+  }
+}
+
+async function evaluateBaselineComparison(
+  artifact: ReliabilityArtifact,
+  baselineArtifactPath: string | undefined,
+  writeLine: (line: string) => void,
+) {
+  if (!baselineArtifactPath) {
+    return true;
+  }
+
+  const baseline = await readBaselineArtifactOrThrow(baselineArtifactPath);
+  const comparison = compareReliabilityArtifacts({
+    baseline,
+    current: artifact,
+    requiredOperationAverageLatencyReductions: getRequiredLatencyReductions(artifact),
+    tolerances: {
+      maxErrorRateIncrease: 0.05,
+      maxP95LatencyIncreaseMs: 250,
+      maxP99LatencyIncreaseMs: 250,
+    },
+  });
+
+  writeLine(`baseline_status=${comparison.passed ? "pass" : "fail"}`);
+  writeRequiredImprovements(comparison, writeLine);
+  return comparison.passed;
 }
 
 async function measureOperation(operation: string, work: () => Promise<void>): Promise<ReliabilityProbeResult> {
@@ -542,52 +644,12 @@ export async function executeReliabilityHttpCli(
       startedAt: new Date().toISOString(),
       target: result.target,
     });
-    const formattedSummary: ReliabilityRunSummary = {
-      passed: !artifact.summary.failed,
-      maxErrorRate: artifact.profile.thresholds.maxErrorRate,
-      errorRate: artifact.summary.thresholds.maxErrorRate.actual,
-      failureGroups: artifact.summary.failureGroups,
-      totals: artifact.summary.totals,
-      latencyMs: artifact.summary.latencyMs,
-      thresholds: artifact.summary.thresholds,
-      failures: artifact.summary.failures,
-    };
-
     const writeLine = dependencies.writeLine ?? console.log;
-    writeLine(formatReliabilitySummary(formattedSummary));
+    writeLine(formatReliabilitySummary(formatCliReliabilitySummary(artifact)));
+    await writeArtifactIfRequested(artifact, options.jsonOut, writeLine);
 
-    let exitCode = artifact.summary.failed ? 1 : 0;
-
-    if (options.jsonOut) {
-      await writeFile(options.jsonOut, JSON.stringify(artifact, null, 2), "utf8");
-      writeLine(`artifact=${options.jsonOut}`);
-    }
-
-    if (options.baselineArtifact) {
-      let baseline: ReliabilityArtifact;
-
-      try {
-        baseline = await readBaselineArtifact(options.baselineArtifact);
-      } catch (error) {
-        throw new Error(`Failed to read baseline artifact: ${options.baselineArtifact}. ${getErrorMessage(error)}`);
-      }
-
-      const comparison = compareReliabilityArtifacts({
-        baseline,
-        current: artifact,
-        tolerances: {
-          maxErrorRateIncrease: 0.05,
-          maxP95LatencyIncreaseMs: 250,
-          maxP99LatencyIncreaseMs: 250,
-        },
-      });
-      writeLine(`baseline_status=${comparison.passed ? "pass" : "fail"}`);
-      if (!comparison.passed) {
-        exitCode = 1;
-      }
-    }
-
-    return exitCode;
+    const baselinePassed = await evaluateBaselineComparison(artifact, options.baselineArtifact, writeLine);
+    return artifact.summary.failed || !baselinePassed ? 1 : 0;
   } catch (error) {
     (dependencies.writeLine ?? console.error)(`status=error message=${getErrorMessage(error)}`);
     return 1;
