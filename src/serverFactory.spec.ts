@@ -297,10 +297,7 @@ describe("createServer", () => {
       fromMonth: "2026-01-01",
       toMonth: "2026-03-01",
     });
-    expect(netWorthPayload.invocationExample).toEqual({
-      fromMonth: "2026-01-01",
-      toMonth: "2026-03-01",
-    });
+    expect(netWorthPayload.invocationExample).toEqual({});
     expect(payeeLocationPayload).toEqual(expect.objectContaining({
       toolName: "ynab_get_payee_location",
       requiredArguments: ["payeeLocationId"],
@@ -310,6 +307,42 @@ describe("createServer", () => {
       invocationExample: {
         payeeLocationId: "payee-location-123",
       },
+    }));
+  });
+
+  it("aligns net-worth trajectory discovery guidance with the tool schema", async () => {
+    const server = createServer(
+      {
+        apiToken: "test-token",
+      },
+      undefined,
+      {
+        discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
+      },
+    );
+    const registeredResources = (server as any)._registeredResources as Record<string, {
+      name: string;
+      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
+    }>;
+
+    const netWorthEntry = Object.entries(registeredResources)
+      .find(([, resource]) => resource.name === "ynab_get_net_worth_trajectory");
+
+    expect(netWorthEntry).toBeDefined();
+
+    const [netWorthUri, netWorthResource] = netWorthEntry!;
+    const netWorthPayload = JSON.parse(
+      (await netWorthResource.readCallback(new URL(netWorthUri), {})).contents[0].text,
+    ) as Record<string, unknown>;
+
+    expect(netWorthPayload).toEqual(expect.objectContaining({
+      toolName: "ynab_get_net_worth_trajectory",
+      requiredArguments: [],
+      argumentExamples: {
+        fromMonth: "2026-01-01",
+        toMonth: "2026-03-01",
+      },
+      invocationExample: {},
     }));
   });
 

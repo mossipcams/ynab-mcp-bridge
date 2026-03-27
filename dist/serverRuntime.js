@@ -81,15 +81,12 @@ const discoveryInvocationGuidanceByToolName = {
         },
     },
     ynab_get_net_worth_trajectory: {
-        requiredArguments: ["fromMonth"],
+        requiredArguments: [],
         argumentExamples: {
             fromMonth: "2026-01-01",
             toMonth: "2026-03-01",
         },
-        invocationExample: {
-            fromMonth: "2026-01-01",
-            toMonth: "2026-03-01",
-        },
+        invocationExample: {},
     },
     ynab_get_spending_anomalies: {
         requiredArguments: ["latestMonth"],

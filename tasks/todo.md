@@ -701,3 +701,36 @@ Tasks:
   No new production code beyond any tiny cleanup found during verification.
   How to verify it works:
   Run `npx vitest run src/serverFactory.spec.ts src/httpServer.spec.ts`, `npx eslint src/serverRuntime.ts src/httpTransport.ts src/serverFactory.spec.ts src/httpServer.spec.ts --max-warnings=0`, and `npm run build`, then use one deployed retry window to check whether `ynab_get_month_category` and `ynab_get_net_worth_trajectory` now progress beyond the wrapper/resource layer.
+
+## Net Worth Guidance Alignment Plan
+
+Validated assumptions before planning:
+- Local bridge proofs now show `ynab_get_net_worth_trajectory` can be read as a resource, can fail validation, and can execute successfully, so the remaining issue is unlikely to be transport registration.
+- The strongest remaining bridge-side mismatch is in discovery metadata: `src/serverRuntime.ts` currently marks `fromMonth` as required for `ynab_get_net_worth_trajectory`, while `src/tools/GetNetWorthTrajectoryTool.ts` gives `fromMonth` a default of `"current"` and therefore does not truly require it.
+- The smallest and safest next move is to align discovery guidance with the actual schema before changing any validation behavior or transport code.
+
+Tasks:
+
+- [x] Task 1: Pin the schema-to-discovery mismatch with a focused failing spec
+  Test to write:
+  Add a focused assertion in `src/serverFactory.spec.ts` that fails unless the discovery payload for `ynab_get_net_worth_trajectory` stops overstating `fromMonth` as required while still providing concrete ISO month examples.
+  Code to implement:
+  No production code in this step beyond whatever minimal change is required after the red proof; the goal is to make the mismatch explicit first.
+  How to verify it works:
+  Run `npx vitest run src/serverFactory.spec.ts -t "aligns net-worth trajectory discovery guidance with the tool schema"` and capture the red failure.
+
+- [x] Task 2: Align discovery guidance with the actual net-worth tool schema
+  Test to write:
+  Re-run the focused spec from Task 1 and keep it as the guardrail for this behavior.
+  Code to implement:
+  Update `src/serverRuntime.ts` so `ynab_get_net_worth_trajectory` no longer lists `fromMonth` in `requiredArguments`, while preserving concrete `argumentExamples` and `invocationExample`.
+  How to verify it works:
+  Re-run the focused spec and inspect the serialized discovery payload for `ynab_get_net_worth_trajectory`.
+
+- [x] Task 3: Final targeted verification on the fresh behavior
+  Test to write:
+  No new test unless Task 2 reveals another mismatch.
+  Code to implement:
+  No new production code beyond any tiny cleanup required after Task 2.
+  How to verify it works:
+  Run `npx vitest run src/serverFactory.spec.ts src/httpServer.spec.ts`, `npx eslint src/serverRuntime.ts src/serverFactory.spec.ts --max-warnings=0`, and `npm run build`, then use the next retry window to see whether `ynab_get_net_worth_trajectory` progresses beyond the wrapper/resource layer.
