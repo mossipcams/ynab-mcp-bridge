@@ -2,7 +2,7 @@ import { z } from "zod";
 import { buildAssignedSpentSummary, compactObject, formatMilliunits, isWithinMonthRange, normalizeMonthRange, toTopRollups, } from "./financeToolUtils.js";
 import { getCachedCategories, getCachedPlanMonth, getCachedPlanMonths } from "./cachedYnabReads.js";
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { buildProse, proseItem } from "./proseFormatUtils.js";
+import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 export const name = "ynab_get_spending_summary";
 export const description = "Returns a compact spending summary with assigned versus spent totals and top spending rollups.";
 export const inputSchema = {
@@ -130,8 +130,8 @@ export async function execute(input, api) {
                     ["transaction_count", payload.transaction_count],
                     ["average_transaction", payload.average_transaction],
                 ], [
-                    { heading: "Top Categories", items: payload.top_categories.map((entry) => proseItem(entry["name"], entry["amount"])) },
-                    { heading: "Top Payees", items: payload.top_payees.map((entry) => proseItem(entry["name"], entry["amount"])) },
+                    { heading: "Top Categories", items: payload.top_categories.map((entry) => proseRecordItem(entry, "name", "amount")) },
+                    { heading: "Top Payees", items: payload.top_payees.map((entry) => proseRecordItem(entry, "name", "amount")) },
                 ]));
             }
             return toTextResult(payload, format);

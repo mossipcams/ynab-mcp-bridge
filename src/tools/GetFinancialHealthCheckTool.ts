@@ -22,7 +22,7 @@ import {
 import { compactObject, isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
 import type { OutputFormat } from "./planToolUtils.js";
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { buildProse, proseItem } from "./proseFormatUtils.js";
+import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 
 type Risk = {
   code: string;
@@ -193,10 +193,10 @@ export async function execute(
             ["upcoming_30d_net", payload.metrics.upcoming_30d_net],
           ],
           [
-            { heading: "Top Risks", items: payload.top_risks.map((riskEntry) => proseItem(riskEntry["code"] as string | undefined, riskEntry["severity"] as string | undefined)) },
-            { heading: "Overspent", items: payload.top_overspent.map((entry) => proseItem(entry["name"] as string | undefined, entry["amount"] as string | undefined)) },
-            { heading: "Underfunded", items: payload.top_underfunded.map((entry) => proseItem(entry["name"] as string | undefined, entry["amount"] as string | undefined)) },
-            { heading: "Uncategorized", items: payload.top_uncategorized.map((entry) => proseItem(entry["date"] as string | undefined, entry["payee_name"] as string | undefined, entry["amount"] as string | undefined)) },
+            { heading: "Top Risks", items: payload.top_risks.map((riskEntry) => proseRecordItem(riskEntry, "code", "severity")) },
+            { heading: "Overspent", items: payload.top_overspent.map((entry) => proseRecordItem(entry, "name", "amount")) },
+            { heading: "Underfunded", items: payload.top_underfunded.map((entry) => proseRecordItem(entry, "name", "amount")) },
+            { heading: "Uncategorized", items: payload.top_uncategorized.map((entry) => proseRecordItem(entry, "date", "payee_name", "amount")) },
           ],
         ));
       }

@@ -3,7 +3,7 @@ import { previousMonths } from "./financialDiagnosticsUtils.js";
 import { buildBudgetHealthMonthSummary, formatMilliunits, isWithinMonthRange, normalizeMonthInput, toSpentMilliunits, toTopRollups, } from "./financeToolUtils.js";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { buildProse, proseItem } from "./proseFormatUtils.js";
+import { buildProse, proseItem, proseRecordItem } from "./proseFormatUtils.js";
 export const name = "ynab_get_monthly_review";
 export const description = "Monthly review with income, cash flow, budget health, top spending, and notable changes.";
 export const inputSchema = {
@@ -122,7 +122,7 @@ export async function execute(input, api) {
                     ["net_flow", payload.net_flow],
                     ["ready_to_assign", payload.ready_to_assign],
                 ], [
-                    { heading: "Top Spending", items: payload.top_spending_categories.map((entry) => proseItem(entry["name"], entry["amount"])) },
+                    { heading: "Top Spending", items: payload.top_spending_categories.map((entry) => proseRecordItem(entry, "name", "amount")) },
                     { heading: "Anomalies", items: payload.anomalies.map((entry) => proseItem(entry.category_name, entry.latest_spent, "vs", entry.baseline_average)) },
                 ]));
             }

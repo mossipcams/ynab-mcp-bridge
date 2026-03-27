@@ -12,7 +12,7 @@ import {
 import { getCachedCategories, getCachedPlanMonth, getCachedPlanMonths } from "./cachedYnabReads.js";
 import type { OutputFormat } from "./planToolUtils.js";
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { buildProse, proseItem } from "./proseFormatUtils.js";
+import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 
 export const name = "ynab_get_spending_summary";
 export const description =
@@ -179,8 +179,8 @@ export async function execute(
             ["average_transaction", payload.average_transaction],
           ],
           [
-            { heading: "Top Categories", items: payload.top_categories.map((entry) => proseItem(entry["name"] as string | undefined, entry["amount"] as string | undefined)) },
-            { heading: "Top Payees", items: payload.top_payees.map((entry) => proseItem(entry["name"] as string | undefined, entry["amount"] as string | undefined)) },
+            { heading: "Top Categories", items: payload.top_categories.map((entry) => proseRecordItem(entry, "name", "amount")) },
+            { heading: "Top Payees", items: payload.top_payees.map((entry) => proseRecordItem(entry, "name", "amount")) },
           ],
         ));
       }

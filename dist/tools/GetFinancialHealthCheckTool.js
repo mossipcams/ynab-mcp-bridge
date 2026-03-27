@@ -3,7 +3,7 @@ import { compactRisk, daysUntil, formatAmount, formatPercent, getTodayIsoDate, l
 import { getCachedAccounts, getCachedPlanMonth, getCachedPlanMonths, getCachedScheduledTransactions, } from "./cachedYnabReads.js";
 import { compactObject, isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { buildProse, proseItem } from "./proseFormatUtils.js";
+import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 export const name = "ynab_get_financial_health_check";
 export const description = "Compact health check across cash, debt, budget stress, cleanup, and near-term obligations.";
 export const inputSchema = {
@@ -143,10 +143,10 @@ export async function execute(input, api) {
                     ["ready_to_assign", payload.metrics.ready_to_assign],
                     ["upcoming_30d_net", payload.metrics.upcoming_30d_net],
                 ], [
-                    { heading: "Top Risks", items: payload.top_risks.map((riskEntry) => proseItem(riskEntry["code"], riskEntry["severity"])) },
-                    { heading: "Overspent", items: payload.top_overspent.map((entry) => proseItem(entry["name"], entry["amount"])) },
-                    { heading: "Underfunded", items: payload.top_underfunded.map((entry) => proseItem(entry["name"], entry["amount"])) },
-                    { heading: "Uncategorized", items: payload.top_uncategorized.map((entry) => proseItem(entry["date"], entry["payee_name"], entry["amount"])) },
+                    { heading: "Top Risks", items: payload.top_risks.map((riskEntry) => proseRecordItem(riskEntry, "code", "severity")) },
+                    { heading: "Overspent", items: payload.top_overspent.map((entry) => proseRecordItem(entry, "name", "amount")) },
+                    { heading: "Underfunded", items: payload.top_underfunded.map((entry) => proseRecordItem(entry, "name", "amount")) },
+                    { heading: "Uncategorized", items: payload.top_uncategorized.map((entry) => proseRecordItem(entry, "date", "payee_name", "amount")) },
                 ]));
             }
             return toTextResult(payload, format);

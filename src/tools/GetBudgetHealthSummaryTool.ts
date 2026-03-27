@@ -5,7 +5,7 @@ import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { buildBudgetHealthMonthSummary, compactObject, formatMilliunits } from "./financeToolUtils.js";
 import type { OutputFormat } from "./planToolUtils.js";
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { buildProse, proseItem } from "./proseFormatUtils.js";
+import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 
 export const name = "ynab_get_budget_health_summary";
 export const description =
@@ -64,8 +64,8 @@ export async function execute(
             ["age_of_money", payload.age_of_money],
           ],
           [
-            { heading: "Overspent", items: payload.top_overspent_categories.map((entry) => proseItem(entry["name"] as string | undefined, entry["amount"] as string | undefined)) },
-            { heading: "Underfunded", items: payload.top_underfunded_categories.map((entry) => proseItem(entry["name"] as string | undefined, entry["amount"] as string | undefined)) },
+            { heading: "Overspent", items: payload.top_overspent_categories.map((entry) => proseRecordItem(entry, "name", "amount")) },
+            { heading: "Underfunded", items: payload.top_underfunded_categories.map((entry) => proseRecordItem(entry, "name", "amount")) },
           ],
         ));
       }

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { buildBudgetHealthMonthSummary, compactObject, formatMilliunits } from "./financeToolUtils.js";
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { buildProse, proseItem } from "./proseFormatUtils.js";
+import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 export const name = "ynab_get_budget_health_summary";
 export const description = "Budget health summary with funds available, overspending, underfunding, and assigned vs spent.";
 export const inputSchema = {
@@ -45,8 +45,8 @@ export async function execute(input, api) {
                     ["underfunded_total", payload.underfunded_total],
                     ["age_of_money", payload.age_of_money],
                 ], [
-                    { heading: "Overspent", items: payload.top_overspent_categories.map((entry) => proseItem(entry["name"], entry["amount"])) },
-                    { heading: "Underfunded", items: payload.top_underfunded_categories.map((entry) => proseItem(entry["name"], entry["amount"])) },
+                    { heading: "Overspent", items: payload.top_overspent_categories.map((entry) => proseRecordItem(entry, "name", "amount")) },
+                    { heading: "Underfunded", items: payload.top_underfunded_categories.map((entry) => proseRecordItem(entry, "name", "amount")) },
                 ]));
             }
             return toTextResult(payload, format);

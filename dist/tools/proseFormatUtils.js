@@ -1,3 +1,4 @@
+import { getStringValue, isRecord } from "../typeUtils.js";
 function hasValue(value) {
     return value !== undefined && value !== null && value !== "";
 }
@@ -6,6 +7,12 @@ export function proseItem(...parts) {
         .filter(hasValue)
         .map((part) => String(part))
         .join(" ");
+}
+export function proseRecordItem(record, ...keys) {
+    if (!isRecord(record)) {
+        return "";
+    }
+    return proseItem(...keys.map((key) => getStringValue(record, key)));
 }
 export function buildProse(title, pairs, lists = []) {
     const summary = pairs

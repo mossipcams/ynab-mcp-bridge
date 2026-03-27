@@ -1,3 +1,5 @@
+import { getStringValue, isRecord } from "../typeUtils.js";
+
 type ProseList = {
   heading: string;
   items: string[];
@@ -5,22 +7,30 @@ type ProseList = {
 
 type ProseValue = number | string | undefined | null;
 
-function hasValue(value: ProseValue) {
+function hasValue(value: ProseValue): boolean {
   return value !== undefined && value !== null && value !== "";
 }
 
-export function proseItem(...parts: ProseValue[]) {
+export function proseItem(...parts: ProseValue[]): string {
   return parts
     .filter(hasValue)
     .map((part) => String(part))
     .join(" ");
 }
 
+export function proseRecordItem(record: unknown, ...keys: string[]): string {
+  if (!isRecord(record)) {
+    return "";
+  }
+
+  return proseItem(...keys.map((key) => getStringValue(record, key)));
+}
+
 export function buildProse(
   title: string,
   pairs: Array<[string, ProseValue]>,
   lists: ProseList[] = [],
-) {
+): string {
   const summary = pairs
     .filter(([, value]) => hasValue(value))
     .map(([label, value]) => `${label} ${value}`)
