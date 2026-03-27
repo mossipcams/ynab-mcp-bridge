@@ -67,6 +67,55 @@ const READ_ONLY_TOOL_ANNOTATIONS = {
     idempotentHint: true,
     openWorldHint: true,
 };
+const discoveryInvocationGuidanceByToolName = {
+    ynab_get_month_category: {
+        requiredArguments: ["month", "categoryId"],
+        argumentExamples: {
+            month: "2026-03-01",
+            categoryId: "category-123",
+        },
+        invocationExample: {
+            month: "2026-03-01",
+            categoryId: "category-123",
+            view: "compact",
+        },
+    },
+    ynab_get_net_worth_trajectory: {
+        requiredArguments: ["fromMonth"],
+        argumentExamples: {
+            fromMonth: "2026-01-01",
+            toMonth: "2026-03-01",
+        },
+        invocationExample: {
+            fromMonth: "2026-01-01",
+            toMonth: "2026-03-01",
+        },
+    },
+    ynab_get_spending_anomalies: {
+        requiredArguments: ["latestMonth"],
+        argumentExamples: {
+            latestMonth: "2026-03-01",
+            baselineMonths: 3,
+            topN: 5,
+        },
+        invocationExample: {
+            latestMonth: "2026-03-01",
+            baselineMonths: 3,
+            thresholdMultiplier: 1.5,
+            minimumDifference: 50000,
+            topN: 5,
+        },
+    },
+    ynab_get_payee_location: {
+        requiredArguments: ["payeeLocationId"],
+        argumentExamples: {
+            payeeLocationId: "payee-location-123",
+        },
+        invocationExample: {
+            payeeLocationId: "payee-location-123",
+        },
+    },
+};
 function getToolDiscoveryUri(toolName) {
     return `ynab-tool://${toolName}`;
 }
@@ -94,6 +143,7 @@ function getToolRegistration(toolName) {
     return tool;
 }
 function buildDiscoveryResourceDocument(tool, uri) {
+    const invocationGuidance = discoveryInvocationGuidanceByToolName[tool.name];
     return {
         annotations: READ_ONLY_TOOL_ANNOTATIONS,
         description: tool.description,
@@ -101,6 +151,11 @@ function buildDiscoveryResourceDocument(tool, uri) {
         title: tool.title,
         toolName: tool.name,
         uri,
+        ...(invocationGuidance ? {
+            argumentExamples: invocationGuidance.argumentExamples,
+            invocationExample: invocationGuidance.invocationExample,
+            requiredArguments: invocationGuidance.requiredArguments,
+        } : {}),
     };
 }
 export function getDiscoveryResourceSummaries(options = {}) {

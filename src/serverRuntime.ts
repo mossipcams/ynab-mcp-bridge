@@ -107,6 +107,62 @@ type DiscoveryResourceSummary = {
   uri: string;
 };
 
+type DiscoveryInvocationGuidance = {
+  argumentExamples: Record<string, string | number>;
+  invocationExample: Record<string, string | number>;
+  requiredArguments: string[];
+};
+
+const discoveryInvocationGuidanceByToolName: Partial<Record<string, DiscoveryInvocationGuidance>> = {
+  ynab_get_month_category: {
+    requiredArguments: ["month", "categoryId"],
+    argumentExamples: {
+      month: "2026-03-01",
+      categoryId: "category-123",
+    },
+    invocationExample: {
+      month: "2026-03-01",
+      categoryId: "category-123",
+      view: "compact",
+    },
+  },
+  ynab_get_net_worth_trajectory: {
+    requiredArguments: ["fromMonth"],
+    argumentExamples: {
+      fromMonth: "2026-01-01",
+      toMonth: "2026-03-01",
+    },
+    invocationExample: {
+      fromMonth: "2026-01-01",
+      toMonth: "2026-03-01",
+    },
+  },
+  ynab_get_spending_anomalies: {
+    requiredArguments: ["latestMonth"],
+    argumentExamples: {
+      latestMonth: "2026-03-01",
+      baselineMonths: 3,
+      topN: 5,
+    },
+    invocationExample: {
+      latestMonth: "2026-03-01",
+      baselineMonths: 3,
+      thresholdMultiplier: 1.5,
+      minimumDifference: 50000,
+      topN: 5,
+    },
+  },
+  ynab_get_payee_location: {
+    requiredArguments: ["payeeLocationId"],
+    argumentExamples: {
+      payeeLocationId: "payee-location-123",
+    },
+    invocationExample: {
+      payeeLocationId: "payee-location-123",
+    },
+  },
+};
+
 function getToolDiscoveryUri(toolName: string): string {
   return `ynab-tool://${toolName}`;
 }
@@ -146,13 +202,18 @@ function buildDiscoveryResourceDocument(
   tool: ToolModule,
   uri: string,
 ): {
+  argumentExamples?: Record<string, string | number>;
   annotations: typeof READ_ONLY_TOOL_ANNOTATIONS;
   description: string;
   inputSchema: unknown;
+  invocationExample?: Record<string, string | number>;
+  requiredArguments?: string[];
   title: string;
   toolName: string;
   uri: string;
 } {
+  const invocationGuidance = discoveryInvocationGuidanceByToolName[tool.name];
+
   return {
     annotations: READ_ONLY_TOOL_ANNOTATIONS,
     description: tool.description,
@@ -160,6 +221,11 @@ function buildDiscoveryResourceDocument(
     title: tool.title,
     toolName: tool.name,
     uri,
+    ...(invocationGuidance ? {
+      argumentExamples: invocationGuidance.argumentExamples,
+      invocationExample: invocationGuidance.invocationExample,
+      requiredArguments: invocationGuidance.requiredArguments,
+    } : {}),
   };
 }
 
@@ -179,9 +245,12 @@ export function getDiscoveryResourceDocument(
   uri: string,
   options: ServerRuntimeOptions = {},
 ): {
+  argumentExamples?: Record<string, string | number>;
   annotations: typeof READ_ONLY_TOOL_ANNOTATIONS;
   description: string;
   inputSchema: unknown;
+  invocationExample?: Record<string, string | number>;
+  requiredArguments?: string[];
   title: string;
   toolName: string;
   uri: string;

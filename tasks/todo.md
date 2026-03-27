@@ -651,3 +651,53 @@ Tasks:
   No new code in this task beyond any tiny log-field cleanup found during verification.
   How to verify it works:
   Deploy the instrumented build, capture one ChatGPT retry window, and answer these with evidence: whether ChatGPT ever sends `resources/read`, which URI family it chooses if multiple are advertised, and whether `ynab_search_transactions` ever reaches bridge validation or execution.
+
+## Residual Wrapper Compatibility Plan
+
+Validated assumptions before planning:
+- The broad discovery/resource compatibility change materially improved behavior: `ynab_list_categories`, `ynab_get_category`, `ynab_list_accounts`, `ynab_get_account`, and `ynab_search_transactions` are now working in live retries.
+- Explorer review and local comparison did not find a unique registration or discovery bug for `ynab_get_month_category`; it is registered through the same generic runtime and compatibility URL path as the now-working sibling tools.
+- The remaining flaky tools skew toward stricter invocation contracts or ID-heavy inputs, for example `ynab_get_month_category` requires both `categoryId` and `month`, and `ynab_get_net_worth_trajectory` requires structured month inputs.
+- Because of the above, the next change should target wrapper compatibility for strict-input tools, not another broad discovery transport rewrite.
+
+Tasks:
+
+- [x] Task 1: Pin the remaining strict-input discovery contract with failing metadata assertions
+  Test to write:
+  Add focused assertions in `src/serverFactory.spec.ts` that fail unless discovery documents for `ynab_get_month_category`, `ynab_get_net_worth_trajectory`, and one representative wrapper-blocked tool expose explicit machine-friendly guidance for their required arguments.
+  Code to implement:
+  Extend the discovery document payload in `src/serverRuntime.ts` with optional compatibility fields such as `requiredArguments`, `argumentExamples`, and `invocationExample`, while keeping the existing metadata contract intact.
+  How to verify it works:
+  Run `npx vitest run src/serverFactory.spec.ts` and inspect the serialized discovery payload for those tools.
+
+- [x] Task 2: Pin the HTTP compatibility route for the enriched discovery payload
+  Test to write:
+  Extend `src/httpServer.spec.ts` so it fails unless the direct `/mcp/resources/...` compatibility URLs for `ynab_get_month_category` and `ynab_get_net_worth_trajectory` return the enriched guidance fields and still match the MCP `resources/read` payload.
+  Code to implement:
+  Reuse the shared discovery-document builder in `src/httpTransport.ts` and `src/serverRuntime.ts` so the direct compatibility route and MCP reads stay byte-for-byte aligned for the new fields.
+  How to verify it works:
+  Run `npx vitest run src/httpServer.spec.ts src/serverFactory.spec.ts` and confirm both transport paths expose the same enriched payload.
+
+- [x] Task 3: Add explicit observability for strict-input tool attempts
+  Test to write:
+  Add a targeted spec in `src/httpServer.spec.ts` that fails unless attempted calls to `ynab_get_month_category` and `ynab_get_net_worth_trajectory` can be distinguished as one of: resource-read only, validation failure, or actual tool execution start.
+  Code to implement:
+  Extend the existing HTTP/MCP logging in `src/httpTransport.ts` only as needed so deployed logs can separate “wrapper stopped at discovery” from “bridge received invalid tool arguments” for these tools.
+  How to verify it works:
+  Run the focused spec red then green, then manually replay one malformed request per tool and confirm the emitted log events are unambiguous.
+
+- [x] Task 4: Keep the tool schemas strict but make the examples concrete
+  Test to write:
+  Add focused source-shape or serialization assertions in `src/serverFactory.spec.ts` that fail unless the discovery payload for the remaining flaky tools includes concrete valid examples such as `2026-03-01` month strings and representative ID placeholders.
+  Code to implement:
+  Add explicit example payloads for `ynab_get_month_category`, `ynab_get_net_worth_trajectory`, and optionally one wrapper-blocked ID-heavy tool without weakening their actual Zod schemas.
+  How to verify it works:
+  Re-run `npx vitest run src/serverFactory.spec.ts` and inspect the enriched examples for exact field names and date formats.
+
+- [x] Task 5: Final verification and deploy-readiness check
+  Test to write:
+  No new automated test unless earlier tasks reveal a bridge contract bug that requires re-planning.
+  Code to implement:
+  No new production code beyond any tiny cleanup found during verification.
+  How to verify it works:
+  Run `npx vitest run src/serverFactory.spec.ts src/httpServer.spec.ts`, `npx eslint src/serverRuntime.ts src/httpTransport.ts src/serverFactory.spec.ts src/httpServer.spec.ts --max-warnings=0`, and `npm run build`, then use one deployed retry window to check whether `ynab_get_month_category` and `ynab_get_net_worth_trajectory` now progress beyond the wrapper/resource layer.
