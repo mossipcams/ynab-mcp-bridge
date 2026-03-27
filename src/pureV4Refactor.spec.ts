@@ -55,6 +55,7 @@ describe("pure v4 refactor", () => {
       "ListScheduledTransactionsTool.ts",
       "ListTransactionsTool.ts",
       "SearchTransactionsTool.ts",
+      "cachedYnabReads.ts",
       "collectionToolUtils.ts",
       "errorUtils.ts",
       "financeToolUtils.ts",

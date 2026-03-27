@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { formatMilliunits, listMonthsInRange, normalizeMonthRange, toSpentMilliunits, } from "./financeToolUtils.js";
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_category_trend_summary";
 export const description = "Returns a compact assigned, spent, and available trend for a category or category group across months.";
@@ -17,7 +18,7 @@ export async function execute(input, api) {
             throw new Error("Provide either categoryId or categoryGroupName.");
         }
         return await withResolvedPlan(input.planId, api, async (planId) => {
-            const months = await Promise.all(listMonthsInRange(fromMonth, toMonth).map((month) => api.months.getPlanMonth(planId, month)));
+            const months = await Promise.all(listMonthsInRange(fromMonth, toMonth).map((month) => getCachedPlanMonth(api, planId, month)));
             const periods = months.map((response) => {
                 const matchingCategories = response.data.month.categories.filter((category) => {
                     if (category.deleted || category.hidden) {

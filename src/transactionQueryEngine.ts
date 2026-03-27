@@ -61,7 +61,7 @@ export type TransactionSort =
   | "date_asc"
   | "date_desc";
 
-type DisplayTransaction = {
+export type DisplayTransaction = {
   account_name?: string | null | undefined;
   amount: string;
   approved?: boolean | null | undefined;
@@ -103,32 +103,39 @@ function applyTransactionProjection(
 }
 
 export function buildTransactionCollectionResult(
-  transactions: readonly DisplayTransaction[],
+  transactions: readonly TransactionLike[],
   input: TransactionProjectionInput,
   totalKey: "match_count" | "transaction_count",
   extra: Record<string, unknown> = {},
 ) {
+  const totalCount = transactions.length;
+
   if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
     return {
-      transactions,
-      [totalKey]: transactions.length,
+      transactions: toDisplayTransactions(transactions),
+      [totalKey]: totalCount,
       ...extra,
     };
   }
 
   if (!hasPaginationControls(input)) {
+    const displayTransactions = toDisplayTransactions(transactions);
+
     return {
-      transactions: applyTransactionProjection(transactions, input),
-      [totalKey]: transactions.length,
+      transactions: applyTransactionProjection(displayTransactions, input),
+      [totalKey]: totalCount,
       ...extra,
     };
   }
 
   const pagedTransactions = paginateEntries([...transactions], input);
+  const displayTransactions = toDisplayTransactions(pagedTransactions.entries);
 
   return {
-      transactions: applyTransactionProjection([...pagedTransactions.entries], input),
-    [totalKey]: transactions.length,
+    transactions: hasProjectionControls(input)
+      ? applyTransactionProjection(displayTransactions, input)
+      : displayTransactions,
+    [totalKey]: totalCount,
     ...pagedTransactions.metadata,
     ...extra,
   };

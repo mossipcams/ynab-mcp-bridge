@@ -8,6 +8,7 @@ import {
   normalizeMonthRange,
   toSpentMilliunits,
 } from "./financeToolUtils.js";
+import { getCachedPlanMonths } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_cash_flow_summary";
@@ -36,7 +37,7 @@ export async function execute(
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const [transactionsResponse, monthsResponse] = await Promise.all([
         api.transactions.getTransactions(planId, fromMonth, undefined, undefined),
-        api.months.getPlanMonths(planId),
+        getCachedPlanMonths(api, planId),
       ]);
 
       const months = monthsResponse.data.months

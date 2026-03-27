@@ -224,6 +224,163 @@ describe("transaction tool family", () => {
     }
   });
 
+  it("does not eagerly format every listed transaction before pagination trims the result", async () => {
+    let formattedAmounts = 0;
+    const api = {
+      transactions: {
+        async getTransactions() {
+          return {
+            data: {
+              transactions: [
+                {
+                  id: "txn-1",
+                  date: "2024-04-03",
+                  get amount() {
+                    formattedAmounts += 1;
+                    return 1000;
+                  },
+                  payee_name: "One",
+                  category_name: "Groceries",
+                  account_name: "Checking",
+                  approved: true,
+                  cleared: "cleared",
+                  deleted: false,
+                },
+                {
+                  id: "txn-2",
+                  date: "2024-04-02",
+                  get amount() {
+                    formattedAmounts += 1;
+                    return 2000;
+                  },
+                  payee_name: "Two",
+                  category_name: "Dining",
+                  account_name: "Checking",
+                  approved: true,
+                  cleared: "cleared",
+                  deleted: false,
+                },
+                {
+                  id: "txn-3",
+                  date: "2024-04-01",
+                  get amount() {
+                    formattedAmounts += 1;
+                    return 3000;
+                  },
+                  payee_name: "Three",
+                  category_name: "Fuel",
+                  account_name: "Checking",
+                  approved: true,
+                  cleared: "cleared",
+                  deleted: false,
+                },
+              ],
+            },
+          };
+        },
+      },
+    };
+
+    const result = readResult(await ListTransactionsTool.execute({
+      planId: "plan-1",
+      limit: 1,
+      offset: 0,
+    }, api as never) as ToolResult);
+
+    expect(result).toMatchObject({
+      transactions: [
+        expect.objectContaining({
+          id: "txn-1",
+          amount: "1.00",
+        }),
+      ],
+      transaction_count: 3,
+      returned_count: 1,
+    });
+    expect(formattedAmounts).toBe(1);
+  });
+
+  it("does not eagerly format every searched transaction before pagination trims the result", async () => {
+    let formattedAmounts = 0;
+    const api = {
+      transactions: {
+        async getTransactions() {
+          return {
+            data: {
+              transactions: [
+                {
+                  id: "txn-1",
+                  date: "2024-04-03",
+                  get amount() {
+                    formattedAmounts += 1;
+                    return -1000;
+                  },
+                  payee_id: "payee-1",
+                  payee_name: "One",
+                  category_name: "Groceries",
+                  account_name: "Checking",
+                  approved: true,
+                  cleared: "cleared",
+                  deleted: false,
+                },
+                {
+                  id: "txn-2",
+                  date: "2024-04-02",
+                  get amount() {
+                    formattedAmounts += 1;
+                    return -2000;
+                  },
+                  payee_id: "payee-1",
+                  payee_name: "Two",
+                  category_name: "Dining",
+                  account_name: "Checking",
+                  approved: true,
+                  cleared: "cleared",
+                  deleted: false,
+                },
+                {
+                  id: "txn-3",
+                  date: "2024-04-01",
+                  get amount() {
+                    formattedAmounts += 1;
+                    return -3000;
+                  },
+                  payee_id: "payee-1",
+                  payee_name: "Three",
+                  category_name: "Fuel",
+                  account_name: "Checking",
+                  approved: true,
+                  cleared: "cleared",
+                  deleted: false,
+                },
+              ],
+            },
+          };
+        },
+      },
+    };
+
+    const result = readResult(await SearchTransactionsTool.execute({
+      planId: "plan-1",
+      payeeId: "payee-1",
+      includeTransfers: true,
+      limit: 1,
+      offset: 0,
+    }, api as never) as ToolResult);
+
+    expect(result).toMatchObject({
+      transactions: [
+        expect.objectContaining({
+          id: "txn-1",
+          amount: "-1.00",
+        }),
+      ],
+      match_count: 3,
+      returned_count: 1,
+    });
+    expect(formattedAmounts).toBe(1);
+  });
+
   it("keeps the transaction query helper surface slim inside src/tools", () => {
     const searchToolSource = readFileSync(new URL("./tools/SearchTransactionsTool.ts", import.meta.url), "utf8");
     const transactionToolUtilsSource = readFileSync(new URL("./tools/transactionToolUtils.ts", import.meta.url), "utf8");

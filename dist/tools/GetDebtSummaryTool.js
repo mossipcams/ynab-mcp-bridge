@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getCachedAccounts } from "./cachedYnabReads.js";
 import { formatAmount, formatRatio, liquidCashMilliunits, totalDebtMilliunits, } from "./financialDiagnosticsUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_debt_summary";
@@ -11,7 +12,7 @@ export async function execute(input, api) {
     try {
         const topN = input.topN ?? 5;
         return await withResolvedPlan(input.planId, api, async (planId) => {
-            const response = await api.accounts.getAccounts(planId);
+            const response = await getCachedAccounts(api, planId);
             const accounts = response.data.accounts.filter((account) => !account.deleted && !account.closed);
             const debtAccounts = accounts.filter((account) => account.balance < 0)
                 .sort((left, right) => left.balance - right.balance);

@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { formatAmountMilliunits, renderCollectionResult, } from "./collectionToolUtils.js";
+import { formatAmountMilliunits, } from "./collectionToolUtils.js";
 import { compactObject } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { compareTransactions, matchesTransactionFilters, toDisplayTransactions, transactionFields, } from "../transactionQueryEngine.js";
+import { buildTransactionCollectionResult, compareTransactions, matchesTransactionFilters, transactionFields, } from "../transactionQueryEngine.js";
 const sortableValues = [
     "date_asc",
     "date_desc",
@@ -38,9 +38,8 @@ export async function execute(input, api) {
             .filter((transaction) => !transaction.deleted)
             .filter((transaction) => matchesTransactionFilters(transaction, input))
             .sort((left, right) => compareTransactions(left, right, sort));
-        const transactions = toDisplayTransactions(matchingTransactions);
         return toTextResult({
-            ...renderCollectionResult(transactions, transactionFields, input, "transactions", "match_count"),
+            ...buildTransactionCollectionResult(matchingTransactions, input, "match_count"),
             filters: compactObject({
                 from_date: input.fromDate,
                 to_date: input.toDate,

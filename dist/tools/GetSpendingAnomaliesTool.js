@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { formatAmount, formatPercent, previousMonths } from "./financialDiagnosticsUtils.js";
 import { isCreditCardPaymentCategoryName, toSpentMilliunits } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
@@ -21,8 +22,8 @@ export async function execute(input, api) {
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const baselineMonthIds = previousMonths(input.latestMonth, baselineMonths);
             const responses = await Promise.all([
-                ...baselineMonthIds.map((month) => api.months.getPlanMonth(planId, month)),
-                api.months.getPlanMonth(planId, input.latestMonth),
+                ...baselineMonthIds.map((month) => getCachedPlanMonth(api, planId, month)),
+                getCachedPlanMonth(api, planId, input.latestMonth),
             ]);
             const baselineResponses = responses.slice(0, baselineMonthIds.length);
             const latestResponse = responses[responses.length - 1];

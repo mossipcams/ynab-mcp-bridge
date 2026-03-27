@@ -123,6 +123,19 @@ function extractVersionText(response) {
         .map((item) => item.text)
         .join("\n");
 }
+function normalizeToolCallResponse(response) {
+    const textContent = extractVersionText(response);
+    if (textContent.length === 0) {
+        return response;
+    }
+    try {
+        const parsed = JSON.parse(textContent);
+        return parsed;
+    }
+    catch {
+        return textContent;
+    }
+}
 function requireScenarioUrl(options) {
     if (!options.url) {
         throw new Error("Expected an HTTP URL for the reliability scenario.");
@@ -138,6 +151,28 @@ function requireSmokeProfile() {
 }
 function createConnectTransport(baseUrl) {
     return new ConnectTransportAdapter(new StreamableHTTPClientTransport(new URL(baseUrl)));
+}
+function createReliabilityClient(index) {
+    return new Client({
+        name: `ynab-mcp-bridge-reliability-${index + 1}`,
+        version: "1.0.0",
+    });
+}
+function defaultToolCallValidation(response) {
+    const normalizedResponse = normalizeToolCallResponse(response);
+    if (!isObjectRecord(normalizedResponse) || typeof normalizedResponse["version"] !== "string") {
+        throw new Error("Expected ynab_get_mcp_version to return version text.");
+    }
+}
+function getMeasuredToolCalls(toolCalls) {
+    if (toolCalls && toolCalls.length > 0) {
+        return toolCalls;
+    }
+    return [{
+            arguments: {},
+            name: "ynab_get_mcp_version",
+            validate: defaultToolCallValidation,
+        }];
 }
 function parseReliabilityHttpValueFlag(parsed, argument, value) {
     if (!value) {
@@ -205,12 +240,10 @@ async function readBaselineArtifact(path) {
     }
     return parsed;
 }
-async function runSequence(baseUrl, index) {
-    const client = new Client({
-        name: `ynab-mcp-bridge-reliability-${index + 1}`,
-        version: "1.0.0",
-    });
-    const transport = createConnectTransport(baseUrl);
+export async function runMeasuredHttpSequence(baseUrl, index, options = {}) {
+    const client = options.createClient?.(index) ?? createReliabilityClient(index);
+    const transport = options.createTransport?.(baseUrl) ?? createConnectTransport(baseUrl);
+    const toolCalls = getMeasuredToolCalls(options.toolCalls);
     const results = [];
     let connected = false;
     try {
@@ -228,16 +261,15 @@ async function runSequence(baseUrl, index) {
                 throw new Error("Expected ynab_get_mcp_version to be registered.");
             }
         }));
-        results.push(await measureOperation("tools/call:ynab_get_mcp_version", async () => {
-            const response = await client.callTool({
-                name: "ynab_get_mcp_version",
-                arguments: {},
-            });
-            const versionText = extractVersionText(response);
-            if (!versionText.includes("\"version\"")) {
-                throw new Error("Expected ynab_get_mcp_version to return version text.");
-            }
-        }));
+        for (const toolCall of toolCalls) {
+            results.push(await measureOperation(`tools/call:${toolCall.name}`, async () => {
+                const response = await client.callTool({
+                    name: toolCall.name,
+                    arguments: toolCall.arguments ?? {},
+                });
+                toolCall.validate?.(normalizeToolCallResponse(response));
+            }));
+        }
         return results;
     }
     finally {
@@ -287,7 +319,7 @@ export async function runHttpReliabilityScenario(options) {
     const results = await runReliabilityProbes({
         concurrency: options.concurrency,
         count: options.requestCount,
-        probe: async (index) => await runSequence(url, index),
+        probe: async (index) => await runMeasuredHttpSequence(url, index),
     });
     return {
         results,

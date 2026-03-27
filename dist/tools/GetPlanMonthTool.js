@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_plan_month";
@@ -11,7 +12,7 @@ export const inputSchema = {
 export async function execute(input, api) {
     try {
         const month = input.month || "current";
-        const response = await withResolvedPlan(input.planId, api, async (planId) => api.months.getPlanMonth(planId, month));
+        const response = await withResolvedPlan(input.planId, api, async (planId) => getCachedPlanMonth(api, planId, month));
         const monthDetail = response.data.month;
         if (input.view === "full") {
             return toTextResult({

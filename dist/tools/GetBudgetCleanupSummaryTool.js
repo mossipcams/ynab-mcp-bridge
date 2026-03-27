@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { compactObject, formatMilliunits, isWithinMonthRange, normalizeMonthInput, } from "./financeToolUtils.js";
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_budget_cleanup_summary";
 export const description = "Returns a compact cleanup punch-list for uncategorized, unapproved, uncleared, and overspent items.";
@@ -15,7 +16,7 @@ export async function execute(input, api) {
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const [transactionsResponse, monthResponse] = await Promise.all([
                 api.transactions.getTransactions(planId, month, undefined, undefined),
-                api.months.getPlanMonth(planId, month),
+                getCachedPlanMonth(api, planId, month),
             ]);
             const transactions = transactionsResponse.data.transactions.filter((transaction) => !transaction.deleted && isWithinMonthRange(transaction.date, month, month));
             const uncategorizedTransactions = transactions.filter((transaction) => !transaction.category_id);

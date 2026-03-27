@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { formatAmountMilliunits, hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
+import { getCachedScheduledTransactions } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_list_scheduled_transactions";
 export const description = "Lists scheduled transactions for a YNAB plan with optional compact projections and pagination.";
@@ -20,7 +21,7 @@ export const inputSchema = {
 };
 export async function execute(input, api) {
     try {
-        const response = await withResolvedPlan(input.planId, api, async (planId) => api.scheduledTransactions.getScheduledTransactions(planId, undefined));
+        const response = await withResolvedPlan(input.planId, api, async (planId) => getCachedScheduledTransactions(api, planId));
         const scheduledTransactions = response.data.scheduled_transactions
             .filter((transaction) => !transaction.deleted)
             .map((transaction) => ({

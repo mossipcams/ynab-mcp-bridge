@@ -8,6 +8,7 @@ import {
   normalizeMonthRange,
   toTopRollups,
 } from "./financeToolUtils.js";
+import { getCachedCategories, getCachedPlanMonths } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_spending_summary";
@@ -64,8 +65,8 @@ export async function execute(
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const [transactionsResponse, monthsResponse, categoriesResponse] = await Promise.all([
         api.transactions.getTransactions(planId, fromMonth, undefined, undefined),
-        api.months.getPlanMonths(planId),
-        api.categories.getCategories(planId),
+        getCachedPlanMonths(api, planId),
+        getCachedCategories(api, planId),
       ]);
 
       const groupByCategoryId = buildCategoryGroupLookup(categoriesResponse.data.category_groups);

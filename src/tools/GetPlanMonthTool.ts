@@ -1,6 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
@@ -19,7 +20,7 @@ export async function execute(
 ) {
   try {
     const month = input.month || "current";
-    const response = await withResolvedPlan(input.planId, api, async (planId) => api.months.getPlanMonth(planId, month));
+    const response = await withResolvedPlan(input.planId, api, async (planId) => getCachedPlanMonth(api, planId, month));
     const monthDetail = response.data.month;
 
     if (input.view === "full") {
