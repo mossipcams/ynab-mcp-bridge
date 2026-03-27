@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.10](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.9...ynab-mcp-bridge-v0.14.10) (2026-03-27)
+
+
+### Bug Fixes
+
+* align runtime API typing for HTTP transport ([9f2cfa3](https://github.com/mossipcams/ynab-mcp-bridge/commit/9f2cfa38a3c47b18c06789191445105addf45822))
+* drop tracked task docs from repo root ([05080d0](https://github.com/mossipcams/ynab-mcp-bridge/commit/05080d038d7310a7c00a4d542f1d925b51227619))
+* optimize mcp transport and ynab read hot paths ([797aa2a](https://github.com/mossipcams/ynab-mcp-bridge/commit/797aa2abb349444ef48365ec54713350ef2a2e9b))
+* reduce repeated MCP read-path work ([b8654f6](https://github.com/mossipcams/ynab-mcp-bridge/commit/b8654f604ca385335939ff6104a902e94209860d))
+* reduce stateless mcp latency ([16099a0](https://github.com/mossipcams/ynab-mcp-bridge/commit/16099a0c8569c84ce6fc71bf7b8efa17d0368a1f))
+* resolve latency PR ci failures ([9532457](https://github.com/mossipcams/ynab-mcp-bridge/commit/9532457d7f33ca232cac4688e78dcdc981db9e60))
+* satisfy CI lint gates for read-path cache changes ([ec65421](https://github.com/mossipcams/ynab-mcp-bridge/commit/ec654216637ae24f9b6c487195dcbf3758c8454d))
+
 ## [0.14.9](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.8...ynab-mcp-bridge-v0.14.9) (2026-03-27)
 
 
