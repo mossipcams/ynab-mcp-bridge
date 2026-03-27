@@ -44,6 +44,44 @@ describe("summarizeReliabilityRun", () => {
         p95: 50,
         p99: 50,
       },
+      operations: {
+        initialize: {
+          count: 2,
+          errorRate: 0,
+          latencyMs: {
+            min: 10,
+            max: 40,
+            average: 25,
+            p50: 10,
+            p95: 40,
+            p99: 40,
+          },
+        },
+        "tools/call": {
+          count: 1,
+          errorRate: 1,
+          latencyMs: {
+            min: 30,
+            max: 30,
+            average: 30,
+            p50: 30,
+            p95: 30,
+            p99: 30,
+          },
+        },
+        "tools/list": {
+          count: 2,
+          errorRate: 0,
+          latencyMs: {
+            min: 20,
+            max: 50,
+            average: 35,
+            p50: 20,
+            p95: 50,
+            p99: 50,
+          },
+        },
+      },
       thresholds: {
         maxErrorRate: {
           actual: 0.2,
@@ -146,6 +184,7 @@ describe("summarizeReliabilityRun", () => {
         p95: 0,
         p99: 0,
       },
+      operations: {},
       thresholds: {
         maxErrorRate: {
           actual: 0,

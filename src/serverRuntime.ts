@@ -284,18 +284,7 @@ const toolRegistrations: ToolModule[] = [
   defineTool("Get Category Trend Summary", GetCategoryTrendSummaryTool),
 ];
 
-const toolRegistrationByName = new Map(toolRegistrations.map((tool) => [tool.name, tool] as const));
 const discoveryCatalogByBaseUrl = new Map<string, DiscoveryCatalog>();
-
-function getToolRegistration(toolName: string): ToolModule {
-  const tool = toolRegistrationByName.get(toolName);
-
-  if (!tool) {
-    throw new Error(`Unknown discovery resource tool: ${toolName}`);
-  }
-
-  return tool;
-}
 
 function getDiscoveryCatalog(options: ServerRuntimeOptions = {}): DiscoveryCatalog {
   const normalizedBaseUrl = getDiscoveryResourceBaseUrl(options.discoveryResourceBaseUrl);

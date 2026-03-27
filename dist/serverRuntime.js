@@ -206,15 +206,7 @@ const toolRegistrations = [
     defineTool("Get Recurring Expense Summary", GetRecurringExpenseSummaryTool),
     defineTool("Get Category Trend Summary", GetCategoryTrendSummaryTool),
 ];
-const toolRegistrationByName = new Map(toolRegistrations.map((tool) => [tool.name, tool]));
 const discoveryCatalogByBaseUrl = new Map();
-function getToolRegistration(toolName) {
-    const tool = toolRegistrationByName.get(toolName);
-    if (!tool) {
-        throw new Error(`Unknown discovery resource tool: ${toolName}`);
-    }
-    return tool;
-}
 function getDiscoveryCatalog(options = {}) {
     const normalizedBaseUrl = getDiscoveryResourceBaseUrl(options.discoveryResourceBaseUrl);
     const cacheKey = normalizedBaseUrl ?? "";

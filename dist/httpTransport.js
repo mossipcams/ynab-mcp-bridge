@@ -617,7 +617,6 @@ export async function startHttpServer(options, dependencies = {}) {
     const port = options.port ?? 3000;
     const ynab = assertYnabConfig(options.ynab);
     const sharedApi = dependencies.createApi?.(ynab) ?? createYnabApi(ynab);
-    let runtimePool;
     if (auth.mode === "oauth") {
         allowedOrigins.add(new URL(auth.publicUrl).origin);
     }
@@ -781,9 +780,6 @@ export async function startHttpServer(options, dependencies = {}) {
     installMcpPostRoute({
         app,
         createManagedRequest: () => {
-            if (!runtimePool) {
-                throw new Error("HTTP runtime pool is not initialized");
-            }
             return createManagedRequestFromRuntimePool(runtimePool, discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {});
         },
         getInitializeParams,
@@ -855,7 +851,7 @@ export async function startHttpServer(options, dependencies = {}) {
         ? new URL(auth.publicUrl).origin
         : `http://${host}:${resolvedAddress.port}`;
     const discoveryResourceBaseUrl = new URL(`${path.replace(/\/$/, "")}/resources/`, resourceOrigin).toString();
-    runtimePool = createManagedRequestRuntimePool(ynab, sharedApi, { discoveryResourceBaseUrl }, dependencies.createServer ?? createServer);
+    const runtimePool = createManagedRequestRuntimePool(ynab, sharedApi, { discoveryResourceBaseUrl }, dependencies.createServer ?? createServer);
     return {
         host,
         path,
