@@ -88,7 +88,7 @@ For each task after approval:
 
 For implementation work, always start a new branch from `main` unless the user explicitly says otherwise.
 When starting a new branch, first update or rebase from the latest `main` so the branch begins from current `main` unless the user explicitly says otherwise.
-If the current branch is not `main`, do not switch branches automatically when that could disturb existing work; pause and confirm first.
+If the current checkout has uncommitted changes, is detached, or is on a branch that should remain undisturbed, do not switch it in place. Create a new `git worktree` from updated `main` unless the user explicitly says otherwise.
 Use `git worktree` when it makes sense to keep branch-based work isolated without disturbing the current working tree.
 
 ## PR Rules
@@ -100,6 +100,7 @@ When creating or updating a PR, keep the title aligned with the actual change ty
 After a PR is merged or explicitly abandoned, clean up the associated local branch and worktree as part of the closeout workflow.
 For merged or abandoned PR work, run `git fetch --prune` and `git worktree prune`, then remove the specific worktree and delete the corresponding local branch when it is no longer needed.
 Do not leave PR-specific worktrees or local branches behind unless the user explicitly asks to keep them.
+Do not remove a worktree that still has uncommitted changes unless the user explicitly approves discarding that work.
 
 ## Markdown-Only Changes
 
