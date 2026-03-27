@@ -1,24 +1,38 @@
 import { z } from "zod";
 import { compactRisk, daysUntil, formatAmount, formatPercent, getTodayIsoDate, liquidCashMilliunits, netWorthMilliunits, recentMonths, totalDebtMilliunits, spreadPercent, } from "./financialDiagnosticsUtils.js";
 import { getCachedAccounts, getCachedPlanMonth, getCachedPlanMonths, getCachedScheduledTransactions, } from "./cachedYnabReads.js";
-import { isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { compactObject, isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 export const name = "ynab_get_financial_health_check";
-export const description = "Builds a compact first-pass health check across cash, debt, budget stress, cleanup backlog, and near-term obligations.";
+export const description = "Compact health check across cash, debt, budget stress, cleanup, and near-term obligations.";
 export const inputSchema = {
-    planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
-    month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("Month to analyze."),
-    asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Optional obligation anchor date."),
-    topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of risks to include."),
+    planId: z.string().optional().describe("Plan ID (uses env default)"),
+    month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("Month (ISO or 'current')"),
+    asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Anchor date (ISO)"),
+    topN: z.number().int().min(1).max(10).default(5).describe("Top N results"),
+    format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
 };
 function risk(code, severity, penalty) {
     return { code, severity, penalty };
+}
+function sortDescendingByAmount(entries) {
+    return entries
+        .slice()
+        .sort((left, right) => {
+        const difference = right.amountMilliunits - left.amountMilliunits;
+        if (difference !== 0) {
+            return difference;
+        }
+        return left.name.localeCompare(right.name);
+    });
 }
 export async function execute(input, api) {
     try {
         const month = normalizeMonthInput(input.month);
         const asOfDate = input.asOfDate ?? getTodayIsoDate();
         const topN = input.topN ?? 5;
+        const format = input.format ?? "compact";
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const [accountsResponse, monthResponse, monthsResponse, transactionsResponse, scheduledResponse] = await Promise.all([
                 getCachedAccounts(api, planId),
@@ -73,7 +87,16 @@ export async function execute(input, api) {
             }
             const score = Math.max(0, 100 - risks.reduce((sum, entry) => sum + entry.penalty, 0));
             const status = score >= 80 ? "healthy" : score >= 50 ? "watch" : "needs_attention";
-            return toTextResult({
+            const topOverspent = sortDescendingByAmount(overspentCategories.map((category) => ({
+                name: category.name,
+                amountMilliunits: Math.abs(category.balance),
+            })));
+            const topUnderfunded = sortDescendingByAmount(underfundedCategories.map((category) => ({
+                name: category.name,
+                amountMilliunits: category.goal_under_funded ?? 0,
+            })));
+            const uncategorizedTransactions = transactions.filter((transaction) => !transaction.category_id);
+            const payload = {
                 as_of_month: monthKey,
                 status,
                 score,
@@ -96,14 +119,37 @@ export async function execute(input, api) {
                     .sort((left, right) => right.penalty - left.penalty)
                     .slice(0, topN)
                     .map((entry) => compactRisk(entry.code, entry.severity)),
-                recommended_tools: [
-                    "ynab_get_budget_health_summary",
-                    "ynab_get_budget_cleanup_summary",
-                    "ynab_search_transactions",
-                    "ynab_get_upcoming_obligations",
-                    "ynab_get_income_summary",
-                ],
-            });
+                top_overspent: topOverspent.slice(0, topN).map((category) => compactObject({
+                    name: category.name,
+                    amount: formatAmount(category.amountMilliunits),
+                })),
+                top_underfunded: topUnderfunded.slice(0, topN).map((category) => compactObject({
+                    name: category.name,
+                    amount: formatAmount(category.amountMilliunits),
+                })),
+                top_uncategorized: uncategorizedTransactions.slice(0, topN).map((transaction) => compactObject({
+                    date: transaction.date,
+                    payee_name: transaction.payee_name ?? undefined,
+                    amount: formatAmount(Math.abs(transaction.amount)),
+                })),
+            };
+            if (format === "prose") {
+                return toProseResult(buildProse(`Financial Health Check (${payload.as_of_month})`, [
+                    ["status", payload.status],
+                    ["score", payload.score],
+                    ["net_worth", payload.metrics.net_worth],
+                    ["liquid_cash", payload.metrics.liquid_cash],
+                    ["debt", payload.metrics.debt],
+                    ["ready_to_assign", payload.metrics.ready_to_assign],
+                    ["upcoming_30d_net", payload.metrics.upcoming_30d_net],
+                ], [
+                    { heading: "Top Risks", items: payload.top_risks.map((riskEntry) => proseRecordItem(riskEntry, "code", "severity")) },
+                    { heading: "Overspent", items: payload.top_overspent.map((entry) => proseRecordItem(entry, "name", "amount")) },
+                    { heading: "Underfunded", items: payload.top_underfunded.map((entry) => proseRecordItem(entry, "name", "amount")) },
+                    { heading: "Uncategorized", items: payload.top_uncategorized.map((entry) => proseRecordItem(entry, "date", "payee_name", "amount")) },
+                ]));
+            }
+            return toTextResult(payload, format);
         });
     }
     catch (error) {

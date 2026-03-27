@@ -1,4 +1,4 @@
-import { compactObject, formatMilliunits } from "./financeToolUtils.js";
+import { compactObject, expandScheduledOccurrences, formatMilliunits } from "./financeToolUtils.js";
 
 type YnabAccountLike = {
   deleted?: boolean;
@@ -104,6 +104,23 @@ export function formatAmount(value: number) {
 
 export function compactRisk(code: string, severity: "high" | "medium" | "low") {
   return compactObject({ code, severity });
+}
+
+export function scheduledNetNext30dMilliunits<
+  T extends {
+    id: string;
+    amount: number;
+    date_next: string;
+    deleted?: boolean;
+    frequency?: "never" | "daily" | "weekly" | "everyOtherWeek" | "twiceAMonth" | "every4Weeks" | "monthly" | "everyOtherMonth" | "every3Months" | "every4Months" | "twiceAYear" | "yearly" | "everyOtherYear" | null;
+    transfer_account_id?: string | null;
+  },
+>(transactions: T[], asOfDate: string) {
+  return expandScheduledOccurrences(
+    transactions.filter((transaction) => !transaction.deleted),
+    asOfDate,
+    30,
+  ).reduce((sum, transaction) => sum + transaction.amount, 0);
 }
 
 

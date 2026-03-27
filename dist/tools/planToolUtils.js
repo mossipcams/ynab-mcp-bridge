@@ -100,6 +100,9 @@ export async function withResolvedPlan(inputPlanId, api, operation) {
     }
 }
 function serializePayload(payload, format) {
+    if (format === "prose") {
+        return typeof payload === "string" ? payload : JSON.stringify(payload);
+    }
     return format === "pretty"
         ? JSON.stringify(payload, null, 2)
         : JSON.stringify(payload);
@@ -111,6 +114,9 @@ export function toTextResult(payload, format = "compact") {
                 text: serializePayload(payload, format),
             }],
     };
+}
+export function toProseResult(text) {
+    return toTextResult(text, "prose");
 }
 export function toErrorResult(error, format = "compact") {
     return {

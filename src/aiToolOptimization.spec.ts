@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { getToolCatalogMetrics, getToolsListResult } from "./serverRuntime.js";
+import * as GetFinancialHealthCheckTool from "./tools/GetFinancialHealthCheckTool.js";
+import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";
 import * as GetTransactionsByAccountTool from "./tools/GetTransactionsByAccountTool.js";
 import * as ListAccountsTool from "./tools/ListAccountsTool.js";
 import * as ListTransactionsTool from "./tools/ListTransactionsTool.js";
@@ -9,7 +12,166 @@ function parseText(result: Awaited<ReturnType<typeof ListTransactionsTool.execut
   return JSON.parse(result.content[0].text);
 }
 
+function measureTextPayload(text: string) {
+  return {
+    bytes: Buffer.byteLength(text, "utf8"),
+    chars: text.length,
+  };
+}
+
 describe("AI tool optimization", () => {
+  it("records baseline catalog and summary payload sizes for latency work", async () => {
+    const catalogMetrics = getToolCatalogMetrics();
+    const api = {
+      accounts: {
+        getAccounts: vi.fn().mockResolvedValue({
+          data: {
+            accounts: [
+              { id: "acct-1", name: "Checking", on_budget: true, deleted: false, closed: false, balance: 600000 },
+              { id: "acct-2", name: "Visa", on_budget: true, deleted: false, closed: false, balance: -300000 },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              to_be_budgeted: -20000,
+              age_of_money: 10,
+              income: 200000,
+              budgeted: 250000,
+              activity: -270000,
+              categories: [
+                { id: "cat-1", name: "Rent", deleted: false, hidden: false, balance: -15000, goal_under_funded: 0 },
+                { id: "cat-2", name: "Emergency Fund", deleted: false, hidden: false, balance: 50000, goal_under_funded: 5000 },
+              ],
+            },
+          },
+        }),
+        getPlanMonths: vi.fn().mockResolvedValue({
+          data: {
+            months: [
+              { month: "2026-01-01", income: 500000, budgeted: 100000, deleted: false },
+              { month: "2026-02-01", income: 500000, budgeted: 100000, deleted: false },
+              { month: "2026-03-01", income: 200000, budgeted: 250000, deleted: false },
+            ],
+          },
+        }),
+      },
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-03-10",
+                amount: -15000,
+                deleted: false,
+                approved: false,
+                cleared: "uncleared",
+                category_id: null,
+                transfer_account_id: null,
+                payee_id: "payee-1",
+                payee_name: "Landlord",
+                category_name: null,
+              },
+            ],
+          },
+        }),
+      },
+      scheduledTransactions: {
+        getScheduledTransactions: vi.fn().mockResolvedValue({
+          data: {
+            scheduled_transactions: [
+              { id: "sched-1", deleted: false, date_next: "2026-03-15", amount: -700000 },
+            ],
+          },
+        }),
+      },
+      plans: {
+        getPlans: vi.fn().mockResolvedValue({
+          data: {
+            plans: [{ id: "plan-1" }],
+            default_plan: { id: "plan-1" },
+          },
+        }),
+      },
+    };
+
+    const [healthCheckResult, snapshotResult] = await Promise.all([
+      GetFinancialHealthCheckTool.execute(
+        { planId: "plan-1", month: "2026-03-01", asOfDate: "2026-03-10" },
+        api as any,
+      ),
+      GetFinancialSnapshotTool.execute(
+        { planId: "plan-1", month: "2026-03-01" },
+        api as any,
+      ),
+    ]);
+
+    const baseline = {
+      tool_catalog: catalogMetrics,
+      summary_payloads: {
+        financial_health_check: measureTextPayload(healthCheckResult.content[0].text),
+        financial_snapshot: measureTextPayload(snapshotResult.content[0].text),
+      },
+    };
+
+    expect(baseline).toEqual({
+      tool_catalog: {
+        tool_count: 47,
+        tools_list_bytes: expect.any(Number),
+        tools_list_chars: expect.any(Number),
+      },
+      summary_payloads: {
+        financial_health_check: {
+          bytes: expect.any(Number),
+          chars: expect.any(Number),
+        },
+        financial_snapshot: {
+          bytes: expect.any(Number),
+          chars: expect.any(Number),
+        },
+      },
+    });
+    expect(baseline.tool_catalog.tools_list_bytes).toBeGreaterThan(1000);
+    expect(baseline.summary_payloads.financial_health_check.bytes).toBeGreaterThan(
+      baseline.summary_payloads.financial_snapshot.bytes,
+    );
+  });
+
+  it("trims repetitive schema and description text for high-value tools", () => {
+    const toolsList = getToolsListResult();
+    const searchTransactions = toolsList.tools.find((tool) => tool.name === "ynab_search_transactions");
+    const financialHealthCheck = toolsList.tools.find((tool) => tool.name === "ynab_get_financial_health_check");
+    const budgetHealth = toolsList.tools.find((tool) => tool.name === "ynab_get_budget_health_summary");
+    const cashFlow = toolsList.tools.find((tool) => tool.name === "ynab_get_cash_flow_summary");
+    const monthlyReview = toolsList.tools.find((tool) => tool.name === "ynab_get_monthly_review");
+    const upcomingObligations = toolsList.tools.find((tool) => tool.name === "ynab_get_upcoming_obligations");
+
+    expect(searchTransactions?.inputSchema).toMatchObject({
+      properties: {
+        planId: { description: "Plan ID (uses env default)" },
+        fromDate: { description: "Start date (ISO)" },
+        toDate: { description: "End date (ISO)" },
+        limit: { description: "Max results" },
+        offset: { description: "Skip N results" },
+      },
+    });
+    expect(financialHealthCheck?.inputSchema).toMatchObject({
+      properties: {
+        planId: { description: "Plan ID (uses env default)" },
+        month: { description: "Month (ISO or 'current')" },
+      },
+    });
+    expect(budgetHealth?.description).toBe("Budget health summary with funds available, overspending, underfunding, and assigned vs spent.");
+    expect(cashFlow?.description).toBe("Cash flow summary with inflow, outflow, net flow, and assigned vs spent.");
+    expect(monthlyReview?.description).toBe("Monthly review with income, cash flow, budget health, top spending, and notable changes.");
+    expect(upcomingObligations?.description).toBe("Upcoming scheduled inflows and outflows across 7, 14, and 30 day windows.");
+  });
+
   it("supports bounded projected transaction listings", async () => {
     const api = {
       transactions: {
