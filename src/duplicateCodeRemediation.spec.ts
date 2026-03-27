@@ -102,7 +102,7 @@ describe("duplicate code remediation", () => {
       const toolSource = readFileSync(path.join(projectRoot, "src", "tools", toolFile), "utf8");
 
       expect(toolSource).toContain("transactionFields");
-      expect(toolSource).toContain("toDisplayTransactions(");
+      expect(toolSource).toContain("buildTransactionCollectionResult(");
       expect(toolSource).not.toContain("const transactionFields = [");
     }
   });
