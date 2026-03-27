@@ -560,3 +560,29 @@ Clean up the duplicates still left after the modular-monolith extraction by:
   No new implementation unless verification finds another true duplicate hotspot worth addressing in this branch.
   How to verify it works:
   Run `npm run lint:duplicates`, then run the focused Vitest suites touched above, then run `npm run build`, and compare the new `jscpd` output with the current baseline so we can confirm the unwanted duplicates were actually removed.
+
+## Discovery Regression Repair Plan
+
+- [x] Task 1: Add a red spec in `src/serverFactory.spec.ts` that fails unless `createServer(...)` advertises MCP `resources` capability and exposes discovery resources for `ynab_list_categories` and `ynab_list_accounts` through the SDK-registered server state.
+  Test to write:
+  Assert `server.server.getCapabilities()` includes `resources.listChanged`, the registered resource state is non-empty, and the discovery entries include names for `ynab_list_categories` and `ynab_list_accounts`.
+  Code to implement:
+  Add a resource-registration layer in `src/serverRuntime.ts` alongside tool registration so the server publishes static discovery resources derived from the existing tool definitions.
+  How to verify it works:
+  Run `npx vitest run src/serverFactory.spec.ts` and show the new test failing first, then passing after implementation.
+
+- [x] Task 2: Add a red spec in `src/serverFactory.spec.ts` that fails unless the discovery resource for `ynab_list_categories` and `ynab_list_accounts` can be read and returns tool metadata that points callers back to the callable MCP tool name.
+  Test to write:
+  Read the registered resource callbacks for those two resources and assert the payload includes the tool name, title, description, and input schema metadata.
+  Code to implement:
+  Implement deterministic per-tool resource URIs and read callbacks in `src/serverRuntime.ts` that serialize tool metadata into MCP resource contents.
+  How to verify it works:
+  Re-run `npx vitest run src/serverFactory.spec.ts` and inspect the targeted assertions for those two affected tool resources.
+
+- [x] Task 3: Add a red transport-level spec in `src/httpServer.spec.ts` that fails unless an MCP client can call `listResources()` against the HTTP server and see the `ynab_list_categories` and `ynab_list_accounts` discovery resources.
+  Test to write:
+  Start the authless HTTP server, connect an MCP client, call `listResources()`, and assert the returned resources include the two affected tool discovery entries.
+  Code to implement:
+  Wire any missing transport or server initialization needed so the new resource registration is available over the live HTTP path without disturbing `tools/list`.
+  How to verify it works:
+  Run `npx vitest run src/httpServer.spec.ts src/serverFactory.spec.ts`, then run `npm run build` as the broader proof.

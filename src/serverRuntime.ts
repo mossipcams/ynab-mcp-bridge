@@ -96,6 +96,10 @@ type ToolRegistrar = {
   ) => unknown;
 };
 
+function getToolDiscoveryUri(toolName: string): string {
+  return `ynab-tool://${toolName}`;
+}
+
 export function defineTool(title: string, tool: ToolSource): ToolModule {
   return {
     title,
@@ -203,6 +207,44 @@ export function registerServerTools(registrar: ToolRegistrar, api: API): string[
   return registeredToolNames;
 }
 
+function registerServerResources(server: McpServer): string[] {
+  const registeredResourceUris: string[] = [];
+
+  for (const tool of toolRegistrations) {
+    const uri = getToolDiscoveryUri(tool.name);
+
+    server.registerResource(
+      tool.name,
+      uri,
+      {
+        title: tool.title,
+        description: tool.description,
+        mimeType: "application/json",
+      },
+      async () => ({
+        contents: [
+          {
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify({
+              annotations: READ_ONLY_TOOL_ANNOTATIONS,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+              title: tool.title,
+              toolName: tool.name,
+              uri,
+            }),
+          },
+        ],
+      }),
+    );
+
+    registeredResourceUris.push(uri);
+  }
+
+  return registeredResourceUris;
+}
+
 export function createServer(config: YnabConfig, api = createYnabApi(config)): McpServer {
   const normalizedConfig = assertYnabConfig(config);
   const server = new McpServer(SERVER_INFO);
@@ -210,6 +252,7 @@ export function createServer(config: YnabConfig, api = createYnabApi(config)): M
 
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- McpServer structurally satisfies the runtime registrar contract.
   registerServerTools(server as unknown as ToolRegistrar, configuredApi);
+  registerServerResources(server);
 
   return server;
 }
