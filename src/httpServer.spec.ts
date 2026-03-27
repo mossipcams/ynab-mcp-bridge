@@ -537,10 +537,14 @@ describe("startHttpServer", () => {
       details.correlationId === correlationId &&
       details.jsonRpcMethod === "resources/list"
     ))).toBeTruthy();
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.correlationId === correlationId &&
+      details.jsonRpcMethod === "tools/call"
+    ))).toBeFalsy();
     expect(findMcpLogCall(consoleErrorSpy, "tool.call.started", (details) => (
       details.correlationId === correlationId &&
       details.toolName === "ynab_get_mcp_version"
-    ))).toBeTruthy();
+    ))).toBeFalsy();
     expect(findLogCall(consoleErrorSpy, "resource.read.requested", (details) => (
       details.correlationId === correlationId
     ))).toBeFalsy();
@@ -705,7 +709,7 @@ describe("startHttpServer", () => {
       details.jsonRpcMethod === "initialize" &&
       details.userAgent === "chatgpt" &&
       details.sessionId === undefined &&
-      details.cleanup === true
+      details.cleanup === false
     ))).toBeTruthy();
     expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
       details.path === "/mcp" &&
@@ -1467,7 +1471,7 @@ describe("startHttpServer", () => {
     await expect(response.text()).resolves.toContain("\"ynab_get_mcp_version\"");
   });
 
-  it("creates a managed request for each sessionless MCP POST in the current transport baseline", async () => {
+  it("creates a managed request for each sessionless MCP POST that misses the authless fast path", async () => {
     let managedRequestCount = 0;
     const httpServer = await (startHttpServer as any)({
       ynab,
@@ -1481,8 +1485,9 @@ describe("startHttpServer", () => {
       },
     });
     cleanups.push(() => httpServer.close());
+    const resourceUri = `${httpServer.url}/resources/ynab_get_mcp_version`;
 
-    const initializeResponse = await fetch(httpServer.url, {
+    const firstReadResponse = await fetch(httpServer.url, {
       method: "POST",
       headers: {
         Accept: "application/json, text/event-stream",
@@ -1493,21 +1498,16 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "initialize",
+        method: "resources/read",
         params: {
-          protocolVersion: LATEST_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: {
-            name: "managed-request-baseline-client",
-            version: "1.0.0",
-          },
+          uri: resourceUri,
         },
       }),
     });
 
-    expect(initializeResponse.status).toBe(200);
+    expect(firstReadResponse.status).toBe(200);
 
-    const toolListResponse = await fetch(httpServer.url, {
+    const secondReadResponse = await fetch(httpServer.url, {
       method: "POST",
       headers: {
         Accept: "application/json, text/event-stream",
@@ -1518,12 +1518,14 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 2,
-        method: "tools/list",
-        params: {},
+        method: "resources/read",
+        params: {
+          uri: resourceUri,
+        },
       }),
     });
 
-    expect(toolListResponse.status).toBe(200);
+    expect(secondReadResponse.status).toBe(200);
     expect(managedRequestCount).toBe(2);
   });
 
@@ -1585,7 +1587,71 @@ describe("startHttpServer", () => {
     expect(createApi).toHaveBeenCalledTimes(1);
   });
 
-  it("reuses one registered MCP server runtime across sequential sessionless MCP POSTs", async () => {
+  it("reuses one registered MCP server runtime across sequential managed sessionless MCP POSTs", async () => {
+    const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
+      createServer(...args)
+    ));
+    let managedRequestCount = 0;
+
+    const httpServer = await (startHttpServer as any)({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    }, {
+      createServer: createServerSpy,
+      onManagedRequestCreated: () => {
+        managedRequestCount += 1;
+      },
+    });
+    cleanups.push(() => httpServer.close());
+    const resourceUri = `${httpServer.url}/resources/ynab_get_mcp_version`;
+
+    const firstReadResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "resources/read",
+        params: {
+          uri: resourceUri,
+        },
+      }),
+    });
+
+    expect(firstReadResponse.status).toBe(200);
+
+    const secondReadResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "resources/read",
+        params: {
+          uri: resourceUri,
+        },
+      }),
+    });
+
+    expect(secondReadResponse.status).toBe(200);
+    expect(managedRequestCount).toBe(2);
+    expect(createServerSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves sessionless authless initialize requests without acquiring a managed runtime", async () => {
     const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
       createServer(...args)
     ));
@@ -1621,7 +1687,7 @@ describe("startHttpServer", () => {
           protocolVersion: LATEST_PROTOCOL_VERSION,
           capabilities: {},
           clientInfo: {
-            name: "reused-runtime-client",
+            name: "fast-path-client",
             version: "1.0.0",
           },
         },
@@ -1629,8 +1695,50 @@ describe("startHttpServer", () => {
     });
 
     expect(initializeResponse.status).toBe(200);
+    await expect(initializeResponse.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+        capabilities: {
+          resources: {
+            listChanged: true,
+          },
+          tools: {
+            listChanged: true,
+          },
+        },
+        serverInfo: {
+          name: "ynab-mcp-bridge",
+          version: "0.14.10",
+        },
+      },
+    });
+    expect(managedRequestCount).toBe(0);
+    expect(createServerSpy).not.toHaveBeenCalled();
+  });
 
-    const toolListResponse = await fetch(httpServer.url, {
+  it("serves sessionless authless list requests without acquiring a managed runtime", async () => {
+    const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
+      createServer(...args)
+    ));
+    let managedRequestCount = 0;
+
+    const httpServer = await (startHttpServer as any)({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    }, {
+      createServer: createServerSpy,
+      onManagedRequestCreated: () => {
+        managedRequestCount += 1;
+      },
+    });
+    cleanups.push(() => httpServer.close());
+
+    const toolsListResponse = await fetch(httpServer.url, {
       method: "POST",
       headers: {
         Accept: "application/json, text/event-stream",
@@ -1646,9 +1754,151 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(toolListResponse.status).toBe(200);
-    expect(managedRequestCount).toBe(2);
-    expect(createServerSpy).toHaveBeenCalledTimes(1);
+    expect(toolsListResponse.status).toBe(200);
+    await expect(toolsListResponse.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 2,
+      result: {
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_get_mcp_version",
+          }),
+        ]),
+      },
+    });
+
+    const resourcesListResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "resources/list",
+        params: {},
+      }),
+    });
+
+    expect(resourcesListResponse.status).toBe(200);
+    await expect(resourcesListResponse.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 3,
+      result: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_get_mcp_version",
+            uri: "ynab-tool://ynab_get_mcp_version",
+          }),
+        ]),
+      },
+    });
+    expect(managedRequestCount).toBe(0);
+    expect(createServerSpy).not.toHaveBeenCalled();
+  });
+
+  it("serves sessionless authless ynab_get_mcp_version calls without acquiring a managed runtime", async () => {
+    const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
+      createServer(...args)
+    ));
+    let managedRequestCount = 0;
+
+    const httpServer = await (startHttpServer as any)({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    }, {
+      createServer: createServerSpy,
+      onManagedRequestCreated: () => {
+        managedRequestCount += 1;
+      },
+    });
+    cleanups.push(() => httpServer.close());
+
+    const toolCallResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(toolCallResponse.status).toBe(200);
+    await expect(toolCallResponse.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: 4,
+      result: {
+        content: [{
+          type: "text",
+          text: "{\"name\":\"ynab-mcp-bridge\",\"version\":\"0.14.10\"}",
+        }],
+      },
+    });
+    expect(managedRequestCount).toBe(0);
+    expect(createServerSpy).not.toHaveBeenCalled();
+  });
+
+  it("skips redundant success-path logs for fast-path authless tool calls", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+      details.path === "/mcp" &&
+      details.method === "POST" &&
+      details.jsonRpcMethod === "tools/call"
+    ))).toBeFalsy();
+    expect(findMcpLogCall(consoleErrorSpy, "tool.call.started", (details) => (
+      details.toolName === "ynab_get_mcp_version"
+    ))).toBeFalsy();
+    expect(findMcpLogCall(consoleErrorSpy, "tool.call.succeeded", (details) => (
+      details.toolName === "ynab_get_mcp_version"
+    ))).toBeFalsy();
   });
 
   it("returns 405 for GET requests after initialization", async () => {
@@ -1820,7 +2070,7 @@ describe("startHttpServer", () => {
     await secondClient.close();
   });
 
-  it("logs the JSON-RPC method for a sessionless tools/call request", async () => {
+  it("logs the JSON-RPC method for a sessionless managed tools/call request", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const correlationId = "corr-tools-call-123";
     const httpServer = await startHttpServer({
@@ -1850,7 +2100,7 @@ describe("startHttpServer", () => {
         id: 1,
         method: "tools/call",
         params: {
-          name: "ynab_get_mcp_version",
+          name: "ynab_get_category",
           arguments: {},
         },
       }),

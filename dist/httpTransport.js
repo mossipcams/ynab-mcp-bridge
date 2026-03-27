@@ -13,7 +13,7 @@ import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolic
 import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import { createRequestContext, getCorrelationHeaderName, getRequestLogFields, hasToolCallStarted, runWithRequestContext, } from "./requestContext.js";
 import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
-import { createServer, getDiscoveryResourceDocument, getDiscoveryResourceSummaries } from "./serverRuntime.js";
+import { createServer, createFastPathToolCallResults, getDiscoveryResourceDocument, getDiscoveryResourceSummaries, getInitializeResult, getResourcesListResult, getToolsListResult, } from "./serverRuntime.js";
 import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 import { createYnabApi } from "./ynabApi.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
@@ -120,6 +120,13 @@ function writeJsonRpcError(res, statusCode, code, message) {
             message,
         },
         id: null,
+    });
+}
+function writeJsonRpcResult(res, id, result) {
+    writeJson(res, 200, {
+        jsonrpc: "2.0",
+        id,
+        result,
     });
 }
 function writeMethodNotAllowed(res, allowedMethods) {
@@ -233,6 +240,16 @@ function getToolCallName(parsedBody) {
     const params = getRecordValueIfObject(parsedBody, "params");
     return params ? getStringValue(params, "name") : undefined;
 }
+function getToolCallArguments(parsedBody) {
+    if (!isRecord(parsedBody)) {
+        return undefined;
+    }
+    if (getStringValue(parsedBody, "method") !== "tools/call") {
+        return undefined;
+    }
+    const params = getRecordValueIfObject(parsedBody, "params");
+    return params ? getRecordValueIfObject(params, "arguments") : undefined;
+}
 function getResourceReadUri(parsedBody) {
     if (!isRecord(parsedBody)) {
         return undefined;
@@ -242,6 +259,15 @@ function getResourceReadUri(parsedBody) {
     }
     const params = getRecordValueIfObject(parsedBody, "params");
     return params ? getStringValue(params, "uri") : undefined;
+}
+function getJsonRpcId(parsedBody) {
+    if (!isRecord(parsedBody) || !("id" in parsedBody)) {
+        return null;
+    }
+    return parsedBody["id"];
+}
+function isEmptyRecord(value) {
+    return value !== undefined && Object.keys(value).length === 0;
 }
 function captureResponseBody(res) {
     const chunks = [];
@@ -491,7 +517,7 @@ function allowsOpaqueNullOrigin(req, authMode) {
         getRequestPath(req) === "/authorize/consent";
 }
 export function installMcpPostRoute(options) {
-    const { app, createManagedRequest, getInitializeParams, getJsonRpcDebugDetails, getRequestAuthDebugOptions, getRequestDebugDetails, getRequestPath, getToolCallName, logHttpDebug, path, resolveRequest, writeMethodNotAllowed, writeRequestResolution, } = options;
+    const { app, createManagedRequest, fastPathResponses, getInitializeParams, getJsonRpcDebugDetails, getRequestAuthDebugOptions, getRequestDebugDetails, getRequestPath, getToolCallName, logHttpDebug, path, resolveRequest, writeMethodNotAllowed, writeRequestResolution, } = options;
     app.use(async (req, res, next) => {
         if (getRequestPath(req) !== path) {
             next();
@@ -506,27 +532,18 @@ export function installMcpPostRoute(options) {
             return;
         }
         const parsedBody = req.body;
-        const resolution = await resolveRequest(req, createManagedRequest);
-        if (resolution.status === "invalid-session-header") {
+        if (hasMultipleSessionHeaderValues(req)) {
             logHttpDebug("request.rejected", {
                 ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                 reason: "invalid-session-header",
             });
-            writeRequestResolution(res, resolution);
+            writeRequestResolution(res, {
+                status: "invalid-session-header",
+            });
             return;
         }
-        let cleanedUp = false;
-        const cleanup = async () => {
-            if (cleanedUp) {
-                return;
-            }
-            cleanedUp = true;
-            await resolution.cleanup?.();
-        };
+        let cleanup = async () => { };
         try {
-            res.once("close", () => {
-                void cleanup();
-            });
             const provisionalProfile = getResolvedClientProfile(res.locals);
             const initializeParams = getInitializeParams(parsedBody);
             if (provisionalProfile && initializeParams) {
@@ -556,10 +573,84 @@ export function installMcpPostRoute(options) {
                 }
             }
             const resolvedProfile = getResolvedClientProfile(res.locals);
+            const authDebugOptions = getRequestAuthDebugOptions(req);
+            const fastPathCache = fastPathResponses();
+            const isSessionlessAuthlessRequest = authDebugOptions.authMode === "none" && !getSessionId(req);
+            const jsonRpcMethod = isRecord(parsedBody) ? getStringValue(parsedBody, "method") : undefined;
+            if (isSessionlessAuthlessRequest && fastPathCache && typeof jsonRpcMethod === "string") {
+                if (jsonRpcMethod === "initialize") {
+                    logHttpDebug("transport.handoff", {
+                        ...getRequestDebugDetails(req, authDebugOptions),
+                        ...getJsonRpcDebugDetails(parsedBody),
+                        cleanup: false,
+                        profileId: resolvedProfile?.profileId,
+                        profileReason: resolvedProfile?.reason,
+                    });
+                    writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.initializeResult);
+                    return;
+                }
+                if (jsonRpcMethod === "tools/list") {
+                    logHttpDebug("transport.handoff", {
+                        ...getRequestDebugDetails(req, authDebugOptions),
+                        ...getJsonRpcDebugDetails(parsedBody),
+                        cleanup: false,
+                        profileId: resolvedProfile?.profileId,
+                        profileReason: resolvedProfile?.reason,
+                    });
+                    writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.toolsListResult);
+                    return;
+                }
+                if (jsonRpcMethod === "resources/list" && fastPathCache.resourcesListResult) {
+                    logHttpDebug("transport.handoff", {
+                        ...getRequestDebugDetails(req, authDebugOptions),
+                        ...getJsonRpcDebugDetails(parsedBody),
+                        cleanup: false,
+                        profileId: resolvedProfile?.profileId,
+                        profileReason: resolvedProfile?.reason,
+                    });
+                    logHttpDebug("resource.list.advertised", {
+                        ...getRequestDebugDetails(req, authDebugOptions),
+                        ...getJsonRpcDebugDetails(parsedBody),
+                        resourceCount: fastPathCache.resourcesListResult.resources.length,
+                        resourceUris: fastPathCache.resourcesListResult.resources.map((resource) => resource.uri),
+                    });
+                    writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.resourcesListResult);
+                    return;
+                }
+                if (jsonRpcMethod === "tools/call") {
+                    const toolName = getToolCallName(parsedBody);
+                    const toolArguments = getToolCallArguments(parsedBody);
+                    const fastPathResult = toolName ? fastPathCache.toolCallResults.get(toolName) : undefined;
+                    if (fastPathResult && isEmptyRecord(toolArguments)) {
+                        writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathResult);
+                        return;
+                    }
+                }
+            }
+            const resolution = await resolveRequest(req, createManagedRequest);
+            if (resolution.status === "invalid-session-header") {
+                logHttpDebug("request.rejected", {
+                    ...getRequestDebugDetails(req, authDebugOptions),
+                    reason: "invalid-session-header",
+                });
+                writeRequestResolution(res, resolution);
+                return;
+            }
+            let cleanedUp = false;
+            cleanup = async () => {
+                if (cleanedUp) {
+                    return;
+                }
+                cleanedUp = true;
+                await resolution.cleanup?.();
+            };
+            res.once("close", () => {
+                void cleanup();
+            });
             const responseCapture = getToolCallName(parsedBody) ? captureResponseBody(res) : undefined;
             const resourceReadUri = getResourceReadUri(parsedBody);
             logHttpDebug("transport.handoff", {
-                ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                ...getRequestDebugDetails(req, authDebugOptions),
                 ...getJsonRpcDebugDetails(parsedBody),
                 cleanup: Boolean(resolution.cleanup),
                 profileId: resolvedProfile?.profileId,
@@ -587,7 +678,7 @@ export function installMcpPostRoute(options) {
                 const errorMessage = responseCapture?.readJsonRpcErrorMessage();
                 if (typeof errorMessage === "string" && errorMessage.includes("Input validation error")) {
                     logHttpDebug("tool.call.validation_failed", {
-                        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                        ...getRequestDebugDetails(req, authDebugOptions),
                         ...getJsonRpcDebugDetails(parsedBody),
                         errorMessage,
                         toolName,
@@ -595,7 +686,7 @@ export function installMcpPostRoute(options) {
                     return;
                 }
                 logHttpDebug("tool.dispatch.absent", {
-                    ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                    ...getRequestDebugDetails(req, authDebugOptions),
                     ...getJsonRpcDebugDetails(parsedBody),
                     errorMessage,
                     toolName,
@@ -782,6 +873,7 @@ export async function startHttpServer(options, dependencies = {}) {
         createManagedRequest: () => {
             return createManagedRequestFromRuntimePool(runtimePool, discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {});
         },
+        fastPathResponses: () => fastPathCache,
         getInitializeParams,
         getJsonRpcDebugDetails,
         getRequestAuthDebugOptions,
@@ -851,6 +943,12 @@ export async function startHttpServer(options, dependencies = {}) {
         ? new URL(auth.publicUrl).origin
         : `http://${host}:${resolvedAddress.port}`;
     const discoveryResourceBaseUrl = new URL(`${path.replace(/\/$/, "")}/resources/`, resourceOrigin).toString();
+    const fastPathCache = {
+        toolCallResults: await createFastPathToolCallResults(),
+        initializeResult: getInitializeResult(),
+        toolsListResult: getToolsListResult(),
+        resourcesListResult: getResourcesListResult({ discoveryResourceBaseUrl }),
+    };
     const runtimePool = createManagedRequestRuntimePool(ynab, sharedApi, { discoveryResourceBaseUrl }, dependencies.createServer ?? createServer);
     return {
         host,

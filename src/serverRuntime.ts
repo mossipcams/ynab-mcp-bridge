@@ -4,7 +4,13 @@
  * Outputs/contracts: defineTool(...), registerServerTools(...), and createServer(...).
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import {
+  normalizeObjectSchema,
+  type AnySchema,
+  type ZodRawShapeCompat,
+} from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
+import { LATEST_PROTOCOL_VERSION, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { API } from "ynab";
 
 import { assertYnabConfig, type YnabConfig } from "./config.js";
@@ -102,6 +108,7 @@ type ServerRuntimeOptions = {
 
 type DiscoveryResourceSummary = {
   description: string;
+  mimeType?: string;
   name: string;
   title: string;
   uri: string;
@@ -129,6 +136,42 @@ type DiscoveryInvocationGuidance = {
   argumentExamples: Record<string, string | number>;
   invocationExample: Record<string, string | number>;
   requiredArguments: string[];
+};
+
+type InitializeResult = {
+  capabilities: {
+    resources: {
+      listChanged: true;
+    };
+    tools: {
+      listChanged: true;
+    };
+  };
+  protocolVersion: string;
+  serverInfo: typeof SERVER_INFO;
+};
+
+type ToolsListResult = {
+  tools: Array<{
+    annotations: typeof READ_ONLY_TOOL_ANNOTATIONS;
+    description: string;
+    execution: {
+      taskSupport: "forbidden";
+    };
+    inputSchema: Record<string, unknown>;
+    name: string;
+    title: string;
+  }>;
+};
+
+type ResourcesListResult = {
+  resources: Array<{
+    description: string;
+    mimeType: "application/json";
+    name: string;
+    title: string;
+    uri: string;
+  }>;
 };
 
 const discoveryInvocationGuidanceByToolName: Partial<Record<string, DiscoveryInvocationGuidance>> = {
@@ -323,6 +366,88 @@ function getDiscoveryCatalog(options: ServerRuntimeOptions = {}): DiscoveryCatal
 
 export function getDiscoveryResourceSummaries(options: ServerRuntimeOptions = {}): DiscoveryResourceSummary[] {
   return getDiscoveryCatalog(options).summaries;
+}
+
+function getToolInputJsonSchema(
+  inputSchema: unknown,
+): Record<string, unknown> {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- MCP tool definitions provide raw Zod shapes or schemas consumed by the SDK helper.
+  const schema = inputSchema as AnySchema | ZodRawShapeCompat | undefined;
+  const objectSchema = normalizeObjectSchema(schema);
+
+  if (!objectSchema) {
+    return {
+      properties: {},
+      type: "object",
+    };
+  }
+
+  const jsonSchema: Record<string, unknown> = toJsonSchemaCompat(objectSchema, {
+    pipeStrategy: "input",
+    strictUnions: true,
+  });
+
+  return jsonSchema;
+}
+
+export function getInitializeResult(): InitializeResult {
+  return {
+    protocolVersion: LATEST_PROTOCOL_VERSION,
+    capabilities: {
+      tools: {
+        listChanged: true,
+      },
+      resources: {
+        listChanged: true,
+      },
+    },
+    serverInfo: SERVER_INFO,
+  };
+}
+
+export function getToolsListResult(): ToolsListResult {
+  return {
+    tools: toolRegistrations.map((tool) => ({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      inputSchema: getToolInputJsonSchema(tool.inputSchema),
+      annotations: READ_ONLY_TOOL_ANNOTATIONS,
+      execution: {
+        taskSupport: "forbidden",
+      },
+    })),
+  };
+}
+
+export function getResourcesListResult(options: ServerRuntimeOptions = {}): ResourcesListResult {
+  return {
+    resources: getDiscoveryResourceSummaries(options).map((resource) => ({
+      uri: resource.uri,
+      name: resource.name,
+      title: resource.title,
+      description: resource.description,
+      mimeType: "application/json",
+    })),
+  };
+}
+
+export async function createFastPathToolCallResults(): Promise<Map<string, CallToolResult>> {
+  const fastPathResults = new Map<string, CallToolResult>();
+
+  fastPathResults.set(
+    GetMcpVersionTool.name,
+    {
+      content: [
+        {
+          text: JSON.stringify(SERVER_INFO),
+          type: "text",
+        },
+      ],
+    },
+  );
+
+  return fastPathResults;
 }
 
 export function getDiscoveryResourceDocument(

@@ -4,6 +4,9 @@
  * Outputs/contracts: defineTool(...), registerServerTools(...), and createServer(...).
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { normalizeObjectSchema, } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
+import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { assertYnabConfig } from "./config.js";
 import { logAppEvent } from "./logger.js";
 import { getPackageInfo } from "./packageInfo.js";
@@ -239,6 +242,73 @@ function getDiscoveryCatalog(options = {}) {
 }
 export function getDiscoveryResourceSummaries(options = {}) {
     return getDiscoveryCatalog(options).summaries;
+}
+function getToolInputJsonSchema(inputSchema) {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- MCP tool definitions provide raw Zod shapes or schemas consumed by the SDK helper.
+    const schema = inputSchema;
+    const objectSchema = normalizeObjectSchema(schema);
+    if (!objectSchema) {
+        return {
+            properties: {},
+            type: "object",
+        };
+    }
+    const jsonSchema = toJsonSchemaCompat(objectSchema, {
+        pipeStrategy: "input",
+        strictUnions: true,
+    });
+    return jsonSchema;
+}
+export function getInitializeResult() {
+    return {
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+        capabilities: {
+            tools: {
+                listChanged: true,
+            },
+            resources: {
+                listChanged: true,
+            },
+        },
+        serverInfo: SERVER_INFO,
+    };
+}
+export function getToolsListResult() {
+    return {
+        tools: toolRegistrations.map((tool) => ({
+            name: tool.name,
+            title: tool.title,
+            description: tool.description,
+            inputSchema: getToolInputJsonSchema(tool.inputSchema),
+            annotations: READ_ONLY_TOOL_ANNOTATIONS,
+            execution: {
+                taskSupport: "forbidden",
+            },
+        })),
+    };
+}
+export function getResourcesListResult(options = {}) {
+    return {
+        resources: getDiscoveryResourceSummaries(options).map((resource) => ({
+            uri: resource.uri,
+            name: resource.name,
+            title: resource.title,
+            description: resource.description,
+            mimeType: "application/json",
+        })),
+    };
+}
+export async function createFastPathToolCallResults() {
+    const fastPathResults = new Map();
+    fastPathResults.set(GetMcpVersionTool.name, {
+        content: [
+            {
+                text: JSON.stringify(SERVER_INFO),
+                type: "text",
+            },
+        ],
+    });
+    return fastPathResults;
 }
 export function getDiscoveryResourceDocument(toolName, uri, options = {}) {
     const catalog = getDiscoveryCatalog(options);
