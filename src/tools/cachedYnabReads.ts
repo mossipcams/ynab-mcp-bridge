@@ -8,15 +8,13 @@ type ApiWithCachedReadStore = object & {
   [cachedReadStoreSymbol]?: CachedReadStore;
 };
 
-function getCachedReadStore(api: object): CachedReadStore {
-  const target = api as ApiWithCachedReadStore;
-
-  if (target[cachedReadStoreSymbol]) {
-    return target[cachedReadStoreSymbol];
+function getCachedReadStore(api: ApiWithCachedReadStore): CachedReadStore {
+  if (api[cachedReadStoreSymbol]) {
+    return api[cachedReadStoreSymbol];
   }
 
   const store: CachedReadStore = new Map();
-  Object.defineProperty(target, cachedReadStoreSymbol, {
+  Object.defineProperty(api, cachedReadStoreSymbol, {
     configurable: false,
     enumerable: false,
     value: store,
@@ -26,16 +24,20 @@ function getCachedReadStore(api: object): CachedReadStore {
   return store;
 }
 
+function hasCachedRead<T>(value: Promise<unknown> | undefined): value is Promise<T> {
+  return value !== undefined;
+}
+
 async function getCachedRead<T>(
-  api: object,
+  api: ApiWithCachedReadStore,
   key: string,
   load: () => Promise<T>,
 ): Promise<T> {
   const store = getCachedReadStore(api);
   const cached = store.get(key);
 
-  if (cached) {
-    return cached as Promise<T>;
+  if (hasCachedRead<T>(cached)) {
+    return await cached;
   }
 
   const pendingRead = load().catch((error: unknown) => {

@@ -7,3 +7,8 @@ data
 coverage
 artifacts
 .claude
+skills/
+tasks/
+*.md
+!README.md
+!CHANGELOG.md

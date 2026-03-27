@@ -36,12 +36,11 @@ function isMissingPlanError(error) {
     return message.includes("not found") || message.includes("no entity was found");
 }
 function getInFlightPlanResolutionStore(api) {
-    const target = api;
-    if (target[inFlightPlanResolutionSymbol]) {
-        return target[inFlightPlanResolutionSymbol];
+    if (api[inFlightPlanResolutionSymbol]) {
+        return api[inFlightPlanResolutionSymbol];
     }
     const store = new Map();
-    Object.defineProperty(target, inFlightPlanResolutionSymbol, {
+    Object.defineProperty(api, inFlightPlanResolutionSymbol, {
         configurable: false,
         enumerable: false,
         value: store,

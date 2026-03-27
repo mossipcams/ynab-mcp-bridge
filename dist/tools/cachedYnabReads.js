@@ -1,11 +1,10 @@
 const cachedReadStoreSymbol = Symbol("ynabCachedReadStore");
 function getCachedReadStore(api) {
-    const target = api;
-    if (target[cachedReadStoreSymbol]) {
-        return target[cachedReadStoreSymbol];
+    if (api[cachedReadStoreSymbol]) {
+        return api[cachedReadStoreSymbol];
     }
     const store = new Map();
-    Object.defineProperty(target, cachedReadStoreSymbol, {
+    Object.defineProperty(api, cachedReadStoreSymbol, {
         configurable: false,
         enumerable: false,
         value: store,
@@ -13,11 +12,14 @@ function getCachedReadStore(api) {
     });
     return store;
 }
+function hasCachedRead(value) {
+    return value !== undefined;
+}
 async function getCachedRead(api, key, load) {
     const store = getCachedReadStore(api);
     const cached = store.get(key);
-    if (cached) {
-        return cached;
+    if (hasCachedRead(cached)) {
+        return await cached;
     }
     const pendingRead = load().catch((error) => {
         store.delete(key);

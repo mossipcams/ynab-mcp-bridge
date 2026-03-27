@@ -284,7 +284,6 @@ describe("reliability http", () => {
       "tools/call:ynab_get_budget_health_summary",
     ]);
   });
-
   it("formats a compact reliability summary and returns a failing exit code when the threshold is breached", async () => {
     const summary: ReliabilityRunSummary = {
       passed: false,

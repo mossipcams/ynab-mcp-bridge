@@ -55,6 +55,7 @@ describe("pure v4 refactor", () => {
       "ListScheduledTransactionsTool.ts",
       "ListTransactionsTool.ts",
       "SearchTransactionsTool.ts",
+      "cachedYnabReads.ts",
       "collectionToolUtils.ts",
       "errorUtils.ts",
       "financeToolUtils.ts",
@@ -81,30 +82,21 @@ describe("pure v4 refactor", () => {
     expect(readme).not.toContain("GET /health");
   });
 
-  it("documents this repository as the default PR target without fork-specific upstream rules", () => {
-    const claudeMd = readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8");
-    const agentsMd = readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
-
-    expect(claudeMd).toContain("Default all PR creation to `mossipcams/ynab-mcp-bridge`.");
-    expect(claudeMd).not.toContain("calebl/ynab-mcp-server");
-    expect(claudeMd).not.toContain("Caleb's repo");
-    expect(agentsMd).toContain("Default PR creation to `mossipcams/ynab-mcp-bridge`.");
-    expect(agentsMd).not.toContain("calebl/ynab-mcp-server");
+  it("keeps housekeeping instruction files out of the tracked repository root", () => {
+    expect(existsSync(path.join(projectRoot, "CLAUDE.md"))).toBe(false);
+    expect(existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
+    expect(existsSync(path.join(projectRoot, "skills"))).toBe(false);
+    expect(existsSync(path.join(projectRoot, "tasks"))).toBe(false);
   });
 
-  it("documents the SDK-native source layout and plan-based env naming", () => {
-    const claudeMd = readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8");
+  it("ignores removed housekeeping docs and folders while keeping core markdown tracked", () => {
+    const gitignore = readFileSync(path.join(projectRoot, ".gitignore"), "utf8");
 
-    expect(claudeMd).toContain("Built with `@modelcontextprotocol/sdk`.");
-    expect(claudeMd).toContain("interacting with YNAB plans");
-    expect(claudeMd).toContain("`src/server.ts`");
-    expect(claudeMd).toContain("`src/httpServer.ts`");
-    expect(claudeMd).toContain("`src/stdioServer.ts`");
-    expect(claudeMd).toContain("`YNAB_PLAN_ID`");
-    expect(claudeMd).not.toContain("interacting with YNAB (You Need A Budget) budgets");
-    expect(claudeMd).not.toContain("`src/index.ts` - Server setup and tool registration");
-    expect(claudeMd).not.toContain("**Tests**: `src/tests/*.test.ts`");
-    expect(claudeMd).not.toContain("YNAB_BUDGET_ID");
+    expect(gitignore).toContain("skills/");
+    expect(gitignore).toContain("tasks/");
+    expect(gitignore).toContain("*.md");
+    expect(gitignore).toContain("!README.md");
+    expect(gitignore).toContain("!CHANGELOG.md");
   });
 
   it("keeps root runtime artifacts aligned with plan-based configuration", () => {
