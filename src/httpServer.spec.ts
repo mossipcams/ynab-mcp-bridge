@@ -286,6 +286,33 @@ describe("startHttpServer", () => {
     await transport.close();
   });
 
+  it("exposes discovery resources over authless streamable HTTP", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const client = new Client({
+      name: "ynab-mcp-bridge-resource-test",
+      version: "1.0.0",
+    });
+    const transport = new StreamableHTTPClientTransport(new URL(httpServer.url));
+
+    await client.connect(transport);
+
+    const result = await client.listResources();
+
+    expect(result.resources.map((resource) => resource.name)).toEqual(expect.arrayContaining([
+      "ynab_list_categories",
+      "ynab_list_accounts",
+    ]));
+
+    await transport.close();
+  });
+
   it("requires explicit YNAB config instead of reading environment during HTTP startup", async () => {
     await expect((async () => {
       let httpServer: Awaited<ReturnType<typeof startHttpServer>> | undefined;

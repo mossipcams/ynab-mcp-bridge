@@ -101,6 +101,67 @@ describe("createServer", () => {
     );
   });
 
+  it("advertises discovery resources for callable YNAB tools", () => {
+    const server = createServer({
+      apiToken: "test-token",
+    });
+
+    expect(server.server.getCapabilities()).toEqual(expect.objectContaining({
+      resources: {
+        listChanged: true,
+      },
+    }));
+
+    const registeredResources = Object.values((server as any)._registeredResources) as Array<{ name: string }>;
+
+    expect(registeredResources.length).toBeGreaterThan(0);
+    expect(registeredResources.map((resource) => resource.name)).toEqual(expect.arrayContaining([
+      "ynab_list_categories",
+      "ynab_list_accounts",
+    ]));
+  });
+
+  it("serializes readable discovery metadata for affected YNAB tools", async () => {
+    const server = createServer({
+      apiToken: "test-token",
+    });
+    const registeredResources = (server as any)._registeredResources as Record<string, {
+      metadata: { mimeType?: string };
+      name: string;
+      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
+    }>;
+
+    const categoryEntry = Object.entries(registeredResources).find(([, resource]) => resource.name === "ynab_list_categories");
+    const accountEntry = Object.entries(registeredResources).find(([, resource]) => resource.name === "ynab_list_accounts");
+
+    expect(categoryEntry).toBeDefined();
+    expect(accountEntry).toBeDefined();
+
+    const [categoryUri, categoryResource] = categoryEntry!;
+    const [accountUri, accountResource] = accountEntry!;
+    const categoryPayload = JSON.parse((await categoryResource.readCallback(new URL(categoryUri), {})).contents[0].text);
+    const accountPayload = JSON.parse((await accountResource.readCallback(new URL(accountUri), {})).contents[0].text);
+
+    expect(categoryResource.metadata.mimeType).toBe("application/json");
+    expect(accountResource.metadata.mimeType).toBe("application/json");
+    expect(categoryPayload).toEqual(expect.objectContaining({
+      annotations: expect.objectContaining({
+        readOnlyHint: true,
+      }),
+      inputSchema: expect.anything(),
+      title: "List Categories",
+      toolName: "ynab_list_categories",
+    }));
+    expect(accountPayload).toEqual(expect.objectContaining({
+      annotations: expect.objectContaining({
+        readOnlyHint: true,
+      }),
+      inputSchema: expect.anything(),
+      title: "List Accounts",
+      toolName: "ynab_list_accounts",
+    }));
+  });
+
   it("registers the toolset through a reusable SDK-native registrar", () => {
     const registerTool = vi.fn();
 
