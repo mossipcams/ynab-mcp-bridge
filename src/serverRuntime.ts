@@ -96,8 +96,104 @@ type ToolRegistrar = {
   ) => unknown;
 };
 
+type ServerRuntimeOptions = {
+  discoveryResourceBaseUrl?: string;
+};
+
+type DiscoveryResourceSummary = {
+  description: string;
+  name: string;
+  title: string;
+  uri: string;
+};
+
 function getToolDiscoveryUri(toolName: string): string {
   return `ynab-tool://${toolName}`;
+}
+
+function getDiscoveryResourceBaseUrl(baseUrl: string | undefined): string | undefined {
+  if (!baseUrl) {
+    return undefined;
+  }
+
+  return baseUrl.endsWith("/")
+    ? baseUrl
+    : `${baseUrl}/`;
+}
+
+function getToolDiscoveryUris(toolName: string, options: ServerRuntimeOptions = {}): string[] {
+  const uris = [getToolDiscoveryUri(toolName)];
+  const discoveryResourceBaseUrl = getDiscoveryResourceBaseUrl(options.discoveryResourceBaseUrl);
+
+  if (discoveryResourceBaseUrl) {
+    uris.push(new URL(encodeURIComponent(toolName), discoveryResourceBaseUrl).toString());
+  }
+
+  return uris;
+}
+
+function getToolRegistration(toolName: string): ToolModule {
+  const tool = toolRegistrations.find((candidate) => candidate.name === toolName);
+
+  if (!tool) {
+    throw new Error(`Unknown discovery resource tool: ${toolName}`);
+  }
+
+  return tool;
+}
+
+function buildDiscoveryResourceDocument(
+  tool: ToolModule,
+  uri: string,
+): {
+  annotations: typeof READ_ONLY_TOOL_ANNOTATIONS;
+  description: string;
+  inputSchema: unknown;
+  title: string;
+  toolName: string;
+  uri: string;
+} {
+  return {
+    annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    title: tool.title,
+    toolName: tool.name,
+    uri,
+  };
+}
+
+export function getDiscoveryResourceSummaries(options: ServerRuntimeOptions = {}): DiscoveryResourceSummary[] {
+  return toolRegistrations.flatMap((tool) => (
+    getToolDiscoveryUris(tool.name, options).map((uri) => ({
+      description: tool.description,
+      name: tool.name,
+      title: tool.title,
+      uri,
+    }))
+  ));
+}
+
+export function getDiscoveryResourceDocument(
+  toolName: string,
+  uri: string,
+  options: ServerRuntimeOptions = {},
+): {
+  annotations: typeof READ_ONLY_TOOL_ANNOTATIONS;
+  description: string;
+  inputSchema: unknown;
+  title: string;
+  toolName: string;
+  uri: string;
+} {
+  const tool = getToolRegistration(toolName);
+  const validUris = getToolDiscoveryUris(toolName, options);
+
+  if (!validUris.includes(uri)) {
+    throw new Error(`Discovery resource URI does not match tool ${toolName}: ${uri}`);
+  }
+
+  return buildDiscoveryResourceDocument(tool, uri);
 }
 
 export function defineTool(title: string, tool: ToolSource): ToolModule {
@@ -207,36 +303,53 @@ export function registerServerTools(registrar: ToolRegistrar, api: API): string[
   return registeredToolNames;
 }
 
-function registerServerResources(server: McpServer): string[] {
+function registerServerResources(server: McpServer, options: ServerRuntimeOptions = {}): string[] {
   const registeredResourceUris: string[] = [];
 
-  for (const tool of toolRegistrations) {
-    const uri = getToolDiscoveryUri(tool.name);
-
+  for (const { name, uri } of getDiscoveryResourceSummaries(options)) {
     server.registerResource(
-      tool.name,
+      name,
       uri,
       {
-        title: tool.title,
-        description: tool.description,
+        title: getToolRegistration(name).title,
+        description: getToolRegistration(name).description,
         mimeType: "application/json",
       },
-      async () => ({
-        contents: [
-          {
-            uri,
-            mimeType: "application/json",
-            text: JSON.stringify({
-              annotations: READ_ONLY_TOOL_ANNOTATIONS,
-              description: tool.description,
-              inputSchema: tool.inputSchema,
-              title: tool.title,
-              toolName: tool.name,
-              uri,
-            }),
-          },
-        ],
-      }),
+      async () => {
+        logAppEvent("mcp", "resource.read.started", {
+          ...getRequestLogFields(),
+          resourceName: name,
+          resourceUri: uri,
+        });
+
+        try {
+          const document = getDiscoveryResourceDocument(name, uri, options);
+
+          logAppEvent("mcp", "resource.read.succeeded", {
+            ...getRequestLogFields(),
+            resourceName: name,
+            resourceUri: uri,
+          });
+
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: "application/json",
+                text: JSON.stringify(document),
+              },
+            ],
+          };
+        } catch (error) {
+          logAppEvent("mcp", "resource.read.failed", {
+            ...getRequestLogFields(),
+            error,
+            resourceName: name,
+            resourceUri: uri,
+          });
+          throw error;
+        }
+      },
     );
 
     registeredResourceUris.push(uri);
@@ -245,14 +358,18 @@ function registerServerResources(server: McpServer): string[] {
   return registeredResourceUris;
 }
 
-export function createServer(config: YnabConfig, api = createYnabApi(config)): McpServer {
+export function createServer(
+  config: YnabConfig,
+  api = createYnabApi(config),
+  options: ServerRuntimeOptions = {},
+): McpServer {
   const normalizedConfig = assertYnabConfig(config);
   const server = new McpServer(SERVER_INFO);
   const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
 
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- McpServer structurally satisfies the runtime registrar contract.
   registerServerTools(server as unknown as ToolRegistrar, configuredApi);
-  registerServerResources(server);
+  registerServerResources(server, options);
 
   return server;
 }

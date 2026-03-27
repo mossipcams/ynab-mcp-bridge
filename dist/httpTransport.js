@@ -13,7 +13,7 @@ import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolic
 import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import { createRequestContext, getCorrelationHeaderName, getRequestLogFields, hasToolCallStarted, runWithRequestContext, } from "./requestContext.js";
 import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
-import { createServer } from "./serverRuntime.js";
+import { createServer, getDiscoveryResourceDocument, getDiscoveryResourceSummaries } from "./serverRuntime.js";
 import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
@@ -232,6 +232,133 @@ function getToolCallName(parsedBody) {
     const params = getRecordValueIfObject(parsedBody, "params");
     return params ? getStringValue(params, "name") : undefined;
 }
+function getResourceReadUri(parsedBody) {
+    if (!isRecord(parsedBody)) {
+        return undefined;
+    }
+    if (getStringValue(parsedBody, "method") !== "resources/read") {
+        return undefined;
+    }
+    const params = getRecordValueIfObject(parsedBody, "params");
+    return params ? getStringValue(params, "uri") : undefined;
+}
+function captureResponseBody(res) {
+    const chunks = [];
+    const originalWrite = res.write.bind(res);
+    const originalEnd = res.end.bind(res);
+    let settled = res.writableFinished || res.writableEnded;
+    const whenSettled = settled
+        ? Promise.resolve()
+        : new Promise((resolve) => {
+            const markSettled = () => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                res.off("close", markSettled);
+                res.off("finish", markSettled);
+                resolve();
+            };
+            res.once("close", markSettled);
+            res.once("finish", markSettled);
+        });
+    function toCapturedChunk(chunk) {
+        if (typeof chunk === "string") {
+            return Buffer.from(chunk);
+        }
+        if (Buffer.isBuffer(chunk)) {
+            return chunk;
+        }
+        if (ArrayBuffer.isView(chunk)) {
+            return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+        }
+        return undefined;
+    }
+    function capturedWrite(chunk, encodingOrCallback, callback) {
+        const normalizedChunk = toCapturedChunk(chunk);
+        if (normalizedChunk) {
+            chunks.push(normalizedChunk);
+        }
+        if (typeof encodingOrCallback === "function") {
+            return originalWrite(chunk, encodingOrCallback);
+        }
+        if (typeof callback === "function" && typeof encodingOrCallback === "string") {
+            return originalWrite(chunk, encodingOrCallback, callback);
+        }
+        if (typeof encodingOrCallback === "string") {
+            return originalWrite(chunk, encodingOrCallback);
+        }
+        return originalWrite(chunk);
+    }
+    function capturedEnd(chunkOrCallback, encodingOrCallback, callback) {
+        const chunk = typeof chunkOrCallback === "function"
+            ? undefined
+            : chunkOrCallback;
+        const normalizedChunk = toCapturedChunk(chunk);
+        if (normalizedChunk) {
+            chunks.push(normalizedChunk);
+        }
+        if (typeof chunkOrCallback === "function") {
+            return originalEnd(chunkOrCallback);
+        }
+        if (typeof encodingOrCallback === "function") {
+            return originalEnd(chunk, encodingOrCallback);
+        }
+        if (typeof callback === "function" && typeof encodingOrCallback === "string") {
+            return originalEnd(chunk, encodingOrCallback, callback);
+        }
+        if (typeof encodingOrCallback === "string") {
+            return originalEnd(chunk, encodingOrCallback);
+        }
+        if (typeof chunk === "undefined") {
+            return originalEnd();
+        }
+        return originalEnd(chunk);
+    }
+    res.write = capturedWrite;
+    res.end = capturedEnd;
+    return {
+        async waitForSettledResponse() {
+            await whenSettled;
+        },
+        readJsonRpcErrorMessage() {
+            if (chunks.length === 0) {
+                return undefined;
+            }
+            try {
+                const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+                if (!isRecord(payload)) {
+                    return undefined;
+                }
+                const errorPayload = getRecordValueIfObject(payload, "error");
+                if (errorPayload) {
+                    const errorMessage = errorPayload["message"];
+                    if (typeof errorMessage === "string") {
+                        return errorMessage;
+                    }
+                }
+                const resultPayload = getRecordValueIfObject(payload, "result");
+                const contentPayload = Array.isArray(resultPayload?.["content"])
+                    ? resultPayload["content"]
+                    : undefined;
+                const textEntry = resultPayload?.["isError"] === true
+                    ? contentPayload?.find((entry) => (isRecord(entry) &&
+                        entry["type"] === "text" &&
+                        typeof entry["text"] === "string"))
+                    : undefined;
+                const textContent = isRecord(textEntry)
+                    ? textEntry["text"]
+                    : undefined;
+                return typeof textContent === "string"
+                    ? textContent
+                    : undefined;
+            }
+            catch {
+                return undefined;
+            }
+        },
+    };
+}
 function getBodyStringValue(body, key) {
     if (!isRecord(body)) {
         return undefined;
@@ -267,13 +394,15 @@ function isPayloadTooLargeError(error) {
             ("status" in error && error.status === 413) ||
             ("statusCode" in error && error.statusCode === 413));
 }
-async function createManagedRequest(config) {
-    const mcpServer = createServer(config);
+async function createManagedRequest(config, options) {
+    const discoveryResources = getDiscoveryResourceSummaries(options);
+    const mcpServer = createServer(config, undefined, options);
     const transport = new StreamableHTTPServerTransport({
         enableJsonResponse: true,
     });
     await mcpServer.connect(new StreamableTransportAdapter(transport));
     return {
+        discoveryResources: discoveryResources.map(({ name, uri }) => ({ name, uri })),
         transport,
         close: async () => {
             await transport.close();
@@ -390,6 +519,8 @@ export function installMcpPostRoute(options) {
                 }
             }
             const resolvedProfile = getResolvedClientProfile(res.locals);
+            const responseCapture = getToolCallName(parsedBody) ? captureResponseBody(res) : undefined;
+            const resourceReadUri = getResourceReadUri(parsedBody);
             logHttpDebug("transport.handoff", {
                 ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                 ...getJsonRpcDebugDetails(parsedBody),
@@ -397,12 +528,39 @@ export function installMcpPostRoute(options) {
                 profileId: resolvedProfile?.profileId,
                 profileReason: resolvedProfile?.reason,
             });
+            if (isRecord(parsedBody) && getStringValue(parsedBody, "method") === "resources/list") {
+                logHttpDebug("resource.list.advertised", {
+                    ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                    ...getJsonRpcDebugDetails(parsedBody),
+                    resourceCount: resolution.managedRequest.discoveryResources.length,
+                    resourceUris: resolution.managedRequest.discoveryResources.map((resource) => resource.uri),
+                });
+            }
+            if (resourceReadUri) {
+                logHttpDebug("resource.read.requested", {
+                    ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                    ...getJsonRpcDebugDetails(parsedBody),
+                    resourceUri: resourceReadUri,
+                });
+            }
             await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
             const toolName = getToolCallName(parsedBody);
             if (toolName && !hasToolCallStarted()) {
+                await responseCapture?.waitForSettledResponse();
+                const errorMessage = responseCapture?.readJsonRpcErrorMessage();
+                if (typeof errorMessage === "string" && errorMessage.includes("Input validation error")) {
+                    logHttpDebug("tool.call.validation_failed", {
+                        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                        ...getJsonRpcDebugDetails(parsedBody),
+                        errorMessage,
+                        toolName,
+                    });
+                    return;
+                }
                 logHttpDebug("tool.dispatch.absent", {
                     ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                     ...getJsonRpcDebugDetails(parsedBody),
+                    errorMessage,
                     toolName,
                 });
             }
@@ -549,9 +707,41 @@ export async function startHttpServer(options) {
         }
         next();
     });
+    app.get(`${path}/resources/:toolName`, (req, res) => {
+        const toolName = typeof req.params.toolName === "string"
+            ? decodeURIComponent(req.params.toolName)
+            : undefined;
+        if (!toolName || !discoveryResourceBaseUrl) {
+            logHttpDebug("request.rejected", {
+                ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                reason: "resource-not-found",
+            });
+            writeNotFound(res);
+            return;
+        }
+        try {
+            const resourceUri = new URL(encodeURIComponent(toolName), discoveryResourceBaseUrl).toString();
+            const document = getDiscoveryResourceDocument(toolName, resourceUri, {
+                discoveryResourceBaseUrl,
+            });
+            logHttpDebug("resource.fetch.direct", {
+                ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                resourceName: toolName,
+                resourceUri,
+            });
+            res.status(200).json(document);
+        }
+        catch {
+            logHttpDebug("request.rejected", {
+                ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+                reason: "resource-not-found",
+            });
+            writeNotFound(res);
+        }
+    });
     installMcpPostRoute({
         app,
-        createManagedRequest: () => createManagedRequest(ynab),
+        createManagedRequest: () => createManagedRequest(ynab, discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {}),
         getInitializeParams,
         getJsonRpcDebugDetails,
         getRequestAuthDebugOptions,
@@ -611,6 +801,10 @@ export async function startHttpServer(options) {
     }
     const resolvedAddress = address;
     let closed = false;
+    const resourceOrigin = auth.mode === "oauth"
+        ? new URL(auth.publicUrl).origin
+        : `http://${host}:${resolvedAddress.port}`;
+    const discoveryResourceBaseUrl = new URL(`${path.replace(/\/$/, "")}/resources/`, resourceOrigin).toString();
     return {
         host,
         path,

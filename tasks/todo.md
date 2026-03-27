@@ -586,3 +586,68 @@ Clean up the duplicates still left after the modular-monolith extraction by:
   Wire any missing transport or server initialization needed so the new resource registration is available over the live HTTP path without disturbing `tools/list`.
   How to verify it works:
   Run `npx vitest run src/httpServer.spec.ts src/serverFactory.spec.ts`, then run `npm run build` as the broader proof.
+
+## Post-Deploy Discovery Compatibility Investigation Plan
+
+Validated assumptions before planning:
+- The MCP resources spec explicitly allows custom URI schemes and says the standard schemes list is not exhaustive. It also says servers SHOULD use `https://` only when the client can fetch the resource directly from the web, and otherwise SHOULD prefer another scheme or define a custom one. Source: MCP Resources spec, “Common URI Schemes” and “Custom URI Schemes.”
+- OpenAI’s ChatGPT developer-mode docs confirm ChatGPT is using full MCP support in developer mode, and that custom apps do not require search/fetch tools. Source: OpenAI Help Center, “Developer mode, and MCP apps in ChatGPT [beta].”
+- Deployed bridge logs already prove `resources/list` reaches the server, while `resources/read`, `ynab_list_categories`, `ynab_list_accounts`, and `ynab_search_transactions` do not appear in the same successful ChatGPT retry windows. Treat that as runtime evidence stronger than any local architectural guess.
+- Because of the above, `ynab-tool://...` is a compatibility hypothesis to test, not a settled root cause.
+
+Tasks:
+
+- [x] Task 1: Add bridge-side observability that proves what happens after `resources/list`
+  Test to write:
+  Add a focused spec in `src/httpServer.spec.ts` or `src/serverFactory.spec.ts` that fails unless the server emits structured log events for `resources/list` and `resources/read`, including the advertised resource URIs and the read URI requested by the client.
+  Code to implement:
+  Add structured MCP logging around resource discovery and reads in the live HTTP/runtime path so production logs can distinguish “resource advertised,” “resource read attempted,” and “resource read missed/not found.”
+  How to verify it works:
+  Run the targeted Vitest spec first red then green, then manually inspect one local MCP session log to confirm the URI family is visible in logs.
+
+- [x] Task 2: Reproduce the deployed ChatGPT sequence locally with an assertion on the missing follow-up
+  Test to write:
+  Add a transport-level regression spec in `src/httpServer.spec.ts` that models the observed ChatGPT flow: `initialize` -> `tools/list` -> `resources/list` -> summary `tools/call`, and fails unless the server can distinguish that no `resources/read` occurred during that sequence.
+  Code to implement:
+  Reuse the new observability hooks to record per-session MCP method flow so we can compare local traces with the deployed logs without relying on manual journal parsing.
+  How to verify it works:
+  Run the targeted Vitest spec and inspect the emitted trace for the expected sequence.
+
+- [x] Task 3: Run a compatibility experiment with a second resource URI family instead of replacing the current one blindly
+  Test to write:
+  Add a spec in `src/serverFactory.spec.ts` that fails unless each discovery resource can be exposed under both the current MCP-owned custom URI and a second compatibility URI family, while both variants resolve to identical metadata.
+  Code to implement:
+  Introduce a compatibility layer in `src/serverRuntime.ts` that can advertise alternate URIs for the same discovery resource without removing the current custom URI path. Keep the current `ynab-tool://...` path intact so we do not regress standards-compliant clients while testing ChatGPT compatibility.
+  How to verify it works:
+  Run the focused specs, then inspect a local `resources/list` result to confirm both URI families are present and stable.
+
+- [x] Task 4: Only if the alternate URI family is `https://`, make it directly fetchable to stay aligned with the spec
+  Test to write:
+  Add an HTTP integration spec in `src/httpServer.spec.ts` that fails unless any advertised `https://` discovery URI can be fetched directly over HTTP and returns the same metadata as `resources/read`.
+  Code to implement:
+  Add a small read-only HTTP endpoint for direct discovery-resource fetches on the public MCP origin, but only if we choose `https://` as the alternate URI family.
+  How to verify it works:
+  Run the new spec and one manual `curl` against the local server to confirm the direct-fetch contract.
+
+- [x] Task 5: Instrument the `ynab_search_transactions` path separately from discovery
+  Test to write:
+  Add a targeted spec in `src/httpServer.spec.ts` or a dedicated MCP transport spec that fails unless invalid `ynab_search_transactions` calls produce an explicit MCP validation/error log entry and valid calls emit `tool.call.started`.
+  Code to implement:
+  Add structured logging at the MCP/transport boundary so production logs can distinguish “client blocked before bridge,” “bridge validation rejected,” and “tool execution started.”
+  How to verify it works:
+  Run the targeted spec red then green, then replay one local malformed and one valid request and confirm the logs separate the cases cleanly.
+
+- [x] Task 6: Use the new observability in staging or production to decide the actual fix
+
+### Results
+
+- The bridge now logs `resource.list.advertised`, `resource.read.requested`, `resource.read.succeeded`, `resource.read.failed`, `resource.fetch.direct`, and `tool.call.validation_failed`, so deployed retry windows can distinguish post-discovery client behavior from bridge execution gaps.
+- Discovery resources now advertise both the original `ynab-tool://...` URI family and an absolute compatibility URL family rooted at `/mcp/resources/...`, with direct HTTP fetch parity tests proving the compatibility URLs resolve to the same metadata as MCP `resources/read`.
+- A ChatGPT-style discovery sequence is pinned in `src/httpServer.spec.ts`, proving that `resources/list` can occur without any subsequent `resources/read`, which matches the deployed logs and keeps the client-side hypothesis explicit.
+- `ynab_search_transactions` validation failures are now separated from generic dispatch gaps at the HTTP layer, so future runtime logs can prove whether a search request was blocked by MCP argument validation or never executed at all.
+  Test to write:
+  No new automated test unless Tasks 1-5 reveal a previously unknown bridge contract gap; if they do, stop and re-plan before implementation.
+  Code to implement:
+  No new code in this task beyond any tiny log-field cleanup found during verification.
+  How to verify it works:
+  Deploy the instrumented build, capture one ChatGPT retry window, and answer these with evidence: whether ChatGPT ever sends `resources/read`, which URI family it chooses if multiple are advertised, and whether `ynab_search_transactions` ever reaches bridge validation or execution.
