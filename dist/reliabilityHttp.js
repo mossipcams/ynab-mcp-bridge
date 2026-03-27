@@ -82,6 +82,21 @@ function getErrorMessage(error) {
     }
     return String(error);
 }
+function getRequiredLatencyReductions(artifact) {
+    const defaultOperations = [
+        "initialize",
+        "tools/list",
+    ];
+    const toolCallOperations = Object.keys(artifact.summary.operations)
+        .filter((operation) => operation.startsWith("tools/call:"))
+        .sort((left, right) => left.localeCompare(right));
+    return [...new Set([...defaultOperations, ...toolCallOperations])]
+        .filter((operation) => operation in artifact.summary.operations)
+        .map((operation) => ({
+        operation,
+        minimumReductionRatio: 0.2,
+    }));
+}
 async function measureOperation(operation, work) {
     const startedAt = performance.now();
     try {
@@ -397,6 +412,7 @@ export async function executeReliabilityHttpCli(argv, dependencies = {}) {
             const comparison = compareReliabilityArtifacts({
                 baseline,
                 current: artifact,
+                requiredOperationAverageLatencyReductions: getRequiredLatencyReductions(artifact),
                 tolerances: {
                     maxErrorRateIncrease: 0.05,
                     maxP95LatencyIncreaseMs: 250,
@@ -404,6 +420,17 @@ export async function executeReliabilityHttpCli(argv, dependencies = {}) {
                 },
             });
             writeLine(`baseline_status=${comparison.passed ? "pass" : "fail"}`);
+            for (const improvement of comparison.requiredImprovements) {
+                const reductionPct = Number.isFinite(improvement.reductionRatio)
+                    ? (improvement.reductionRatio * 100).toFixed(2)
+                    : "n/a";
+                writeLine(`baseline_latency_reduction operation=${improvement.operation} ` +
+                    `status=${improvement.passed ? "pass" : "fail"} ` +
+                    `reduction_pct=${reductionPct} ` +
+                    `target_pct=${(improvement.minimumReductionRatio * 100).toFixed(2)} ` +
+                    `baseline_avg_ms=${Number.isFinite(improvement.baselineAverage) ? improvement.baselineAverage.toFixed(2) : "n/a"} ` +
+                    `current_avg_ms=${Number.isFinite(improvement.currentAverage) ? improvement.currentAverage.toFixed(2) : "n/a"}`);
+            }
             if (!comparison.passed) {
                 exitCode = 1;
             }

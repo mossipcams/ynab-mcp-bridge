@@ -1,6 +1,6 @@
 import type { ReliabilityProfile } from "./reliabilityProfiles.js";
 import { summarizeReliabilityResults } from "./reliabilitySummaryUtils.js";
-import type { ReliabilityProbeResult } from "./reliabilitySummaryUtils.js";
+import type { ReliabilityOperationSummary, ReliabilityProbeResult } from "./reliabilitySummaryUtils.js";
 
 export type ReliabilityArtifact = {
   completedAt: string;
@@ -26,6 +26,7 @@ export type ReliabilityArtifact = {
       p95: number;
       p99: number;
     };
+    operations: Record<string, ReliabilityOperationSummary>;
     thresholds: {
       maxErrorRate: {
         actual: number;
@@ -89,6 +90,10 @@ export function createReliabilityArtifact(input: CreateReliabilityArtifactInput)
 export function compareReliabilityArtifacts(input: {
   baseline: ReliabilityArtifact;
   current: ReliabilityArtifact;
+  requiredOperationAverageLatencyReductions?: Array<{
+    minimumReductionRatio: number;
+    operation: string;
+  }>;
   tolerances: {
     maxErrorRateIncrease: number;
     maxP95LatencyIncreaseMs: number;
@@ -108,6 +113,26 @@ export function compareReliabilityArtifacts(input: {
     metric: "errorRate" | "p95LatencyMs" | "p99LatencyMs";
     tolerance: number;
   }> = [];
+  const baselineOperations = input.baseline.summary.operations ?? {};
+  const currentOperations = input.current.summary.operations ?? {};
+  const requiredImprovements = (input.requiredOperationAverageLatencyReductions ?? []).map((target) => {
+    const baselineOperation = baselineOperations[target.operation];
+    const currentOperation = currentOperations[target.operation];
+    const baselineAverage = baselineOperation?.latencyMs.average ?? Number.NaN;
+    const currentAverage = currentOperation?.latencyMs.average ?? Number.NaN;
+    const reductionRatio = Number.isFinite(baselineAverage) && baselineAverage > 0 && Number.isFinite(currentAverage)
+      ? (baselineAverage - currentAverage) / baselineAverage
+      : Number.NEGATIVE_INFINITY;
+
+    return {
+      baselineAverage,
+      currentAverage,
+      minimumReductionRatio: target.minimumReductionRatio,
+      operation: target.operation,
+      passed: reductionRatio >= target.minimumReductionRatio,
+      reductionRatio,
+    };
+  });
 
   const errorRateIncrease = input.current.summary.thresholds.maxErrorRate.actual -
     input.baseline.summary.thresholds.maxErrorRate.actual;
@@ -138,7 +163,8 @@ export function compareReliabilityArtifacts(input: {
   }
 
   return {
-    passed: regressions.length === 0,
+    passed: regressions.length === 0 && requiredImprovements.every((improvement) => improvement.passed),
     regressions,
+    requiredImprovements,
   };
 }

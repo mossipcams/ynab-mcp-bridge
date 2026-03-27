@@ -474,4 +474,166 @@ describe("reliability http", () => {
     expect(lines.join("\n")).toContain("baseline_status=fail");
     expect(await readFile(artifactPath, "utf8")).toContain("\"failureGroups\"");
   });
+
+  it("reports per-operation latency reduction status for the lightweight path and representative tool calls", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-reliability-"));
+    const baselinePath = path.join(tempDir, "baseline.json");
+    cleanups.push(async () => {
+      await rm(tempDir, { force: true, recursive: true });
+    });
+
+    await writeFile(baselinePath, JSON.stringify({
+      completedAt: "2026-03-27T18:05:00.000Z",
+      profile: {
+        description: "Fast local HTTP smoke probe for regressions.",
+        name: "smoke",
+        runner: "smoke",
+        smoke: {
+          concurrency: 1,
+          requestCount: 2,
+        },
+        thresholds: {
+          abortOnFail: false,
+          maxErrorRate: 0,
+          maxP95LatencyMs: 250,
+          maxP99LatencyMs: 500,
+        },
+      },
+      startedAt: "2026-03-27T18:00:00.000Z",
+      summary: {
+        failed: false,
+        failureGroups: [],
+        failures: [],
+        latencyMs: {
+          average: 120,
+          max: 180,
+          min: 90,
+          p50: 120,
+          p95: 180,
+          p99: 180,
+        },
+        operations: {
+          "initialize": {
+            count: 1,
+            errorRate: 0,
+            latencyMs: {
+              average: 100,
+              max: 100,
+              min: 100,
+              p50: 100,
+              p95: 100,
+              p99: 100,
+            },
+          },
+          "tools/list": {
+            count: 1,
+            errorRate: 0,
+            latencyMs: {
+              average: 120,
+              max: 120,
+              min: 120,
+              p50: 120,
+              p95: 120,
+              p99: 120,
+            },
+          },
+          "tools/call:ynab_get_mcp_version": {
+            count: 1,
+            errorRate: 0,
+            latencyMs: {
+              average: 130,
+              max: 130,
+              min: 130,
+              p50: 130,
+              p95: 130,
+              p99: 130,
+            },
+          },
+          "tools/call:ynab_get_budget_health_summary": {
+            count: 1,
+            errorRate: 0,
+            latencyMs: {
+              average: 200,
+              max: 200,
+              min: 200,
+              p50: 200,
+              p95: 200,
+              p99: 200,
+            },
+          },
+        },
+        thresholds: {
+          maxErrorRate: { actual: 0, passed: true, target: 0.01 },
+          maxP95LatencyMs: { actual: 180, passed: true, target: 500 },
+          maxP99LatencyMs: { actual: 180, passed: true, target: 1000 },
+        },
+        totals: {
+          attempts: 4,
+          failed: 0,
+          succeeded: 4,
+        },
+      },
+      target: {
+        mode: "local",
+        url: "http://127.0.0.1:3000/mcp",
+      },
+    }, null, 2));
+
+    const lines: string[] = [];
+    const exitCode = await executeReliabilityHttpCli([
+      "--requests",
+      "2",
+      "--baseline-artifact",
+      baselinePath,
+    ], {
+      runScenario: vi.fn().mockResolvedValue({
+        results: [
+          { ok: true, operation: "initialize", latencyMs: 75 },
+          { ok: true, operation: "tools/list", latencyMs: 90 },
+          { ok: true, operation: "tools/call:ynab_get_mcp_version", latencyMs: 95 },
+          { ok: true, operation: "tools/call:ynab_get_budget_health_summary", latencyMs: 150 },
+        ],
+        target: {
+          mode: "local",
+          url: "http://127.0.0.1:3000/mcp",
+        },
+        summary: {
+          errorRate: 0,
+          failures: [],
+          failureGroups: [],
+          latencyMs: {
+            average: 102.5,
+            max: 150,
+            min: 75,
+            p50: 90,
+            p95: 150,
+            p99: 150,
+          },
+          maxErrorRate: 0,
+          passed: true,
+          thresholds: {
+            maxErrorRate: { actual: 0, passed: true, target: 0 },
+            maxP95LatencyMs: { actual: 150, passed: true, target: 250 },
+            maxP99LatencyMs: { actual: 150, passed: true, target: 500 },
+          },
+          totals: {
+            attempts: 4,
+            failed: 0,
+            succeeded: 4,
+          },
+        },
+      }),
+      writeLine: (line) => {
+        lines.push(line);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(lines.join("\n")).toContain(
+      "baseline_latency_reduction operation=initialize status=pass reduction_pct=25.00 target_pct=20.00 baseline_avg_ms=100.00 current_avg_ms=75.00",
+    );
+    expect(lines.join("\n")).toContain(
+      "baseline_latency_reduction operation=tools/call:ynab_get_budget_health_summary status=pass reduction_pct=25.00 target_pct=20.00 baseline_avg_ms=200.00 current_avg_ms=150.00",
+    );
+  });
 });

@@ -107,6 +107,24 @@ type DiscoveryResourceSummary = {
   uri: string;
 };
 
+type DiscoveryResourceDocument = {
+  argumentExamples?: Record<string, string | number>;
+  annotations: typeof READ_ONLY_TOOL_ANNOTATIONS;
+  description: string;
+  inputSchema: unknown;
+  invocationExample?: Record<string, string | number>;
+  requiredArguments?: string[];
+  title: string;
+  toolName: string;
+  uri: string;
+};
+
+type DiscoveryCatalog = {
+  documentsByUri: Map<string, DiscoveryResourceDocument>;
+  summaries: DiscoveryResourceSummary[];
+  toolNameByUri: Map<string, string>;
+};
+
 type DiscoveryInvocationGuidance = {
   argumentExamples: Record<string, string | number>;
   invocationExample: Record<string, string | number>;
@@ -188,30 +206,10 @@ function getToolDiscoveryUris(toolName: string, options: ServerRuntimeOptions = 
   return uris;
 }
 
-function getToolRegistration(toolName: string): ToolModule {
-  const tool = toolRegistrations.find((candidate) => candidate.name === toolName);
-
-  if (!tool) {
-    throw new Error(`Unknown discovery resource tool: ${toolName}`);
-  }
-
-  return tool;
-}
-
 function buildDiscoveryResourceDocument(
   tool: ToolModule,
   uri: string,
-): {
-  argumentExamples?: Record<string, string | number>;
-  annotations: typeof READ_ONLY_TOOL_ANNOTATIONS;
-  description: string;
-  inputSchema: unknown;
-  invocationExample?: Record<string, string | number>;
-  requiredArguments?: string[];
-  title: string;
-  toolName: string;
-  uri: string;
-} {
+): DiscoveryResourceDocument {
   const invocationGuidance = discoveryInvocationGuidanceByToolName[tool.name];
 
   return {
@@ -227,42 +225,6 @@ function buildDiscoveryResourceDocument(
       requiredArguments: invocationGuidance.requiredArguments,
     } : {}),
   };
-}
-
-export function getDiscoveryResourceSummaries(options: ServerRuntimeOptions = {}): DiscoveryResourceSummary[] {
-  return toolRegistrations.flatMap((tool) => (
-    getToolDiscoveryUris(tool.name, options).map((uri) => ({
-      description: tool.description,
-      name: tool.name,
-      title: tool.title,
-      uri,
-    }))
-  ));
-}
-
-export function getDiscoveryResourceDocument(
-  toolName: string,
-  uri: string,
-  options: ServerRuntimeOptions = {},
-): {
-  argumentExamples?: Record<string, string | number>;
-  annotations: typeof READ_ONLY_TOOL_ANNOTATIONS;
-  description: string;
-  inputSchema: unknown;
-  invocationExample?: Record<string, string | number>;
-  requiredArguments?: string[];
-  title: string;
-  toolName: string;
-  uri: string;
-} {
-  const tool = getToolRegistration(toolName);
-  const validUris = getToolDiscoveryUris(toolName, options);
-
-  if (!validUris.includes(uri)) {
-    throw new Error(`Discovery resource URI does not match tool ${toolName}: ${uri}`);
-  }
-
-  return buildDiscoveryResourceDocument(tool, uri);
 }
 
 export function defineTool(title: string, tool: ToolSource): ToolModule {
@@ -322,6 +284,79 @@ const toolRegistrations: ToolModule[] = [
   defineTool("Get Category Trend Summary", GetCategoryTrendSummaryTool),
 ];
 
+const toolRegistrationByName = new Map(toolRegistrations.map((tool) => [tool.name, tool] as const));
+const discoveryCatalogByBaseUrl = new Map<string, DiscoveryCatalog>();
+
+function getToolRegistration(toolName: string): ToolModule {
+  const tool = toolRegistrationByName.get(toolName);
+
+  if (!tool) {
+    throw new Error(`Unknown discovery resource tool: ${toolName}`);
+  }
+
+  return tool;
+}
+
+function getDiscoveryCatalog(options: ServerRuntimeOptions = {}): DiscoveryCatalog {
+  const normalizedBaseUrl = getDiscoveryResourceBaseUrl(options.discoveryResourceBaseUrl);
+  const cacheKey = normalizedBaseUrl ?? "";
+  const cachedCatalog = discoveryCatalogByBaseUrl.get(cacheKey);
+
+  if (cachedCatalog) {
+    return cachedCatalog;
+  }
+
+  const summaries: DiscoveryResourceSummary[] = [];
+  const documentsByUri = new Map<string, DiscoveryResourceDocument>();
+  const toolNameByUri = new Map<string, string>();
+
+  for (const tool of toolRegistrations) {
+    for (const uri of getToolDiscoveryUris(tool.name, options)) {
+      summaries.push({
+        description: tool.description,
+        name: tool.name,
+        title: tool.title,
+        uri,
+      });
+      documentsByUri.set(uri, buildDiscoveryResourceDocument(tool, uri));
+      toolNameByUri.set(uri, tool.name);
+    }
+  }
+
+  const catalog = {
+    documentsByUri,
+    summaries,
+    toolNameByUri,
+  } satisfies DiscoveryCatalog;
+  discoveryCatalogByBaseUrl.set(cacheKey, catalog);
+  return catalog;
+}
+
+export function getDiscoveryResourceSummaries(options: ServerRuntimeOptions = {}): DiscoveryResourceSummary[] {
+  return getDiscoveryCatalog(options).summaries;
+}
+
+export function getDiscoveryResourceDocument(
+  toolName: string,
+  uri: string,
+  options: ServerRuntimeOptions = {},
+): DiscoveryResourceDocument {
+  const catalog = getDiscoveryCatalog(options);
+  const resolvedToolName = catalog.toolNameByUri.get(uri);
+
+  if (resolvedToolName !== toolName) {
+    throw new Error(`Discovery resource URI does not match tool ${toolName}: ${uri}`);
+  }
+
+  const document = catalog.documentsByUri.get(uri);
+
+  if (!document) {
+    throw new Error(`Discovery resource URI does not match tool ${toolName}: ${uri}`);
+  }
+
+  return document;
+}
+
 function registerTool(registrar: ToolRegistrar, tool: ToolModule, api: API): void {
   registrar.registerTool(
     tool.name,
@@ -375,13 +410,13 @@ export function registerServerTools(registrar: ToolRegistrar, api: API): string[
 function registerServerResources(server: McpServer, options: ServerRuntimeOptions = {}): string[] {
   const registeredResourceUris: string[] = [];
 
-  for (const { name, uri } of getDiscoveryResourceSummaries(options)) {
+  for (const { description, name, title, uri } of getDiscoveryResourceSummaries(options)) {
     server.registerResource(
       name,
       uri,
       {
-        title: getToolRegistration(name).title,
-        description: getToolRegistration(name).description,
+        title,
+        description,
         mimeType: "application/json",
       },
       async () => {
