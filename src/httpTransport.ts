@@ -9,6 +9,7 @@ import type { AddressInfo } from "node:net";
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
 import { decodeJwt } from "jose";
 import type { API } from "ynab";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   hostHeaderValidation,
   localhostHostValidation,
@@ -43,7 +44,15 @@ import {
   runWithRequestContext,
 } from "./requestContext.js";
 import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
-import { createServer, getDiscoveryResourceDocument, getDiscoveryResourceSummaries } from "./serverRuntime.js";
+import {
+  createServer,
+  createFastPathToolCallResults,
+  getDiscoveryResourceDocument,
+  getDiscoveryResourceSummaries,
+  getInitializeResult,
+  getResourcesListResult,
+  getToolsListResult,
+} from "./serverRuntime.js";
 import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 import { createYnabApi } from "./ynabApi.js";
 
@@ -109,6 +118,12 @@ type InitializeParamsLike = {
 type InstallMcpPostRouteOptions = {
   app: express.Express;
   createManagedRequest: () => Promise<ManagedRequest>;
+  fastPathResponses: () => {
+    initializeResult: ReturnType<typeof getInitializeResult>;
+    resourcesListResult?: ReturnType<typeof getResourcesListResult>;
+    toolCallResults: Map<string, CallToolResult>;
+    toolsListResult: ReturnType<typeof getToolsListResult>;
+  } | undefined;
   getInitializeParams: (parsedBody: unknown) => { capabilities?: unknown; clientInfo?: unknown } | undefined;
   getJsonRpcDebugDetails: (parsedBody: unknown) => Record<string, unknown>;
   getRequestAuthDebugOptions: (req: Pick<Request, "path" | "url">) => { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean };
@@ -250,6 +265,14 @@ function writeJsonRpcError(res: Response, statusCode: number, code: number, mess
       message,
     },
     id: null,
+  });
+}
+
+function writeJsonRpcResult(res: Response, id: unknown, result: unknown) {
+  writeJson(res, 200, {
+    jsonrpc: "2.0",
+    id,
+    result,
   });
 }
 
@@ -402,6 +425,19 @@ function getToolCallName(parsedBody: unknown) {
   return params ? getStringValue(params, "name") : undefined;
 }
 
+function getToolCallArguments(parsedBody: unknown) {
+  if (!isRecord(parsedBody)) {
+    return undefined;
+  }
+
+  if (getStringValue(parsedBody, "method") !== "tools/call") {
+    return undefined;
+  }
+
+  const params = getRecordValueIfObject(parsedBody, "params");
+  return params ? getRecordValueIfObject(params, "arguments") : undefined;
+}
+
 function getResourceReadUri(parsedBody: unknown) {
   if (!isRecord(parsedBody)) {
     return undefined;
@@ -414,6 +450,18 @@ function getResourceReadUri(parsedBody: unknown) {
   const params = getRecordValueIfObject(parsedBody, "params");
 
   return params ? getStringValue(params, "uri") : undefined;
+}
+
+function getJsonRpcId(parsedBody: unknown) {
+  if (!isRecord(parsedBody) || !("id" in parsedBody)) {
+    return null;
+  }
+
+  return parsedBody["id"];
+}
+
+function isEmptyRecord(value: Record<string, unknown> | undefined) {
+  return value !== undefined && Object.keys(value).length === 0;
 }
 
 function captureResponseBody(res: Response) {
@@ -772,6 +820,7 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
   const {
     app,
     createManagedRequest,
+    fastPathResponses,
     getInitializeParams,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
@@ -801,35 +850,20 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
     }
 
     const parsedBody: unknown = req.body;
-    const resolution = await resolveRequest(
-      req,
-      createManagedRequest,
-    );
-
-    if (resolution.status === "invalid-session-header") {
+    if (hasMultipleSessionHeaderValues(req)) {
       logHttpDebug("request.rejected", {
         ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         reason: "invalid-session-header",
       });
-      writeRequestResolution(res, resolution);
+      writeRequestResolution(res, {
+        status: "invalid-session-header",
+      });
       return;
     }
 
-    let cleanedUp = false;
-    const cleanup = async () => {
-      if (cleanedUp) {
-        return;
-      }
-
-      cleanedUp = true;
-      await resolution.cleanup?.();
-    };
+    let cleanup = async () => {};
 
     try {
-      res.once("close", () => {
-        void cleanup();
-      });
-
       const provisionalProfile = getResolvedClientProfile(res.locals);
       const initializeParams = getInitializeParams(parsedBody);
 
@@ -862,11 +896,99 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
       }
 
       const resolvedProfile = getResolvedClientProfile(res.locals);
+      const authDebugOptions = getRequestAuthDebugOptions(req);
+      const fastPathCache = fastPathResponses();
+      const isSessionlessAuthlessRequest = authDebugOptions.authMode === "none" && !getSessionId(req);
+      const jsonRpcMethod = isRecord(parsedBody) ? getStringValue(parsedBody, "method") : undefined;
+
+      if (isSessionlessAuthlessRequest && fastPathCache && typeof jsonRpcMethod === "string") {
+        if (jsonRpcMethod === "initialize") {
+          logHttpDebug("transport.handoff", {
+            ...getRequestDebugDetails(req, authDebugOptions),
+            ...getJsonRpcDebugDetails(parsedBody),
+            cleanup: false,
+            profileId: resolvedProfile?.profileId,
+            profileReason: resolvedProfile?.reason,
+          });
+          writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.initializeResult);
+          return;
+        }
+
+        if (jsonRpcMethod === "tools/list") {
+          logHttpDebug("transport.handoff", {
+            ...getRequestDebugDetails(req, authDebugOptions),
+            ...getJsonRpcDebugDetails(parsedBody),
+            cleanup: false,
+            profileId: resolvedProfile?.profileId,
+            profileReason: resolvedProfile?.reason,
+          });
+          writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.toolsListResult);
+          return;
+        }
+
+        if (jsonRpcMethod === "resources/list" && fastPathCache.resourcesListResult) {
+          logHttpDebug("transport.handoff", {
+            ...getRequestDebugDetails(req, authDebugOptions),
+            ...getJsonRpcDebugDetails(parsedBody),
+            cleanup: false,
+            profileId: resolvedProfile?.profileId,
+            profileReason: resolvedProfile?.reason,
+          });
+          logHttpDebug("resource.list.advertised", {
+            ...getRequestDebugDetails(req, authDebugOptions),
+            ...getJsonRpcDebugDetails(parsedBody),
+            resourceCount: fastPathCache.resourcesListResult.resources.length,
+            resourceUris: fastPathCache.resourcesListResult.resources.map((resource) => resource.uri),
+          });
+          writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.resourcesListResult);
+          return;
+        }
+
+        if (jsonRpcMethod === "tools/call") {
+          const toolName = getToolCallName(parsedBody);
+          const toolArguments = getToolCallArguments(parsedBody);
+          const fastPathResult = toolName ? fastPathCache.toolCallResults.get(toolName) : undefined;
+
+          if (fastPathResult && isEmptyRecord(toolArguments)) {
+            writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathResult);
+            return;
+          }
+        }
+      }
+
+      const resolution = await resolveRequest(
+        req,
+        createManagedRequest,
+      );
+
+      if (resolution.status === "invalid-session-header") {
+        logHttpDebug("request.rejected", {
+          ...getRequestDebugDetails(req, authDebugOptions),
+          reason: "invalid-session-header",
+        });
+        writeRequestResolution(res, resolution);
+        return;
+      }
+
+      let cleanedUp = false;
+      cleanup = async () => {
+        if (cleanedUp) {
+          return;
+        }
+
+        cleanedUp = true;
+        await resolution.cleanup?.();
+      };
+
+      res.once("close", () => {
+        void cleanup();
+      });
+
       const responseCapture = getToolCallName(parsedBody) ? captureResponseBody(res) : undefined;
       const resourceReadUri = getResourceReadUri(parsedBody);
 
       logHttpDebug("transport.handoff", {
-        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+        ...getRequestDebugDetails(req, authDebugOptions),
         ...getJsonRpcDebugDetails(parsedBody),
         cleanup: Boolean(resolution.cleanup),
         profileId: resolvedProfile?.profileId,
@@ -900,7 +1022,7 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
 
         if (typeof errorMessage === "string" && errorMessage.includes("Input validation error")) {
           logHttpDebug("tool.call.validation_failed", {
-            ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+            ...getRequestDebugDetails(req, authDebugOptions),
             ...getJsonRpcDebugDetails(parsedBody),
             errorMessage,
             toolName,
@@ -909,7 +1031,7 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
         }
 
         logHttpDebug("tool.dispatch.absent", {
-          ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+          ...getRequestDebugDetails(req, authDebugOptions),
           ...getJsonRpcDebugDetails(parsedBody),
           errorMessage,
           toolName,
@@ -1133,6 +1255,7 @@ export async function startHttpServer(
         discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {},
       );
     },
+    fastPathResponses: () => fastPathCache,
     getInitializeParams,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
@@ -1218,6 +1341,12 @@ export async function startHttpServer(
     ? new URL(auth.publicUrl).origin
     : `http://${host}:${resolvedAddress.port}`;
   const discoveryResourceBaseUrl = new URL(`${path.replace(/\/$/, "")}/resources/`, resourceOrigin).toString();
+  const fastPathCache = {
+    toolCallResults: await createFastPathToolCallResults(),
+    initializeResult: getInitializeResult(),
+    toolsListResult: getToolsListResult(),
+    resourcesListResult: getResourcesListResult({ discoveryResourceBaseUrl }),
+  };
   const runtimePool = createManagedRequestRuntimePool(
     ynab,
     sharedApi,
