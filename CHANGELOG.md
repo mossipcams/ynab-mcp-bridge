@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.3...ynab-mcp-bridge-v0.14.4) (2026-03-27)
+
+
+### Bug Fixes
+
+* finish modular monolith task 12 verification ([b684fec](https://github.com/mossipcams/ynab-mcp-bridge/commit/b684fec79bd32b03cad525e384b4863d6e5a23b4))
+* remove stale transaction type import ([c89f42d](https://github.com/mossipcams/ynab-mcp-bridge/commit/c89f42dc2c3a61acd9b725f3c25bf4670e07dab2))
+* resolve CI lint and typecheck blockers ([5f77831](https://github.com/mossipcams/ynab-mcp-bridge/commit/5f778318dcbc41bc2257d34d445e33dd91adddd5))
+* scope coverage to exercised runtime code ([99b1fc7](https://github.com/mossipcams/ynab-mcp-bridge/commit/99b1fc72afb3e5e1a03e91d510d32079078a46eb))
+
 ## [0.14.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.2...ynab-mcp-bridge-v0.14.3) (2026-03-26)
 
 
