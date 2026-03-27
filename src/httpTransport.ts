@@ -631,7 +631,7 @@ async function createManagedRequest(config: YnabConfig, api: API | object, optio
   discoveryResourceBaseUrl?: string;
 }) {
   const discoveryResources = getDiscoveryResourceSummaries(options);
-  const mcpServer = createServer(config, api as API, options);
+  const mcpServer = createServer(config, api, options);
   const transport = new StreamableHTTPServerTransport({
     enableJsonResponse: true,
   });
