@@ -583,6 +583,59 @@ describe("startHttpServer", () => {
     await transport.close();
   });
 
+  it("serves enriched strict-input discovery payloads over direct compatibility URLs", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const client = new Client({
+      name: "ynab-mcp-bridge-strict-resource-direct-fetch-test",
+      version: "1.0.0",
+    });
+    const transport = new StreamableHTTPClientTransport(new URL(httpServer.url));
+
+    await client.connect(transport);
+
+    const listResult = await client.listResources();
+    const strictToolNames = [
+      "ynab_get_month_category",
+      "ynab_get_net_worth_trajectory",
+    ] as const;
+
+    for (const toolName of strictToolNames) {
+      const compatibilityResource = listResult.resources.find((resource) => (
+        resource.name === toolName &&
+        resource.uri.startsWith("http://")
+      ));
+
+      expect(compatibilityResource).toBeDefined();
+
+      const mcpReadResult = await client.readResource({
+        uri: compatibilityResource!.uri,
+      });
+      const directFetchResponse = await fetch(compatibilityResource!.uri);
+
+      expect(directFetchResponse.status).toBe(200);
+
+      const directPayload = await directFetchResponse.json() as Record<string, unknown>;
+      const mcpPayload = JSON.parse(mcpReadResult.contents[0].text) as Record<string, unknown>;
+
+      expect(directPayload).toEqual(mcpPayload);
+      expect(directPayload).toEqual(expect.objectContaining({
+        toolName,
+        requiredArguments: expect.any(Array),
+        argumentExamples: expect.any(Object),
+        invocationExample: expect.any(Object),
+      }));
+    }
+
+    await transport.close();
+  });
+
   it("requires explicit YNAB config instead of reading environment during HTTP startup", async () => {
     await expect((async () => {
       let httpServer: Awaited<ReturnType<typeof startHttpServer>> | undefined;
@@ -1758,6 +1811,177 @@ describe("startHttpServer", () => {
       entry.event === "tool.call.started" &&
       entry.correlationId === validCorrelationId &&
       entry.toolName === "ynab_search_transactions"
+    ))).toBeTruthy();
+  });
+
+  it("distinguishes discovery-only, validation-failed, and executed strict-input tool attempts", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
+    const monthCategoryReadCorrelationId = "corr-month-category-read-123";
+    const monthCategoryInvalidCorrelationId = "corr-month-category-invalid-123";
+    const monthCategoryValidCorrelationId = "corr-month-category-valid-123";
+    const netWorthReadCorrelationId = "corr-net-worth-read-123";
+    const netWorthInvalidCorrelationId = "corr-net-worth-invalid-123";
+    const netWorthValidCorrelationId = "corr-net-worth-valid-123";
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const monthCategoryResourceUri = `${httpServer.url}/resources/ynab_get_month_category`;
+    const netWorthResourceUri = `${httpServer.url}/resources/ynab_get_net_worth_trajectory`;
+
+    const monthCategoryReadResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId: monthCategoryReadCorrelationId,
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "resources/read",
+        params: {
+          uri: monthCategoryResourceUri,
+        },
+      },
+    });
+    expect(monthCategoryReadResponse.status).toBe(200);
+    await monthCategoryReadResponse.text();
+
+    const netWorthReadResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId: netWorthReadCorrelationId,
+      body: {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "resources/read",
+        params: {
+          uri: netWorthResourceUri,
+        },
+      },
+    });
+    expect(netWorthReadResponse.status).toBe(200);
+    await netWorthReadResponse.text();
+
+    const monthCategoryInvalidResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId: monthCategoryInvalidCorrelationId,
+      body: {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_month_category",
+          arguments: {
+            categoryId: "category-123",
+          },
+        },
+      },
+    });
+    expect(monthCategoryInvalidResponse.status).toBe(200);
+    await monthCategoryInvalidResponse.text();
+
+    const netWorthInvalidResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId: netWorthInvalidCorrelationId,
+      body: {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_net_worth_trajectory",
+          arguments: {
+            fromMonth: "March 2026",
+          },
+        },
+      },
+    });
+    expect(netWorthInvalidResponse.status).toBe(200);
+    await netWorthInvalidResponse.text();
+
+    const monthCategoryValidResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId: monthCategoryValidCorrelationId,
+      body: {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_month_category",
+          arguments: {
+            month: "2026-03-01",
+            categoryId: "category-123",
+          },
+        },
+      },
+    });
+    expect(monthCategoryValidResponse.status).toBe(200);
+    await monthCategoryValidResponse.text();
+
+    const netWorthValidResponse = await sendJsonRpcRequest(httpServer.url, {
+      correlationId: netWorthValidCorrelationId,
+      body: {
+        jsonrpc: "2.0",
+        id: 6,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_net_worth_trajectory",
+          arguments: {
+            fromMonth: "2026-01-01",
+            toMonth: "2026-03-01",
+          },
+        },
+      },
+    });
+    expect(netWorthValidResponse.status).toBe(200);
+    await netWorthValidResponse.text();
+
+    const entries = sink.readEntries();
+
+    expect(entries.find((entry) => (
+      entry.scope === "http" &&
+      entry.event === "resource.read.requested" &&
+      entry.correlationId === monthCategoryReadCorrelationId &&
+      entry.resourceUri === monthCategoryResourceUri
+    ))).toBeTruthy();
+    expect(entries.find((entry) => (
+      entry.scope === "http" &&
+      entry.event === "resource.read.requested" &&
+      entry.correlationId === netWorthReadCorrelationId &&
+      entry.resourceUri === netWorthResourceUri
+    ))).toBeTruthy();
+    expect(entries.find((entry) => (
+      entry.scope === "mcp" &&
+      entry.event === "tool.call.started" &&
+      entry.correlationId === monthCategoryReadCorrelationId
+    ))).toBeFalsy();
+    expect(entries.find((entry) => (
+      entry.scope === "mcp" &&
+      entry.event === "tool.call.started" &&
+      entry.correlationId === netWorthReadCorrelationId
+    ))).toBeFalsy();
+
+    expect(entries.find((entry) => (
+      entry.scope === "http" &&
+      entry.event === "tool.call.validation_failed" &&
+      entry.correlationId === monthCategoryInvalidCorrelationId &&
+      entry.toolName === "ynab_get_month_category"
+    ))).toBeTruthy();
+    expect(entries.find((entry) => (
+      entry.scope === "http" &&
+      entry.event === "tool.call.validation_failed" &&
+      entry.correlationId === netWorthInvalidCorrelationId &&
+      entry.toolName === "ynab_get_net_worth_trajectory"
+    ))).toBeTruthy();
+
+    expect(entries.find((entry) => (
+      entry.scope === "mcp" &&
+      entry.event === "tool.call.started" &&
+      entry.correlationId === monthCategoryValidCorrelationId &&
+      entry.toolName === "ynab_get_month_category"
+    ))).toBeTruthy();
+    expect(entries.find((entry) => (
+      entry.scope === "mcp" &&
+      entry.event === "tool.call.started" &&
+      entry.correlationId === netWorthValidCorrelationId &&
+      entry.toolName === "ynab_get_net_worth_trajectory"
     ))).toBeTruthy();
   });
 

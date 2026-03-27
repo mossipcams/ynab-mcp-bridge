@@ -197,11 +197,120 @@ describe("createServer", () => {
     ]));
     expect(new Set(payloads.map((payload) => JSON.stringify({
       annotations: payload.annotations,
+      argumentExamples: payload.argumentExamples,
       description: payload.description,
       inputSchema: payload.inputSchema,
+      invocationExample: payload.invocationExample,
+      requiredArguments: payload.requiredArguments,
       title: payload.title,
       toolName: payload.toolName,
     })))).toHaveLength(1);
+  });
+
+  it("adds explicit required-argument guidance for strict-input discovery tools", async () => {
+    const server = createServer(
+      {
+        apiToken: "test-token",
+      },
+      undefined,
+      {
+        discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
+      },
+    );
+    const registeredResources = (server as any)._registeredResources as Record<string, {
+      name: string;
+      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
+    }>;
+
+    const strictToolNames = [
+      "ynab_get_month_category",
+      "ynab_get_net_worth_trajectory",
+      "ynab_get_spending_anomalies",
+    ] as const;
+
+    for (const toolName of strictToolNames) {
+      const entry = Object.entries(registeredResources)
+        .find(([, resource]) => resource.name === toolName);
+
+      expect(entry).toBeDefined();
+
+      const [uri, resource] = entry!;
+      const payload = JSON.parse((await resource.readCallback(new URL(uri), {})).contents[0].text) as Record<string, unknown>;
+
+      expect(payload).toEqual(expect.objectContaining({
+        toolName,
+        requiredArguments: expect.any(Array),
+        argumentExamples: expect.any(Object),
+        invocationExample: expect.any(Object),
+      }));
+    }
+
+    const monthCategoryEntry = Object.entries(registeredResources)
+      .find(([, resource]) => resource.name === "ynab_get_month_category");
+    const [monthCategoryUri, monthCategoryResource] = monthCategoryEntry!;
+    const monthCategoryPayload = JSON.parse(
+      (await monthCategoryResource.readCallback(new URL(monthCategoryUri), {})).contents[0].text,
+    ) as Record<string, unknown>;
+
+    expect(monthCategoryPayload.requiredArguments).toEqual(["month", "categoryId"]);
+    expect(monthCategoryPayload.argumentExamples).toEqual(expect.objectContaining({
+      month: "2026-03-01",
+      categoryId: "category-123",
+    }));
+  });
+
+  it("uses concrete date and id examples for the remaining flaky discovery tools", async () => {
+    const server = createServer(
+      {
+        apiToken: "test-token",
+      },
+      undefined,
+      {
+        discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
+      },
+    );
+    const registeredResources = (server as any)._registeredResources as Record<string, {
+      name: string;
+      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
+    }>;
+
+    async function readResourcePayload(toolName: string) {
+      const entry = Object.entries(registeredResources)
+        .find(([, resource]) => resource.name === toolName);
+
+      expect(entry).toBeDefined();
+
+      const [uri, resource] = entry!;
+      return JSON.parse((await resource.readCallback(new URL(uri), {})).contents[0].text) as Record<string, unknown>;
+    }
+
+    const monthCategoryPayload = await readResourcePayload("ynab_get_month_category");
+    const netWorthPayload = await readResourcePayload("ynab_get_net_worth_trajectory");
+    const payeeLocationPayload = await readResourcePayload("ynab_get_payee_location");
+
+    expect(monthCategoryPayload.invocationExample).toEqual({
+      month: "2026-03-01",
+      categoryId: "category-123",
+      view: "compact",
+    });
+    expect(netWorthPayload.argumentExamples).toEqual({
+      fromMonth: "2026-01-01",
+      toMonth: "2026-03-01",
+    });
+    expect(netWorthPayload.invocationExample).toEqual({
+      fromMonth: "2026-01-01",
+      toMonth: "2026-03-01",
+    });
+    expect(payeeLocationPayload).toEqual(expect.objectContaining({
+      toolName: "ynab_get_payee_location",
+      requiredArguments: ["payeeLocationId"],
+      argumentExamples: {
+        payeeLocationId: "payee-location-123",
+      },
+      invocationExample: {
+        payeeLocationId: "payee-location-123",
+      },
+    }));
   });
 
   it("registers the toolset through a reusable SDK-native registrar", () => {
