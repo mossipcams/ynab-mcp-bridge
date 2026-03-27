@@ -3,13 +3,16 @@ import * as ynab from "ynab";
 
 import {
   buildAssignedSpentSummary,
+  compactObject,
   formatMilliunits,
   isWithinMonthRange,
   normalizeMonthRange,
   toTopRollups,
 } from "./financeToolUtils.js";
-import { getCachedCategories, getCachedPlanMonths } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { getCachedCategories, getCachedPlanMonth, getCachedPlanMonths } from "./cachedYnabReads.js";
+import type { OutputFormat } from "./planToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { buildProse, proseItem } from "./proseFormatUtils.js";
 
 export const name = "ynab_get_spending_summary";
 export const description =
@@ -23,6 +26,7 @@ export const inputSchema = {
     "The last month in ISO format. Defaults to fromMonth.",
   ),
   topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of top rollups to include."),
+  format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
 };
 
 function buildCategoryGroupLookup(categoryGroups: ynab.CategoryGroupWithCategories[]) {
@@ -55,18 +59,21 @@ function addRollup(
 }
 
 export async function execute(
-  input: { planId?: string; fromMonth?: string; toMonth?: string; topN?: number },
+  input: { planId?: string; fromMonth?: string; toMonth?: string; topN?: number; format?: OutputFormat },
   api: ynab.API,
 ) {
   try {
     const { fromMonth, toMonth } = normalizeMonthRange(input.fromMonth, input.toMonth);
     const topN = input.topN ?? 5;
+    const isSingleMonth = fromMonth === toMonth;
+    const format = input.format ?? "compact";
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
-      const [transactionsResponse, monthsResponse, categoriesResponse] = await Promise.all([
+      const [transactionsResponse, monthsResponse, categoriesResponse, monthResponse] = await Promise.all([
         api.transactions.getTransactions(planId, fromMonth, undefined, undefined),
         getCachedPlanMonths(api, planId),
         getCachedCategories(api, planId),
+        isSingleMonth ? getCachedPlanMonth(api, planId, fromMonth) : Promise.resolve(undefined),
       ]);
 
       const groupByCategoryId = buildCategoryGroupLookup(categoriesResponse.data.category_groups);
@@ -109,8 +116,46 @@ export async function execute(
         .filter((month) => !month.deleted && month.month >= fromMonth && month.month <= toMonth)
         .reduce((sum, month) => sum + month.budgeted, 0);
       const spentMilliunits = spendingTransactions.reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
+      const monthCategoryBudgetById = new Map(
+        monthResponse?.data.month.categories
+          .filter((category) => !category.deleted)
+          .map((category) => [category.id, category.budgeted ?? 0] as const) ?? [],
+      );
+      const topCategories = isSingleMonth
+        ? Array.from(categoryRollups.values())
+          .slice()
+          .sort((left, right) => {
+            const amountDifference = Math.abs(right.amountMilliunits) - Math.abs(left.amountMilliunits);
+            if (amountDifference !== 0) {
+              return amountDifference;
+            }
 
-      return toTextResult({
+            return left.name.localeCompare(right.name);
+          })
+          .slice(0, topN)
+          .map((entry) => {
+            const budgetedMilliunits = entry.id ? monthCategoryBudgetById.get(entry.id) : undefined;
+            const varianceMilliunits = typeof budgetedMilliunits === "number"
+              ? budgetedMilliunits - entry.amountMilliunits
+              : undefined;
+            const variancePercent = typeof budgetedMilliunits === "number" && budgetedMilliunits !== 0
+              ? ((varianceMilliunits ?? 0) / budgetedMilliunits) * 100
+              : undefined;
+
+            return compactObject({
+              id: entry.id,
+              name: entry.name,
+              amount: formatMilliunits(entry.amountMilliunits),
+              transaction_count: entry.transactionCount,
+              budgeted: typeof budgetedMilliunits === "number" ? formatMilliunits(budgetedMilliunits) : undefined,
+              spent: formatMilliunits(entry.amountMilliunits),
+              variance: typeof varianceMilliunits === "number" ? formatMilliunits(varianceMilliunits) : undefined,
+              variance_pct: typeof variancePercent === "number" ? variancePercent.toFixed(2) : undefined,
+            });
+          })
+        : toTopRollups(Array.from(categoryRollups.values()), topN);
+
+      const payload = {
         from_month: fromMonth,
         to_month: toMonth,
         ...buildAssignedSpentSummary(assignedMilliunits, spentMilliunits),
@@ -118,10 +163,29 @@ export async function execute(
         average_transaction: formatMilliunits(
           spendingTransactions.length > 0 ? Math.round(spentMilliunits / spendingTransactions.length) : 0,
         ),
-        top_categories: toTopRollups(Array.from(categoryRollups.values()), topN),
+        top_categories: topCategories,
         top_category_groups: toTopRollups(Array.from(categoryGroupRollups.values()), topN),
         top_payees: toTopRollups(Array.from(payeeRollups.values()), topN),
-      });
+      };
+
+      if (format === "prose") {
+        return toProseResult(buildProse(
+          `Spending Summary (${payload.from_month} to ${payload.to_month})`,
+          [
+            ["assigned", payload.assigned],
+            ["spent", payload.spent],
+            ["assigned_vs_spent", payload.assigned_vs_spent],
+            ["transaction_count", payload.transaction_count],
+            ["average_transaction", payload.average_transaction],
+          ],
+          [
+            { heading: "Top Categories", items: payload.top_categories.map((entry) => proseItem(entry["name"] as string | undefined, entry["amount"] as string | undefined)) },
+            { heading: "Top Payees", items: payload.top_payees.map((entry) => proseItem(entry["name"] as string | undefined, entry["amount"] as string | undefined)) },
+          ],
+        ));
+      }
+
+      return toTextResult(payload, format);
     });
   } catch (error) {
     return toErrorResult(error);

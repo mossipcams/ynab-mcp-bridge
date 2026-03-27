@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./tools/planToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./tools/planToolUtils.js";
 
 describe("plan tool response helpers", () => {
   it("serializes payloads as compact JSON by default", () => {
@@ -42,6 +42,28 @@ describe("plan tool response helpers", () => {
           "  }",
           "}",
         ].join("\n"),
+      }],
+    });
+  });
+
+  it("supports prose text results through the shared output format", () => {
+    const result = toTextResult("Budget Health: Ready 123.45 | Overspent 0.00", "prose");
+
+    expect(result).toEqual({
+      content: [{
+        type: "text",
+        text: "Budget Health: Ready 123.45 | Overspent 0.00",
+      }],
+    });
+  });
+
+  it("builds prose text results directly when requested", () => {
+    const result = toProseResult("Cash Flow: Inflow 500.00 | Outflow 300.00");
+
+    expect(result).toEqual({
+      content: [{
+        type: "text",
+        text: "Cash Flow: Inflow 500.00 | Outflow 300.00",
       }],
     });
   });

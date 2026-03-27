@@ -11,6 +11,10 @@ function parseText(result: Awaited<ReturnType<typeof GetFinancialHealthCheckTool
   return JSON.parse(result.content[0].text);
 }
 
+function readText(result: { content: Array<{ text: string }> }) {
+  return result.content[0].text;
+}
+
 describe("financial diagnostics tools", () => {
   it("builds a compact financial health check", async () => {
     const api = {
@@ -59,10 +63,13 @@ describe("financial diagnostics tools", () => {
             transactions: [
               {
                 id: "tx-1",
+                date: "2026-03-08",
+                amount: -45000,
                 deleted: false,
                 approved: false,
                 cleared: "uncleared",
                 category_id: null,
+                payee_name: "Mystery Charge",
               },
             ],
           },
@@ -109,12 +116,15 @@ describe("financial diagnostics tools", () => {
         { code: "goal_underfunding", severity: "medium" },
         { code: "cleanup_backlog", severity: "medium" },
       ],
-      recommended_tools: [
-        "ynab_get_budget_health_summary",
-        "ynab_get_budget_cleanup_summary",
-        "ynab_search_transactions",
-        "ynab_get_upcoming_obligations",
-        "ynab_get_income_summary",
+      top_overspent: [
+        { name: "Rent", amount: "15.00" },
+      ],
+      top_underfunded: [
+        { name: "Vacation", amount: "10.00" },
+        { name: "Emergency Fund", amount: "5.00" },
+      ],
+      top_uncategorized: [
+        { date: "2026-03-08", payee_name: "Mystery Charge", amount: "45.00" },
       ],
     });
   });
@@ -161,18 +171,22 @@ describe("financial diagnostics tools", () => {
               {
                 id: "tx-1",
                 date: "2026-03-03",
+                amount: -20000,
                 deleted: false,
                 approved: false,
                 cleared: "uncleared",
                 category_id: null,
+                payee_name: "Unknown Store",
               },
               {
                 id: "tx-2",
                 date: "2026-04-03",
+                amount: -50000,
                 deleted: false,
                 approved: false,
                 cleared: "uncleared",
                 category_id: null,
+                payee_name: "April Store",
               },
             ],
           },
@@ -213,14 +227,96 @@ describe("financial diagnostics tools", () => {
       top_risks: [
         { code: "cleanup_backlog", severity: "medium" },
       ],
-      recommended_tools: [
-        "ynab_get_budget_health_summary",
-        "ynab_get_budget_cleanup_summary",
-        "ynab_search_transactions",
-        "ynab_get_upcoming_obligations",
-        "ynab_get_income_summary",
+      top_overspent: [],
+      top_underfunded: [],
+      top_uncategorized: [
+        { date: "2026-03-03", payee_name: "Unknown Store", amount: "20.00" },
       ],
     });
+  });
+
+  it("renders the financial health check as prose when requested", async () => {
+    const api = {
+      accounts: {
+        getAccounts: vi.fn().mockResolvedValue({
+          data: {
+            accounts: [
+              { id: "acct-1", name: "Checking", on_budget: true, deleted: false, closed: false, balance: 600000 },
+              { id: "acct-2", name: "Visa", on_budget: true, deleted: false, closed: false, balance: -300000 },
+              { id: "acct-3", name: "Mortgage", on_budget: false, deleted: false, closed: false, balance: -200000 },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              to_be_budgeted: -20000,
+              age_of_money: 10,
+              income: 200000,
+              budgeted: 250000,
+              activity: -270000,
+              categories: [
+                { id: "cat-1", name: "Rent", deleted: false, hidden: false, balance: -15000, goal_under_funded: 0 },
+                { id: "cat-2", name: "Emergency Fund", deleted: false, hidden: false, balance: 50000, goal_under_funded: 5000 },
+                { id: "cat-3", name: "Vacation", deleted: false, hidden: false, balance: 10000, goal_under_funded: 10000 },
+              ],
+            },
+          },
+        }),
+        getPlanMonths: vi.fn().mockResolvedValue({
+          data: {
+            months: [
+              { month: "2026-01-01", income: 500000, deleted: false },
+              { month: "2026-02-01", income: 500000, deleted: false },
+              { month: "2026-03-01", income: 200000, deleted: false },
+            ],
+          },
+        }),
+      },
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-03-08",
+                amount: -45000,
+                deleted: false,
+                approved: false,
+                cleared: "uncleared",
+                category_id: null,
+                payee_name: "Mystery Charge",
+              },
+            ],
+          },
+        }),
+      },
+      scheduledTransactions: {
+        getScheduledTransactions: vi.fn().mockResolvedValue({
+          data: {
+            scheduled_transactions: [
+              { id: "sched-1", deleted: false, date_next: "2026-03-15", amount: -700000 },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetFinancialHealthCheckTool.execute(
+      { planId: "plan-1", month: "2026-03-01", asOfDate: "2026-03-10", format: "prose" } as any,
+      api as any,
+    );
+
+    expect(readText(result as any)).toBe([
+      "Financial Health Check (2026-03-01): status needs_attention | score 20 | net_worth 100.00 | liquid_cash 600.00 | debt 500.00 | ready_to_assign -20.00 | upcoming_30d_net -700.00",
+      "Top Risks: cash_shortfall high, negative_ready_to_assign high, overspent_categories high, goal_underfunding medium, cleanup_backlog medium",
+      "Overspent: Rent 15.00",
+      "Underfunded: Vacation 10.00, Emergency Fund 5.00",
+      "Uncategorized: 2026-03-08 Mystery Charge 45.00",
+    ].join("\n"));
   });
 
   it("calculates emergency fund coverage", async () => {
@@ -245,6 +341,17 @@ describe("financial diagnostics tools", () => {
           },
         }),
       },
+      scheduledTransactions: {
+        getScheduledTransactions: vi.fn().mockResolvedValue({
+          data: {
+            scheduled_transactions: [
+              { id: "sched-1", deleted: false, date_next: "2026-03-10", amount: -100000, frequency: "monthly", transfer_account_id: null },
+              { id: "sched-2", deleted: false, date_next: "2026-03-20", amount: 50000, frequency: "never", transfer_account_id: null },
+              { id: "sched-3", deleted: false, date_next: "2026-04-15", amount: -25000, frequency: "never", transfer_account_id: null },
+            ],
+          },
+        }),
+      },
     };
 
     const result = await GetEmergencyFundCoverageTool.execute(
@@ -256,6 +363,7 @@ describe("financial diagnostics tools", () => {
       as_of_month: "2026-03-01",
       liquid_cash: "900.00",
       average_monthly_spending: "300.00",
+      scheduled_net_next_30d: "-50.00",
       coverage_months: "3.00",
       status: "solid",
       months_considered: 3,
@@ -284,6 +392,17 @@ describe("financial diagnostics tools", () => {
           },
         }),
       },
+      scheduledTransactions: {
+        getScheduledTransactions: vi.fn().mockResolvedValue({
+          data: {
+            scheduled_transactions: [
+              { id: "sched-1", deleted: false, date_next: "2026-03-10", amount: -100000, frequency: "monthly", transfer_account_id: null },
+              { id: "sched-2", deleted: false, date_next: "2026-03-20", amount: 50000, frequency: "never", transfer_account_id: null },
+              { id: "sched-3", deleted: false, date_next: "2026-04-15", amount: -25000, frequency: "never", transfer_account_id: null },
+            ],
+          },
+        }),
+      },
     };
 
     const result = await GetCashRunwayTool.execute(
@@ -295,6 +414,7 @@ describe("financial diagnostics tools", () => {
       as_of_month: "2026-03-01",
       liquid_cash: "900.00",
       average_daily_outflow: "10.00",
+      scheduled_net_next_30d: "-50.00",
       runway_days: "90.00",
       status: "stable",
       months_considered: 3,
@@ -463,6 +583,13 @@ describe("financial diagnostics tools", () => {
           },
         }),
       },
+      scheduledTransactions: {
+        getScheduledTransactions: vi.fn().mockResolvedValue({
+          data: {
+            scheduled_transactions: [],
+          },
+        }),
+      },
     };
 
     const result = await GetCashRunwayTool.execute(
@@ -473,6 +600,7 @@ describe("financial diagnostics tools", () => {
     const parsed = parseText(result as any);
     expect(parsed.status).toBe("no_outflows");
     expect(parsed.liquid_cash).toBe("900.00");
+    expect(parsed.scheduled_net_next_30d).toBe("0.00");
     expect(parsed.runway_days).toBeUndefined();
   });
 
@@ -498,6 +626,13 @@ describe("financial diagnostics tools", () => {
           },
         }),
       },
+      scheduledTransactions: {
+        getScheduledTransactions: vi.fn().mockResolvedValue({
+          data: {
+            scheduled_transactions: [],
+          },
+        }),
+      },
     };
 
     const result = await GetEmergencyFundCoverageTool.execute(
@@ -508,6 +643,7 @@ describe("financial diagnostics tools", () => {
     const parsed = parseText(result as any);
     expect(parsed.status).toBe("no_spending");
     expect(parsed.liquid_cash).toBe("900.00");
+    expect(parsed.scheduled_net_next_30d).toBe("0.00");
     expect(parsed.coverage_months).toBeUndefined();
   });
 

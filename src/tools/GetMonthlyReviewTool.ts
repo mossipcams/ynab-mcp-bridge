@@ -11,20 +11,19 @@ import {
   toTopRollups,
 } from "./financeToolUtils.js";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import type { OutputFormat } from "./planToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { buildProse, proseItem } from "./proseFormatUtils.js";
 
 export const name = "ynab_get_monthly_review";
 export const description =
-  "Returns a compact monthly review with income, cash flow, budget health, top spending, and notable spending changes, including assigned versus spent as a buffering and timing signal rather than a discipline score.";
+  "Monthly review with income, cash flow, budget health, top spending, and notable changes.";
 export const inputSchema = {
-  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
-  month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe(
-    "The month in ISO format or the string 'current'.",
-  ),
-  baselineMonths: z.number().int().min(1).max(12).default(3).describe(
-    "How many trailing months to use when checking for notable spending changes.",
-  ),
-  topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of rollups or anomalies to include."),
+  planId: z.string().optional().describe("Plan ID (uses env default)"),
+  month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("Month (ISO or 'current')"),
+  baselineMonths: z.number().int().min(1).max(12).default(3).describe("Baseline months"),
+  topN: z.number().int().min(1).max(10).default(5).describe("Top N results"),
+  format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
 };
 
 function addRollup(
@@ -57,13 +56,14 @@ function buildBaselineSpentLookup(
 }
 
 export async function execute(
-  input: { planId?: string; month?: string; baselineMonths?: number; topN?: number },
+  input: { planId?: string; month?: string; baselineMonths?: number; topN?: number; format?: OutputFormat },
   api: ynab.API,
 ) {
   try {
     const month = normalizeMonthInput(input.month);
     const baselineMonths = input.baselineMonths ?? 3;
     const topN = input.topN ?? 5;
+    const format = input.format ?? "compact";
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const baselineMonthIds = previousMonths(month, baselineMonths);
@@ -145,7 +145,7 @@ export async function execute(
         .slice(0, topN)
         .map(({ sort_difference: _sortDifference, ...anomaly }) => anomaly);
 
-      return toTextResult({
+      const payload = {
         month: monthDetail.month,
         income: formatMilliunits(monthDetail.income),
         inflow: formatMilliunits(inflowMilliunits),
@@ -154,7 +154,26 @@ export async function execute(
         ...budgetHealthSummary,
         top_spending_categories: toTopRollups(Array.from(spendingRollups.values()), topN),
         anomalies,
-      });
+      };
+
+      if (format === "prose") {
+        return toProseResult(buildProse(
+          `Monthly Review (${payload.month})`,
+          [
+            ["income", payload.income],
+            ["inflow", payload.inflow],
+            ["outflow", payload.outflow],
+            ["net_flow", payload.net_flow],
+            ["ready_to_assign", payload.ready_to_assign],
+          ],
+          [
+            { heading: "Top Spending", items: payload.top_spending_categories.map((entry) => proseItem(entry["name"] as string | undefined, entry["amount"] as string | undefined)) },
+            { heading: "Anomalies", items: payload.anomalies.map((entry) => proseItem(entry.category_name, entry.latest_spent, "vs", entry.baseline_average)) },
+          ],
+        ));
+      }
+
+      return toTextResult(payload, format);
     });
   } catch (error) {
     return toErrorResult(error);
