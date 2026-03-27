@@ -15,6 +15,7 @@ import { createRequestContext, getCorrelationHeaderName, getRequestLogFields, ha
 import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
 import { createServer, getDiscoveryResourceDocument, getDiscoveryResourceSummaries } from "./serverRuntime.js";
 import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
+import { createYnabApi } from "./ynabApi.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
 const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 class StreamableTransportAdapter {
@@ -394,9 +395,9 @@ function isPayloadTooLargeError(error) {
             ("status" in error && error.status === 413) ||
             ("statusCode" in error && error.statusCode === 413));
 }
-async function createManagedRequest(config, options) {
+async function createManagedRequest(config, api, options) {
     const discoveryResources = getDiscoveryResourceSummaries(options);
-    const mcpServer = createServer(config, undefined, options);
+    const mcpServer = createServer(config, api, options);
     const transport = new StreamableHTTPServerTransport({
         enableJsonResponse: true,
     });
@@ -571,7 +572,7 @@ export function installMcpPostRoute(options) {
         }
     });
 }
-export async function startHttpServer(options) {
+export async function startHttpServer(options, dependencies = {}) {
     const allowedHosts = options.allowedHosts ?? [];
     const auth = options.auth ?? { deployment: "authless", mode: "none" };
     const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
@@ -579,6 +580,7 @@ export async function startHttpServer(options) {
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
     const ynab = assertYnabConfig(options.ynab);
+    const sharedApi = dependencies.createApi?.(ynab) ?? createYnabApi(ynab);
     if (auth.mode === "oauth") {
         allowedOrigins.add(new URL(auth.publicUrl).origin);
     }
@@ -741,7 +743,7 @@ export async function startHttpServer(options) {
     });
     installMcpPostRoute({
         app,
-        createManagedRequest: () => createManagedRequest(ynab, discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {}),
+        createManagedRequest: () => createManagedRequest(ynab, sharedApi, discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {}),
         getInitializeParams,
         getJsonRpcDebugDetails,
         getRequestAuthDebugOptions,
@@ -750,7 +752,13 @@ export async function startHttpServer(options) {
         getToolCallName,
         logHttpDebug,
         path,
-        resolveRequest,
+        resolveRequest: async (req, createRequest) => {
+            const resolution = await resolveRequest(req, createRequest);
+            if (resolution.status === "ready") {
+                dependencies.onManagedRequestCreated?.();
+            }
+            return resolution;
+        },
         writeMethodNotAllowed,
         writeRequestResolution,
     });

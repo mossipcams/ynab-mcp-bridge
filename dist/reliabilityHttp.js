@@ -314,12 +314,15 @@ export function formatReliabilitySummary(summary) {
     }
     return lines.join("\n");
 }
-export async function runHttpReliabilityScenario(options) {
+export async function runHttpReliabilityScenario(options, dependencies = {}) {
     const url = requireScenarioUrl(options);
+    const runSequence = dependencies.runSequence ?? runMeasuredHttpSequence;
     const results = await runReliabilityProbes({
         concurrency: options.concurrency,
         count: options.requestCount,
-        probe: async (index) => await runMeasuredHttpSequence(url, index),
+        probe: async (index) => await runSequence(url, index, options.toolCalls
+            ? { toolCalls: options.toolCalls }
+            : {}),
     });
     return {
         results,

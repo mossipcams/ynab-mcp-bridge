@@ -34,6 +34,7 @@ export type ReliabilityHttpScenarioOptions = {
   path?: string | undefined;
   port?: number | undefined;
   requestCount: number;
+  toolCalls?: readonly MeasuredToolCall[];
   url?: string | undefined;
   ynab: YnabConfig;
 };
@@ -51,6 +52,10 @@ type ExecuteReliabilityHttpCliDependencies = {
   runScenario?: (options: ReliabilityHttpScenarioOptions) => Promise<ReliabilityHttpScenarioResult>;
   writeLine?: (line: string) => void;
   ynab?: YnabConfig;
+};
+
+type RunHttpReliabilityScenarioDependencies = {
+  runSequence?: typeof runMeasuredHttpSequence;
 };
 
 type TextContentItem = {
@@ -468,13 +473,23 @@ export function formatReliabilitySummary(summary: ReliabilityRunSummary) {
   return lines.join("\n");
 }
 
-export async function runHttpReliabilityScenario(options: ReliabilityHttpScenarioOptions): Promise<ReliabilityHttpScenarioResult> {
+export async function runHttpReliabilityScenario(
+  options: ReliabilityHttpScenarioOptions,
+  dependencies: RunHttpReliabilityScenarioDependencies = {},
+): Promise<ReliabilityHttpScenarioResult> {
   const url = requireScenarioUrl(options);
+  const runSequence = dependencies.runSequence ?? runMeasuredHttpSequence;
 
   const results = await runReliabilityProbes({
     concurrency: options.concurrency,
     count: options.requestCount,
-    probe: async (index) => await runMeasuredHttpSequence(url, index),
+    probe: async (index) => await runSequence(
+      url,
+      index,
+      options.toolCalls
+        ? { toolCalls: options.toolCalls }
+        : {},
+    ),
   });
 
   return {

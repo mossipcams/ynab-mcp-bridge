@@ -429,7 +429,7 @@ function registerServerResources(server: McpServer, options: ServerRuntimeOption
 
 export function createServer(
   config: YnabConfig,
-  api = createYnabApi(config),
+  api: API | object = createYnabApi(config),
   options: ServerRuntimeOptions = {},
 ): McpServer {
   const normalizedConfig = assertYnabConfig(config);

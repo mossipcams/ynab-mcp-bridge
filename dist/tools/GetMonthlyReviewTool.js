@@ -25,6 +25,9 @@ function addRollup(bucket, key, value) {
         transactionCount: 1,
     });
 }
+function buildBaselineSpentLookup(responses) {
+    return responses.map((response) => new Map(response.data.month.categories.map((category) => [category.id, toSpentMilliunits(category.activity)])));
+}
 export async function execute(input, api) {
     try {
         const month = normalizeMonthInput(input.month);
@@ -42,6 +45,7 @@ export async function execute(input, api) {
             }
             const monthDetail = currentMonthResponse.data.month;
             const categories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden);
+            const baselineSpentLookups = buildBaselineSpentLookup(baselineResponses);
             const budgetHealthDetails = buildBudgetHealthMonthSummary(monthDetail);
             const budgetHealthSummary = {
                 ready_to_assign: budgetHealthDetails.ready_to_assign,
@@ -75,10 +79,7 @@ export async function execute(input, api) {
             const anomalies = categories
                 .map((category) => {
                 const latestSpent = toSpentMilliunits(category.activity);
-                const baselineValues = baselineResponses.map((response) => {
-                    const baselineCategory = response.data.month.categories.find((candidate) => candidate.id === category.id);
-                    return baselineCategory ? toSpentMilliunits(baselineCategory.activity) : 0;
-                });
+                const baselineValues = baselineSpentLookups.map((lookup) => lookup.get(category.id) ?? 0);
                 const baselineAverage = baselineValues.length === 0
                     ? 0
                     : baselineValues.reduce((sum, value) => sum + value, 0) / baselineValues.length;

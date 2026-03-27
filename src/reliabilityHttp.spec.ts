@@ -236,6 +236,54 @@ describe("reliability http", () => {
     ]);
   });
 
+  it("threads representative tool calls through the higher-level scenario runner", async () => {
+    const runSequence = vi.fn(async (_baseUrl: string, index: number, options?: { toolCalls?: unknown[] }) => {
+      expect(options?.toolCalls).toEqual([
+        {
+          name: "ynab_get_budget_health_summary",
+          arguments: {
+            month: "2026-03-01",
+          },
+        },
+      ]);
+
+      return [
+        { ok: true, operation: `initialize:${index}`, latencyMs: 1 },
+        { ok: true, operation: `tools/list:${index}`, latencyMs: 1 },
+        { ok: true, operation: "tools/call:ynab_get_budget_health_summary", latencyMs: 1 },
+      ];
+    });
+
+    const result = await runHttpReliabilityScenario({
+      concurrency: 1,
+      maxErrorRate: 0,
+      requestCount: 2,
+      url: "http://127.0.0.1:4100/mcp",
+      ynab: {
+        apiToken: "test-token",
+      },
+      toolCalls: [
+        {
+          name: "ynab_get_budget_health_summary",
+          arguments: {
+            month: "2026-03-01",
+          },
+        },
+      ],
+    } as any, {
+      runSequence,
+    } as any);
+
+    expect(runSequence).toHaveBeenCalledTimes(2);
+    expect(result.results.map((entry) => entry.operation)).toEqual([
+      "initialize:0",
+      "tools/list:0",
+      "tools/call:ynab_get_budget_health_summary",
+      "initialize:1",
+      "tools/list:1",
+      "tools/call:ynab_get_budget_health_summary",
+    ]);
+  });
   it("formats a compact reliability summary and returns a failing exit code when the threshold is breached", async () => {
     const summary: ReliabilityRunSummary = {
       passed: false,

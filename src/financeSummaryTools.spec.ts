@@ -4,7 +4,9 @@ import { registerServerTools } from "./serverRuntime.js";
 import * as GetBudgetHealthSummaryTool from "./tools/GetBudgetHealthSummaryTool.js";
 import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
 import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";
+import * as GetMonthlyReviewTool from "./tools/GetMonthlyReviewTool.js";
 import * as GetSpendingSummaryTool from "./tools/GetSpendingSummaryTool.js";
+import * as ListAccountsTool from "./tools/ListAccountsTool.js";
 
 function parseText(result: Awaited<ReturnType<typeof GetFinancialSnapshotTool.execute>>) {
   return JSON.parse(result.content[0].text);
@@ -27,6 +29,190 @@ function registerHandlers(api: unknown) {
 }
 
 describe("finance summary tools", () => {
+  it("builds monthly review anomalies without repeated baseline category scans", async () => {
+    let baselineFindCalls = 0;
+    const makeBaselineCategories = (groceriesActivity: number, diningActivity: number) => {
+      const categories = [
+        {
+          id: "cat-groceries",
+          name: "Groceries",
+          activity: groceriesActivity,
+          deleted: false,
+          hidden: false,
+        },
+        {
+          id: "cat-dining",
+          name: "Dining",
+          activity: diningActivity,
+          deleted: false,
+          hidden: false,
+        },
+      ] as any[];
+
+      categories.find = (...args: any[]) => {
+        baselineFindCalls += 1;
+        return Array.prototype.find.apply(categories, args);
+      };
+
+      return categories;
+    };
+
+    const api = {
+      plans: {
+        getPlans: vi.fn().mockResolvedValue({
+          data: {
+            plans: [{ id: "plan-1" }],
+            default_plan: { id: "plan-1" },
+          },
+        }),
+      },
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "txn-1",
+                date: "2026-03-15",
+                amount: -30000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-groceries",
+                category_name: "Groceries",
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn(async (_planId: string, month: string) => {
+          if (month === "2026-03-01") {
+            return {
+              data: {
+                month: {
+                  month: "2026-03-01",
+                  income: 500000,
+                  budgeted: 300000,
+                  activity: -120000,
+                  to_be_budgeted: 20000,
+                  age_of_money: 25,
+                  deleted: false,
+                  categories: [
+                    {
+                      id: "cat-groceries",
+                      name: "Groceries",
+                      activity: -45000,
+                      deleted: false,
+                      hidden: false,
+                    },
+                    {
+                      id: "cat-dining",
+                      name: "Dining",
+                      activity: -8000,
+                      deleted: false,
+                      hidden: false,
+                    },
+                  ],
+                },
+              },
+            };
+          }
+
+          if (month === "2026-02-01") {
+            return {
+              data: {
+                month: {
+                  month: "2026-02-01",
+                  deleted: false,
+                  categories: makeBaselineCategories(-12000, -7000),
+                },
+              },
+            };
+          }
+
+          return {
+            data: {
+              month: {
+                month: "2026-01-01",
+                deleted: false,
+                categories: makeBaselineCategories(-10000, -6000),
+              },
+            },
+          };
+        }),
+      },
+    };
+
+    const result = await GetMonthlyReviewTool.execute(
+      { planId: "plan-1", month: "2026-03-01", baselineMonths: 2, topN: 5 },
+      api as any,
+    );
+
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      month: "2026-03-01",
+      anomalies: [
+        expect.objectContaining({
+          category_id: "cat-groceries",
+          category_name: "Groceries",
+        }),
+      ],
+    });
+    expect(baselineFindCalls).toBe(0);
+  });
+
+  it("reuses low-churn account and month snapshots across repeated tool calls on the same API object", async () => {
+    const api = {
+      accounts: {
+        getAccounts: vi.fn().mockResolvedValue({
+          data: {
+            accounts: [
+              {
+                id: "acct-1",
+                name: "Checking",
+                type: "checking",
+                on_budget: true,
+                closed: false,
+                deleted: false,
+                balance: 320000,
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              income: 500000,
+              budgeted: 420000,
+              activity: -365000,
+              to_be_budgeted: 55000,
+              age_of_money: 42,
+              deleted: false,
+              categories: [],
+            },
+          },
+        }),
+      },
+    };
+
+    await GetFinancialSnapshotTool.execute(
+      { planId: "plan-1", month: "2026-03-01" },
+      api as any,
+    );
+    await GetFinancialSnapshotTool.execute(
+      { planId: "plan-1", month: "2026-03-01" },
+      api as any,
+    );
+    await ListAccountsTool.execute(
+      { planId: "plan-1" },
+      api as any,
+    );
+
+    expect(api.accounts.getAccounts).toHaveBeenCalledTimes(1);
+    expect(api.months.getPlanMonth).toHaveBeenCalledTimes(1);
+  });
+
   it("builds a compact financial snapshot for the requested month", async () => {
     const api = {
       accounts: {
