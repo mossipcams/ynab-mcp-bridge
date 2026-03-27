@@ -1,10 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { startHttpServer } from "./httpServer.js";
+import { startHttpServer } from "./httpTransport.js";
 import { setLoggerDestinationForTests } from "./logger.js";
 import {
   approveAuthorizationConsent,
@@ -101,6 +102,18 @@ describe("oauth broker persistence", () => {
 
     expect(secondAuthorizeResponse.status).toBe(302);
     expect(secondAuthorizeResponse.headers.get("location")).toContain("/authorize");
+  });
+
+  it("keeps broker runtime ownership in oauthRuntime", () => {
+    const oauthRuntimeSource = readFileSync(new URL("./oauthRuntime.ts", import.meta.url), "utf8");
+
+    expect(oauthRuntimeSource).toContain("export function createOAuthBroker");
+    expect(oauthRuntimeSource).toContain("export function installOAuthRoutes");
+    expect(oauthRuntimeSource).toContain("handleCallback");
+    expect(oauthRuntimeSource).toContain("handleConsent");
+    expect(oauthRuntimeSource).toContain("verifyAccessToken");
+    expect(oauthRuntimeSource).toContain('"/.well-known/oauth-protected-resource"');
+    expect(oauthRuntimeSource).toContain('reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope"');
   });
 
   it("logs callback failures through the shared oauth logger", async () => {

@@ -1,52 +1,34 @@
 import { getYnabApiRuntimeContext } from "../ynabApi.js";
-import { toPlanId } from "../ynabTypes.js";
 import { getErrorMessage } from "./errorUtils.js";
-function getApiConfiguredPlanId(api) {
-    return getYnabApiRuntimeContext(api)?.config.planId;
-}
-function getRuntimePlanIdOverride(api) {
-    return getYnabApiRuntimeContext(api)?.runtimePlanIdOverride;
-}
-function setRuntimePlanIdOverride(api, planId) {
-    const runtimeContext = getYnabApiRuntimeContext(api);
-    if (!runtimeContext) {
-        return;
+function _getPlanId(inputPlanId, configuredPlanId) {
+    const planId = inputPlanId?.trim() || configuredPlanId?.trim() || "";
+    if (!planId) {
+        throw new Error("No plan ID provided. Please provide a plan ID or set YNAB_PLAN_ID.");
     }
-    runtimeContext.runtimePlanIdOverride = planId;
+    return planId;
+}
+function getApiConfiguredPlanId(api) {
+    return getYnabApiRuntimeContext(api)?.config.planId?.trim();
 }
 function getConfiguredPlanId(inputPlanId, api, options) {
-    const explicitPlanId = toPlanId(inputPlanId);
+    const explicitPlanId = inputPlanId?.trim();
     if (explicitPlanId) {
         return explicitPlanId;
     }
-    const runtimePlanIdOverride = getRuntimePlanIdOverride(api);
-    if (!options.ignoreRuntimePlanIdOverride && runtimePlanIdOverride) {
-        return runtimePlanIdOverride;
-    }
     if (!options.ignoreConfiguredPlanId) {
-        return getApiConfiguredPlanId(api);
+        return getApiConfiguredPlanId(api) ?? "";
     }
-    return undefined;
+    return "";
 }
 function pickResolvedPlanId(plans, defaultPlanId, excludedPlanIds) {
-    const normalizedDefaultPlanId = toPlanId(defaultPlanId);
-    if (normalizedDefaultPlanId && !excludedPlanIds.has(normalizedDefaultPlanId)) {
-        return normalizedDefaultPlanId;
+    if (defaultPlanId && !excludedPlanIds.has(defaultPlanId)) {
+        return defaultPlanId;
     }
-    const remainingPlans = plans
-        .map((plan) => ({ ...plan, id: toPlanId(plan.id) }))
-        .filter((plan) => plan.id !== undefined)
-        .filter((plan) => !excludedPlanIds.has(plan.id));
+    const remainingPlans = plans.filter((plan) => !excludedPlanIds.has(plan.id));
     if (remainingPlans.length === 1) {
-        const [remainingPlan] = remainingPlans;
-        return remainingPlan?.id;
+        return remainingPlans[0]?.id;
     }
     return undefined;
-}
-function rememberRuntimePlanId(api, planId, inputPlanId) {
-    if (!inputPlanId) {
-        setRuntimePlanIdOverride(api, planId);
-    }
 }
 function isMissingPlanError(error) {
     const message = getErrorMessage(error).toLowerCase();
@@ -61,7 +43,6 @@ async function resolvePlanId(inputPlanId, api, options = {}) {
     const response = await api.plans.getPlans();
     const resolvedPlanId = pickResolvedPlanId(response.data.plans, response.data.default_plan?.id, excludedPlanIds);
     if (resolvedPlanId) {
-        rememberRuntimePlanId(api, resolvedPlanId, inputPlanId);
         return resolvedPlanId;
     }
     throw new Error("No plan ID provided. Please provide a plan ID, set YNAB_PLAN_ID, or configure a default YNAB plan.");
@@ -78,9 +59,7 @@ export async function withResolvedPlan(inputPlanId, api, operation) {
         const recoveredPlanId = await resolvePlanId(undefined, api, {
             excludePlanIds: [planId],
             ignoreConfiguredPlanId: true,
-            ignoreRuntimePlanIdOverride: true,
         });
-        rememberRuntimePlanId(api, recoveredPlanId);
         return operation(recoveredPlanId);
     }
 }

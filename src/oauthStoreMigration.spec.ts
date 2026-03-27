@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadPersistedOAuthState } from "./oauthStoreMigration.js";
+import { loadPersistedOAuthState } from "./grantPersistence.js";
 
 describe("oauth store migration", () => {
   it("loads current version-2 oauth state", () => {
@@ -62,7 +62,7 @@ describe("oauth store migration", () => {
     });
   });
 
-  it("drops legacy oauth state instead of migrating it", () => {
+  it("migrates legacy oauth state into the modular-monolith grant format", () => {
     const loaded = loadPersistedOAuthState({
       approvals: [],
       authorizationCodes: {
@@ -133,12 +133,20 @@ describe("oauth store migration", () => {
       version: 1,
     });
 
-    expect(loaded).toEqual({
-      approvals: [],
-      clientProfiles: {},
-      clients: {},
-      grants: {},
-      version: 2,
+    expect(loaded.version).toBe(2);
+    expect(loaded.clients["client-1"]?.client_name).toBe("Claude Web");
+    expect(Object.keys(loaded.grants)).toEqual(expect.arrayContaining([
+      "legacy-authorization:state-1",
+      "legacy-code:code-1",
+      "legacy-consent:consent-1",
+      "legacy-refresh:refresh-1",
+    ]));
+    expect(loaded.grants["legacy-consent:consent-1"]).toMatchObject({
+      clientId: "client-1",
+      consent: {
+        challenge: "consent-1",
+      },
+      scopes: ["openid", "profile"],
     });
   });
 });

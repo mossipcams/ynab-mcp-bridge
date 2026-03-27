@@ -5,7 +5,6 @@ import type { ClientProfileId } from "./clientProfiles/types.js";
 export type OAuthGrantUpstreamTokens = Omit<OAuthTokens, "access_token"> & {
   access_token?: string;
 };
-
 export type OAuthGrant = {
   authorizationCode?: {
     code: string;

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { compactObject, formatMilliunits, isTransferTransaction, isWithinMonthRange, normalizeMonthInput, } from "./financeToolUtils.js";
+import { compactObject, formatMilliunits, isWithinMonthRange, normalizeMonthInput, } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_budget_cleanup_summary";
 export const description = "Returns a compact cleanup punch-list for uncategorized, unapproved, uncleared, and overspent items.";
@@ -17,9 +17,7 @@ export async function execute(input, api) {
                 api.transactions.getTransactions(planId, month, undefined, undefined),
                 api.months.getPlanMonth(planId, month),
             ]);
-            const transactions = transactionsResponse.data.transactions.filter((transaction) => !transaction.deleted
-                && !isTransferTransaction(transaction)
-                && isWithinMonthRange(transaction.date, month, month));
+            const transactions = transactionsResponse.data.transactions.filter((transaction) => !transaction.deleted && isWithinMonthRange(transaction.date, month, month));
             const uncategorizedTransactions = transactions.filter((transaction) => !transaction.category_id);
             const unapprovedTransactions = transactions.filter((transaction) => !transaction.approved);
             const unclearedTransactions = transactions.filter((transaction) => transaction.cleared === "uncleared");

@@ -1,22 +1,52 @@
+/**
+ * Owns: OpenID/protected-resource metadata, bearer-auth middleware wiring, OAuth HTTP route registration hooks, consent-page handling, provider callbacks, token exchange orchestration, and OAuth event logging.
+ * Inputs/dependencies: OAuth auth config, grantLifecycle, grantPersistence, upstream OAuth adapter, local token service, Cloudflare compatibility middleware, and clientProfiles/.
+ * Outputs/contracts: createMcpAuthModule(...), createOAuthBroker(...), and OAuth runtime helpers consumed by HTTP transport wiring.
+ */
 import crypto from "node:crypto";
 
-import type { RequestHandler } from "express";
+import express, { type RequestHandler } from "express";
 import {
   InvalidRequestError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import { createOAuthMetadata, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { getEffectiveOAuthScopes, type RuntimeAuthConfig } from "./config.js";
+import type { ClientProfileId, DetectedClientProfile } from "./clientProfiles/types.js";
+import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
+import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { logAppEvent } from "./logger.js";
-import { createOAuthCore, type PendingConsent } from "./oauthCore.js";
-import { createOAuthStore } from "./oauthStore.js";
+import { createOAuthCore, type PendingConsent } from "./grantLifecycle.js";
+import { createOAuthStore } from "./grantPersistence.js";
 import { getRequestLogFields } from "./requestContext.js";
 import { getStringValue, isRecord } from "./typeUtils.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 
 type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
+type AuthDebugOptions = {
+  authMode?: "http" | "stdio" | "oauth" | "none";
+  authRequired?: boolean;
+};
+
+type InstallOAuthRoutesOptions = {
+  app: express.Express;
+  auth: OAuthAuthConfig;
+  cloudflareCompatibilityMiddleware: RequestHandler;
+  getCanonicalOAuthDiscoveryPath: (pathname: string, profileId: ClientProfileId) => string | undefined;
+  getPersistedOAuthProfileReason: (profileId: ClientProfileId) => string;
+  getRequestAuthDebugOptions: (req: Pick<express.Request, "path" | "url">) => AuthDebugOptions;
+  getRequestDebugDetails: (req: express.Request, options?: AuthDebugOptions) => Record<string, unknown>;
+  getRequestPath: (req: Pick<express.Request, "path" | "url">) => string;
+  isDirectUpstreamBearerToken: (req: Pick<express.Request, "headers">, auth: OAuthAuthConfig) => boolean;
+  jsonParser: RequestHandler;
+  logHttpDebug: (event: string, details: Record<string, unknown>) => void;
+  mcpAuthModule: ReturnType<typeof createMcpAuthModule>;
+  path: string;
+};
 
 function getConsentPageHeaders(authorizationUrl: string) {
   const authorizationOrigin = new URL(authorizationUrl).origin;
@@ -103,49 +133,13 @@ function getTokenResponseDebugDetails(tokens: OAuthTokens) {
     tokenResponseFields: Object.keys(tokens).sort(),
   };
 }
+
 function getBodyStringValue(body: unknown, key: string) {
   if (!isRecord(body)) {
     return undefined;
   }
 
   return getStringValue(body, key);
-}
-
-function getQueryStringValue(query: unknown, key: string) {
-  if (!isRecord(query)) {
-    return undefined;
-  }
-
-  return getStringValue(query, key);
-}
-
-function getCallbackRequestDetails(query: unknown) {
-  const upstreamState = getQueryStringValue(query, "state");
-  const upstreamError = getQueryStringValue(query, "error");
-  const upstreamErrorDescription = getQueryStringValue(query, "error_description");
-  const code = getQueryStringValue(query, "code");
-
-  return {
-    code,
-    upstreamError,
-    upstreamErrorDescription,
-    upstreamState,
-  };
-}
-
-async function exchangeAuthorizationCodeWithLogging(args: {
-  authorizationCode: string;
-  client: Parameters<OAuthServerProvider["exchangeAuthorizationCode"]>[0];
-  core: Pick<ReturnType<typeof createOAuthCore>, "exchangeAuthorizationCode">;
-  redirectUri: string | undefined;
-  resource: URL | undefined;
-}) {
-  return await args.core.exchangeAuthorizationCode(
-    args.client,
-    args.authorizationCode,
-    args.redirectUri,
-    args.resource,
-  );
 }
 
 export function createOAuthBroker(config: OAuthAuthConfig): {
@@ -294,17 +288,9 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     async challengeForAuthorizationCode(client, authorizationCode) {
       return await core.getAuthorizationCodeChallenge(client, authorizationCode);
     },
-    async exchangeAuthorizationCode(...args) {
-      const [client, authorizationCode, _codeVerifier, redirectUri, resource] = args;
-
+    async exchangeAuthorizationCode(client, authorizationCode, _codeVerifier, redirectUri, resource) {
       try {
-        const tokens = await exchangeAuthorizationCodeWithLogging({
-          authorizationCode,
-          client,
-          core,
-          redirectUri,
-          resource,
-        });
+        const tokens = await core.exchangeAuthorizationCode(client, authorizationCode, redirectUri, resource);
         logOAuthDebug("token.exchange.succeeded", {
           clientId: client.client_id,
           grantType: "authorization_code",
@@ -387,13 +373,12 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
 
   const handleCallback: RequestHandler = async (req, res, next) => {
     try {
-      const {
-        code,
-        upstreamError,
-        upstreamErrorDescription,
-        upstreamState,
-      } = getCallbackRequestDetails(req.query);
-      const hasCode = typeof code === "string" && code.length > 0;
+      const upstreamState = typeof req.query["state"] === "string" ? req.query["state"] : undefined;
+      const upstreamError = typeof req.query["error"] === "string" ? req.query["error"] : undefined;
+      const upstreamErrorDescription = typeof req.query["error_description"] === "string"
+        ? req.query["error_description"]
+        : undefined;
+      const hasCode = typeof req.query["code"] === "string" && req.query["code"].length > 0;
       const hasError = typeof upstreamError === "string";
       const hasState = typeof upstreamState === "string" && upstreamState.length > 0;
 
@@ -408,7 +393,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       }
 
       const result = await core.handleCallback({
-        code: hasCode ? code : undefined,
+        code: typeof req.query["code"] === "string" && req.query["code"].length > 0 ? req.query["code"] : undefined,
         error: upstreamError,
         errorDescription: upstreamErrorDescription,
         upstreamState,
@@ -444,4 +429,187 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     provider,
     handleCallback,
   };
+}
+
+function getOpenIdConfiguration(
+  auth: OAuthAuthConfig,
+  oauthBroker: ReturnType<typeof createOAuthBroker>,
+) {
+  const scopesSupported = getEffectiveOAuthScopes(auth.scopes);
+  const oauthMetadata = createOAuthMetadata({
+    issuerUrl: oauthBroker.getIssuerUrl(),
+    provider: oauthBroker.provider,
+    scopesSupported,
+  });
+
+  return {
+    authorization_endpoint: oauthMetadata.authorization_endpoint,
+    code_challenge_methods_supported: oauthMetadata.code_challenge_methods_supported,
+    grant_types_supported: oauthMetadata.grant_types_supported,
+    issuer: oauthMetadata.issuer,
+    registration_endpoint: oauthMetadata.registration_endpoint,
+    response_types_supported: oauthMetadata.response_types_supported,
+    scopes_supported: oauthMetadata.scopes_supported,
+    subject_types_supported: ["public"],
+    token_endpoint: oauthMetadata.token_endpoint,
+    token_endpoint_auth_methods_supported: oauthMetadata.token_endpoint_auth_methods_supported,
+  };
+}
+
+export function createMcpAuthModule(auth: OAuthAuthConfig) {
+  const oauthBroker = createOAuthBroker(auth);
+  const publicServerUrl = new URL(auth.publicUrl);
+  const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(publicServerUrl);
+  const scopesSupported = getEffectiveOAuthScopes(auth.scopes);
+  const router = express.Router();
+
+  router.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
+  router.post("/authorize/consent", express.urlencoded({ extended: false }), oauthBroker.handleConsent);
+  router.get("/.well-known/openid-configuration", (_req, res) => {
+    res.status(200).json(getOpenIdConfiguration(auth, oauthBroker));
+  });
+  router.use(mcpAuthRouter({
+    baseUrl: oauthBroker.getIssuerUrl(),
+    issuerUrl: oauthBroker.getIssuerUrl(),
+    provider: oauthBroker.provider,
+    resourceName: "YNAB MCP Bridge",
+    resourceServerUrl: publicServerUrl,
+    scopesSupported,
+  }));
+
+  return {
+    authMiddleware: requireBearerAuth({
+      requiredScopes: scopesSupported,
+      resourceMetadataUrl,
+      verifier: oauthBroker.provider,
+    }),
+    getClientCompatibilityProfile: oauthBroker.getClientCompatibilityProfile,
+    protectedResourceMetadata: {
+      authorization_servers: [oauthBroker.getIssuerUrl().href],
+      resource: publicServerUrl.href,
+      resource_name: "YNAB MCP Bridge",
+      scopes_supported: scopesSupported.length > 0 ? scopesSupported : undefined,
+    },
+    router,
+  };
+}
+
+export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
+  const {
+    app,
+    auth,
+    cloudflareCompatibilityMiddleware,
+    getCanonicalOAuthDiscoveryPath,
+    getPersistedOAuthProfileReason,
+    getRequestAuthDebugOptions,
+    getRequestDebugDetails,
+    getRequestPath,
+    isDirectUpstreamBearerToken,
+    jsonParser,
+    logHttpDebug,
+    mcpAuthModule,
+    path,
+  } = options;
+
+  app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
+    const resolvedProfile = getResolvedClientProfile(res.locals);
+
+    if (resolvedProfile?.profileId !== "chatgpt") {
+      next();
+      return;
+    }
+
+    res.status(200).json(mcpAuthModule.protectedResourceMetadata);
+  });
+
+  app.use((req, res, next) => {
+    const resolvedProfile = getResolvedClientProfile(res.locals);
+    const canonicalPath = getCanonicalOAuthDiscoveryPath(
+      getRequestPath(req),
+      resolvedProfile?.profileId ?? "generic",
+    );
+
+    if (canonicalPath) {
+      req.url = canonicalPath;
+    }
+
+    next();
+  });
+
+  app.use(mcpAuthModule.router);
+
+  app.use((req, res, next) => {
+    if (getRequestPath(req) === path && req.method === "POST") {
+      cloudflareCompatibilityMiddleware(req, res, (error?: unknown) => {
+        if (error) {
+          next(error);
+          return;
+        }
+
+        jsonParser(req, res, next);
+      });
+      return;
+    }
+
+    next();
+  });
+
+  app.use((req, res, next) => {
+    if (getRequestPath(req) !== path || req.method !== "POST") {
+      next();
+      return;
+    }
+
+    if (isDirectUpstreamBearerToken(req, auth)) {
+      delete req.headers.authorization;
+    }
+
+    res.once("finish", () => {
+      if (req.auth || (res.statusCode !== 401 && res.statusCode !== 403)) {
+        return;
+      }
+
+      logHttpDebug("request.rejected", {
+        ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+        reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope",
+      });
+    });
+
+    mcpAuthModule.authMiddleware(req, res, next);
+  });
+
+  app.use((req, res, next) => {
+    if (getRequestPath(req) !== path || req.method !== "POST" || !req.auth?.clientId) {
+      next();
+      return;
+    }
+
+    const persistedProfileId = mcpAuthModule.getClientCompatibilityProfile(req.auth.clientId);
+
+    if (!persistedProfileId) {
+      next();
+      return;
+    }
+
+    const persistedProfile: DetectedClientProfile = {
+      profileId: persistedProfileId,
+      reason: getPersistedOAuthProfileReason(persistedProfileId),
+    };
+    const resolvedProfile = getResolvedClientProfile(res.locals);
+
+    if (
+      resolvedProfile?.profileId !== persistedProfile.profileId ||
+      resolvedProfile.reason !== persistedProfile.reason
+    ) {
+      setResolvedClientProfile(res.locals, persistedProfile);
+      logClientProfileEvent("profile.detected", {
+        method: req.method ?? "GET",
+        path: getRequestPath(req),
+        profileId: persistedProfile.profileId,
+        reason: persistedProfile.reason,
+      });
+    }
+
+    next();
+  });
 }

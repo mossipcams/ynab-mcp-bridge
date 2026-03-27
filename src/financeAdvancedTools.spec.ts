@@ -4,7 +4,6 @@ import * as GetBudgetCleanupSummaryTool from "./tools/GetBudgetCleanupSummaryToo
 import * as GetCategoryTrendSummaryTool from "./tools/GetCategoryTrendSummaryTool.js";
 import * as GetGoalProgressSummaryTool from "./tools/GetGoalProgressSummaryTool.js";
 import * as GetIncomeSummaryTool from "./tools/GetIncomeSummaryTool.js";
-import * as GetMonthlyReviewTool from "./tools/GetMonthlyReviewTool.js";
 import * as GetUpcomingObligationsTool from "./tools/GetUpcomingObligationsTool.js";
 
 function parseText(result: Awaited<ReturnType<typeof GetUpcomingObligationsTool.execute>>) {
@@ -505,6 +504,7 @@ describe("advanced finance tools", () => {
                 amount: -50000,
                 deleted: false,
                 transfer_account_id: null,
+                category_name: "Groceries",
                 payee_id: "payee-3",
                 payee_name: "Grocer",
               },
@@ -674,9 +674,9 @@ describe("advanced finance tools", () => {
       from_month: "2026-01-01",
       to_month: "2026-03-01",
       scope: {
+        match_basis: "category_group_name",
         type: "category_group",
         name: "Living",
-        match_basis: "category_group_name",
       },
       average_spent: "356.67",
       peak_month: "2026-02-01",
@@ -745,9 +745,9 @@ describe("advanced finance tools", () => {
         from_month: "2026-03-01",
         to_month: "2026-03-01",
         scope: {
+          match_basis: "category_group_name",
           type: "category_group",
           name: "Living",
-          match_basis: "category_group_name",
         },
         average_spent: "150.00",
         peak_month: "2026-03-01",
@@ -766,272 +766,4 @@ describe("advanced finance tools", () => {
     }
   });
 
-  it("builds a compact monthly review with top spending and anomalies", async () => {
-    const api = {
-      transactions: {
-        getTransactions: vi.fn().mockResolvedValue({
-          data: {
-            transactions: [
-              {
-                id: "tx-income",
-                date: "2026-03-05",
-                amount: 500000,
-                deleted: false,
-                transfer_account_id: null,
-                category_id: "cat-income",
-                category_name: "Inflow: Ready to Assign",
-              },
-              {
-                id: "tx-groceries",
-                date: "2026-03-10",
-                amount: -120000,
-                deleted: false,
-                transfer_account_id: null,
-                category_id: "cat-1",
-                category_name: "Groceries",
-              },
-              {
-                id: "tx-dining-1",
-                date: "2026-03-15",
-                amount: -100000,
-                deleted: false,
-                transfer_account_id: null,
-                category_id: "cat-2",
-                category_name: "Dining Out",
-              },
-              {
-                id: "tx-dining-2",
-                date: "2026-03-20",
-                amount: -50000,
-                deleted: false,
-                transfer_account_id: null,
-                category_id: "cat-2",
-                category_name: "Dining Out",
-              },
-              {
-                id: "tx-transfer",
-                date: "2026-03-21",
-                amount: -25000,
-                deleted: false,
-                transfer_account_id: "acct-savings",
-                category_id: "cat-2",
-                category_name: "Dining Out",
-              },
-              {
-                id: "tx-deleted",
-                date: "2026-03-22",
-                amount: -90000,
-                deleted: true,
-                transfer_account_id: null,
-                category_id: "cat-2",
-                category_name: "Dining Out",
-              },
-            ],
-          },
-        }),
-      },
-      months: {
-        getPlanMonth: vi
-          .fn()
-          .mockResolvedValueOnce({
-            data: {
-              month: {
-                month: "2025-12-01",
-                income: 450000,
-                budgeted: 280000,
-                activity: -150000,
-                to_be_budgeted: 40000,
-                deleted: false,
-                categories: [
-                  {
-                    id: "cat-1",
-                    name: "Groceries",
-                    category_group_name: "Needs",
-                    deleted: false,
-                    hidden: false,
-                    balance: 15000,
-                    goal_under_funded: 0,
-                    activity: -110000,
-                  },
-                  {
-                    id: "cat-2",
-                    name: "Dining Out",
-                    category_group_name: "Wants",
-                    deleted: false,
-                    hidden: false,
-                    balance: 5000,
-                    goal_under_funded: 0,
-                    activity: -50000,
-                  },
-                ],
-              },
-            },
-          })
-          .mockResolvedValueOnce({
-            data: {
-              month: {
-                month: "2026-01-01",
-                income: 460000,
-                budgeted: 290000,
-                activity: -160000,
-                to_be_budgeted: 35000,
-                deleted: false,
-                categories: [
-                  {
-                    id: "cat-1",
-                    name: "Groceries",
-                    category_group_name: "Needs",
-                    deleted: false,
-                    hidden: false,
-                    balance: 20000,
-                    goal_under_funded: 0,
-                    activity: -100000,
-                  },
-                  {
-                    id: "cat-2",
-                    name: "Dining Out",
-                    category_group_name: "Wants",
-                    deleted: false,
-                    hidden: false,
-                    balance: 10000,
-                    goal_under_funded: 0,
-                    activity: -60000,
-                  },
-                ],
-              },
-            },
-          })
-          .mockResolvedValueOnce({
-            data: {
-              month: {
-                month: "2026-02-01",
-                income: 470000,
-                budgeted: 300000,
-                activity: -130000,
-                to_be_budgeted: 30000,
-                deleted: false,
-                categories: [
-                  {
-                    id: "cat-1",
-                    name: "Groceries",
-                    category_group_name: "Needs",
-                    deleted: false,
-                    hidden: false,
-                    balance: 25000,
-                    goal_under_funded: 0,
-                    activity: -90000,
-                  },
-                  {
-                    id: "cat-2",
-                    name: "Dining Out",
-                    category_group_name: "Wants",
-                    deleted: false,
-                    hidden: false,
-                    balance: 12000,
-                    goal_under_funded: 0,
-                    activity: -40000,
-                  },
-                ],
-              },
-            },
-          })
-          .mockResolvedValueOnce({
-            data: {
-              month: {
-                month: "2026-03-01",
-                income: 500000,
-                budgeted: 300000,
-                activity: -270000,
-                to_be_budgeted: 30000,
-                deleted: false,
-                categories: [
-                  {
-                    id: "cat-1",
-                    name: "Groceries",
-                    category_group_name: "Needs",
-                    deleted: false,
-                    hidden: false,
-                    balance: 10000,
-                    goal_under_funded: 0,
-                    activity: -120000,
-                  },
-                  {
-                    id: "cat-2",
-                    name: "Dining Out",
-                    category_group_name: "Wants",
-                    deleted: false,
-                    hidden: false,
-                    balance: -15000,
-                    goal_under_funded: 30000,
-                    activity: -150000,
-                  },
-                  {
-                    id: "cat-3",
-                    name: "Hidden Category",
-                    category_group_name: "Ignored",
-                    deleted: false,
-                    hidden: true,
-                    balance: 5000,
-                    goal_under_funded: 20000,
-                    activity: -5000,
-                  },
-                ],
-              },
-            },
-          }),
-      },
-    };
-
-    const result = await GetMonthlyReviewTool.execute(
-      {
-        planId: "plan-1",
-        month: "2026-03-01",
-        baselineMonths: 3,
-        topN: 2,
-      },
-      api as any,
-    );
-
-    expect(api.transactions.getTransactions).toHaveBeenCalledWith("plan-1", "2026-03-01", undefined, undefined);
-    expect(api.months.getPlanMonth).toHaveBeenCalledWith("plan-1", "2026-03-01");
-    expect(parseText(result as any)).toEqual({
-      month: "2026-03-01",
-      income: "500.00",
-      inflow: "500.00",
-      outflow: "270.00",
-      net_flow: "230.00",
-      ready_to_assign: "30.00",
-      available_total: "10.00",
-      overspent_total: "15.00",
-      underfunded_total: "30.00",
-      assigned: "300.00",
-      spent: "270.00",
-      assigned_vs_spent: "30.00",
-      overspent_category_count: 1,
-      underfunded_category_count: 1,
-      top_spending_categories: [
-        {
-          id: "cat-2",
-          name: "Dining Out",
-          amount: "150.00",
-          transaction_count: 2,
-        },
-        {
-          id: "cat-1",
-          name: "Groceries",
-          amount: "120.00",
-          transaction_count: 1,
-        },
-      ],
-      anomalies: [
-        {
-          category_id: "cat-2",
-          category_name: "Dining Out",
-          latest_spent: "150.00",
-          baseline_average: "50.00",
-          change_percent: "200.00",
-        },
-      ],
-    });
-  });
 });

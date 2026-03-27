@@ -281,7 +281,10 @@ function isDeploymentMode(value: string): value is DeploymentMode {
     value === "oauth-hardened";
 }
 
-function assertDeploymentModeCompatibility(deploymentMode: DeploymentMode, legacyAuthMode: ReturnType<typeof readLegacyAuthMode>) {
+function validateDeploymentModeCompatibility(
+  deploymentMode: DeploymentMode,
+  legacyAuthMode: "none" | "oauth" | undefined,
+): void {
   if (legacyAuthMode === "oauth" && deploymentMode === "authless") {
     throw new Error("MCP_DEPLOYMENT_MODE=authless is incompatible with MCP_AUTH_MODE=oauth.");
   }
@@ -300,7 +303,7 @@ function readDeploymentMode(args: string[], env: EnvConfig): DeploymentMode {
       throw new Error(`Unsupported deployment mode: ${deploymentMode}`);
     }
 
-    assertDeploymentModeCompatibility(deploymentMode, legacyAuthMode);
+    validateDeploymentModeCompatibility(deploymentMode, legacyAuthMode);
 
     return deploymentMode;
   }
@@ -387,24 +390,33 @@ function resolveRuntimeAuthConfig(args: string[], env: EnvConfig): RuntimeAuthCo
   };
 }
 
-function resolveListValue(cliValues: string[], envValues: string[] | undefined) {
-  return cliValues.length > 0 ? cliValues : (envValues ?? []);
-}
-
-function assertTransport(rawTransport: string): asserts rawTransport is RuntimeConfig["transport"] {
-  if (rawTransport !== "http" && rawTransport !== "stdio") {
-    throw new Error(`Unsupported transport: ${rawTransport}`);
-  }
-}
-
 export function assertBackendEnvironment(env: EnvConfig) {
   return assertYnabBackendEnvironment(env);
 }
 
+function parseTransport(value: string): RuntimeTransport {
+  if (value !== "http" && value !== "stdio") {
+    throw new Error(`Unsupported transport: ${value}`);
+  }
+
+  return value;
+}
+
+function getConfiguredList(
+  args: string[],
+  env: EnvConfig,
+  flagName: "--allowed-hosts" | "--allowed-origins",
+  envName: "MCP_ALLOWED_HOSTS" | "MCP_ALLOWED_ORIGINS",
+): string[] {
+  const flagValues = readCsvFlag(args, flagName);
+  const envValues = env[envName] ? parseCsv(env[envName]) : undefined;
+
+  return flagValues.length > 0 ? flagValues : (envValues ?? []);
+}
+
 export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeConfig {
   const rawTransport = readFlag(args, "--transport") ?? env["MCP_TRANSPORT"] ?? "http";
-
-  assertTransport(rawTransport);
+  const transport = parseTransport(rawTransport);
 
   const rawPort = readFlag(args, "--port") ?? env["MCP_PORT"] ?? "3000";
   const port = Number.parseInt(rawPort, 10);
@@ -413,20 +425,11 @@ export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeCon
     throw new Error(`Invalid port: ${rawPort}`);
   }
 
-  const allowedOrigins = readCsvFlag(args, "--allowed-origins");
-  const envAllowedOrigins = env["MCP_ALLOWED_ORIGINS"]
-    ? parseCsv(env["MCP_ALLOWED_ORIGINS"])
-    : undefined;
-  const allowedHosts = readCsvFlag(args, "--allowed-hosts");
-  const envAllowedHosts = env["MCP_ALLOWED_HOSTS"]
-    ? parseCsv(env["MCP_ALLOWED_HOSTS"])
-    : undefined;
-
-  const resolvedAllowedOrigins = resolveListValue(allowedOrigins, envAllowedOrigins);
-  const resolvedAllowedHosts = resolveListValue(allowedHosts, envAllowedHosts);
+  const resolvedAllowedOrigins = getConfiguredList(args, env, "--allowed-origins", "MCP_ALLOWED_ORIGINS");
+  const resolvedAllowedHosts = getConfiguredList(args, env, "--allowed-hosts", "MCP_ALLOWED_HOSTS");
   const auth = resolveRuntimeAuthConfig(args, env);
 
-  if (auth.mode === "oauth" && rawTransport !== "http") {
+  if (auth.mode === "oauth" && transport !== "http") {
     throw new Error("OAuth deployment modes require HTTP transport.");
   }
 
@@ -438,7 +441,7 @@ export function resolveRuntimeConfig(args: string[], env: EnvConfig): RuntimeCon
     allowedOrigins: resolvedAllowedOrigins,
     allowedHosts: resolvedAllowedHosts,
     auth,
-    transport: rawTransport,
+    transport,
     host: readFlag(args, "--host") ?? env["MCP_HOST"] ?? "127.0.0.1",
     path: readFlag(args, "--path") ?? env["MCP_PATH"] ?? "/mcp",
     port,

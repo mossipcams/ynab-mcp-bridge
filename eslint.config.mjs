@@ -17,9 +17,12 @@ const TYPE_CHECKED_FILES = [
 
 const TYPE_CHECKED_IGNORES = [
   ...NON_TYPED_TS_IGNORES,
-  "src/httpServer.ts",
+  "src/httpTransport.ts",
   "src/index.ts",
-  "src/server.ts",
+  "src/serverRuntime.ts",
+  "src/oauthRuntime.ts",
+  "src/grantPersistence.ts",
+  "src/grantLifecycle.ts",
   "src/stdioServer.ts",
 ];
 
@@ -184,7 +187,7 @@ export default [
     },
   },
   {
-    files: ["src/{config,server}.ts"],
+    files: ["src/{config,serverRuntime}.ts"],
     rules: {
       "@typescript-eslint/explicit-function-return-type": ["error", {
         allowExpressions: true,

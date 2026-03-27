@@ -3,14 +3,17 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("http server structure", () => {
-  it("delegates oauth route setup and mcp request handling to route-scoped modules", () => {
-    const source = readFileSync(new URL("./httpServer.ts", import.meta.url), "utf8");
+  it("keeps the HTTP runtime owned by httpTransport and oauthRuntime", () => {
+    const httpTransportSource = readFileSync(new URL("./httpTransport.ts", import.meta.url), "utf8");
+    const oauthRuntimeSource = readFileSync(new URL("./oauthRuntime.ts", import.meta.url), "utf8");
 
-    expect(source).toContain('from "./httpServerOAuthRoutes.js"');
-    expect(source).toContain('from "./httpServerIngress.js"');
-    expect(source).toContain('from "./httpServerTransportRoutes.js"');
-    expect(source).toContain("registerHttpServerIngress(");
-    expect(source).toContain("registerOAuthHttpRoutes(");
-    expect(source).toContain("registerMcpTransportRoutes(");
+    expect(httpTransportSource).toContain('from "./oauthRuntime.js"');
+    expect(httpTransportSource).toContain('from "./serverRuntime.js"');
+    expect(httpTransportSource).toContain("installOAuthRoutes(");
+    expect(httpTransportSource).toContain("export function installMcpPostRoute");
+    expect(httpTransportSource).toContain('reason: "invalid-session-header"');
+    expect(httpTransportSource).toContain('"transport.handoff"');
+
+    expect(oauthRuntimeSource).toContain("export function installOAuthRoutes");
   });
 });

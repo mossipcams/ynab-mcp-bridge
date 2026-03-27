@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   assertTransactionMonth,
   buildTransactionCollectionResult,
+  compareTransactions,
   transactionFields,
   toDisplayTransactions,
   type TransactionLike,
@@ -32,10 +33,11 @@ async function runTransactionCollectionTool<TInput extends TransactionProjection
       api,
       async (planId) => fetchTransactions(api, planId, normalizedInput),
     );
+    const sortedTransactions = [...transactions].sort((left, right) => compareTransactions(left, right, "date_desc"));
 
     return toTextResult({
       ...buildTransactionCollectionResult(
-        toDisplayTransactions(transactions),
+        toDisplayTransactions(sortedTransactions),
         normalizedInput,
         "transaction_count",
       ),

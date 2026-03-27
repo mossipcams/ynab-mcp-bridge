@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { registerServerTools } from "./server.js";
+import { registerServerTools } from "./serverRuntime.js";
 import * as GetBudgetHealthSummaryTool from "./tools/GetBudgetHealthSummaryTool.js";
 import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
 import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";

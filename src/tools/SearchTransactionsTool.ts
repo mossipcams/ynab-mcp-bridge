@@ -7,7 +7,13 @@ import {
 } from "./collectionToolUtils.js";
 import { compactObject } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
-import { toDisplayTransactions, transactionFields } from "./transactionToolUtils.js";
+import {
+  compareTransactions,
+  matchesTransactionFilters,
+  toDisplayTransactions,
+  transactionFields,
+  type TransactionSort,
+} from "../transactionQueryEngine.js";
 
 const sortableValues = [
   "date_asc",
@@ -15,21 +21,6 @@ const sortableValues = [
   "amount_asc",
   "amount_desc",
 ] as const;
-
-type SearchableTransaction = {
-  id: string;
-  date: string;
-  amount: number;
-  payee_id?: string | null;
-  payee_name?: string | null;
-  category_id?: string | null;
-  category_name?: string | null;
-  account_id?: string | null;
-  account_name?: string | null;
-  approved?: boolean | null;
-  cleared?: string | null;
-  transfer_account_id?: string | null;
-};
 
 export const name = "ynab_search_transactions";
 export const description =
@@ -53,50 +44,6 @@ export const inputSchema = {
   sort: z.enum(sortableValues).default("date_desc").describe("Sort order for matching transactions."),
 };
 
-function matchesFilters(
-  transaction: SearchableTransaction,
-  input: {
-    toDate?: string;
-    payeeId?: string;
-    accountId?: string;
-    categoryId?: string;
-    approved?: boolean;
-    cleared?: string;
-    minAmount?: number;
-    maxAmount?: number;
-    includeTransfers?: boolean;
-  },
-): boolean {
-  return [
-    input.includeTransfers !== false || !transaction.transfer_account_id,
-    !input.toDate || transaction.date <= input.toDate,
-    !input.payeeId || transaction.payee_id === input.payeeId,
-    !input.accountId || transaction.account_id === input.accountId,
-    !input.categoryId || transaction.category_id === input.categoryId,
-    input.approved === undefined || transaction.approved === input.approved,
-    !input.cleared || transaction.cleared === input.cleared,
-    input.minAmount === undefined || transaction.amount >= input.minAmount,
-    input.maxAmount === undefined || transaction.amount <= input.maxAmount,
-  ].every(Boolean);
-}
-
-function compareTransactions(
-  left: Pick<SearchableTransaction, "amount" | "date" | "id">,
-  right: Pick<SearchableTransaction, "amount" | "date" | "id">,
-  sort: (typeof sortableValues)[number],
-) {
-  switch (sort) {
-    case "date_asc":
-      return left.date.localeCompare(right.date) || left.id.localeCompare(right.id);
-    case "date_desc":
-      return right.date.localeCompare(left.date) || left.id.localeCompare(right.id);
-    case "amount_asc":
-      return left.amount - right.amount || right.date.localeCompare(left.date);
-    case "amount_desc":
-      return right.amount - left.amount || right.date.localeCompare(left.date);
-  }
-}
-
 export async function execute(
   input: {
     planId?: string;
@@ -114,13 +61,13 @@ export async function execute(
     offset?: number;
     includeIds?: boolean;
     fields?: Array<(typeof transactionFields)[number]>;
-    sort?: (typeof sortableValues)[number];
+    sort?: TransactionSort;
   },
   api: ynab.API,
 ) {
   try {
     const fromDate = input.fromDate;
-    const sort = input.sort ?? "date_desc";
+    const sort: TransactionSort = input.sort ?? "date_desc";
 
     const response = await withResolvedPlan(input.planId, api, async (planId) => api.transactions.getTransactions(
       planId,
@@ -131,7 +78,7 @@ export async function execute(
 
     const matchingTransactions = response.data.transactions
       .filter((transaction) => !transaction.deleted)
-      .filter((transaction) => matchesFilters(transaction, input))
+      .filter((transaction) => matchesTransactionFilters(transaction, input))
       .sort((left, right) => compareTransactions(left, right, sort));
     const transactions = toDisplayTransactions(matchingTransactions);
 

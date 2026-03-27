@@ -28,8 +28,8 @@ export const codexProfile = {
         return undefined;
     },
     matchesPreAuth: (context) => Boolean(codexProfile.detectPreAuth?.(context)),
-    matchesInitialize: (clientInfo) => Boolean(isRecord(clientInfo) &&
-        getStringValue(clientInfo, "name")?.toLowerCase().includes("codex")),
+    matchesInitialize: (clientInfo) => (isRecord(clientInfo) &&
+        getStringValue(clientInfo, "name")?.toLowerCase().includes("codex") === true),
     oauth: {
         ...genericProfile.oauth,
         discoveryPathVariants: [

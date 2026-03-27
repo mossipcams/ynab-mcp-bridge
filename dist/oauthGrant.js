@@ -1,33 +1,13 @@
 export function normalizeScopes(scopes) {
     return [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))].sort();
 }
-export function minimizeUpstreamTokens(tokens) {
-    if (!tokens) {
-        return undefined;
-    }
-    const { access_token: _accessToken, ...remainingTokens } = tokens;
-    const minimizedTokens = {
-        token_type: remainingTokens.token_type,
-    };
-    if (remainingTokens.expires_in !== undefined) {
-        minimizedTokens.expires_in = remainingTokens.expires_in;
-    }
-    if (remainingTokens.refresh_token !== undefined) {
-        minimizedTokens.refresh_token = remainingTokens.refresh_token;
-    }
-    if (remainingTokens.scope !== undefined) {
-        minimizedTokens.scope = remainingTokens.scope;
-    }
-    return minimizedTokens;
-}
 export function normalizeGrant(grant) {
-    const { subject: _subject, upstreamTokens, ...normalizedGrant } = grant;
+    const { subject: _subject, ...normalizedGrant } = grant;
     const principalId = grant.principalId ?? grant.subject;
     return {
         ...normalizedGrant,
         principalId,
         scopes: normalizeScopes(grant.scopes),
-        ...(upstreamTokens ? { upstreamTokens: minimizeUpstreamTokens(upstreamTokens) } : {}),
     };
 }
 export function getGrantExpiry(grant) {

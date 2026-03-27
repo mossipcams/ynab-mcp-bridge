@@ -9,9 +9,12 @@
     "**/*.test.ts",
     "**/*.spec.ts",
     "**/*.contract.ts",
-    "src/httpServer.ts",
+    "src/httpTransport.ts",
     "src/index.ts",
-    "src/server.ts",
+    "src/serverRuntime.ts",
+    "src/oauthRuntime.ts",
+    "src/grantPersistence.ts",
+    "src/grantLifecycle.ts",
     "src/stdioServer.ts"
   ]
 }

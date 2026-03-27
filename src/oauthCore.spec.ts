@@ -1,12 +1,21 @@
 import { InvalidGrantError, InvalidRequestError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { ClientProfileId } from "./clientProfiles/types.js";
-import { createOAuthCore } from "./oauthCore.js";
+import { createOAuthCore } from "./grantLifecycle.js";
 import type { OAuthGrant } from "./oauthGrant.js";
 
 describe("createOAuthCore", () => {
+  it("keeps lifecycle ownership in grantLifecycle", () => {
+    const grantLifecycleSource = readFileSync(new URL("./grantLifecycle.ts", import.meta.url), "utf8");
+
+    expect(grantLifecycleSource).toContain("export function createOAuthCore");
+    expect(grantLifecycleSource).toContain("exchangeAuthorizationCode");
+    expect(grantLifecycleSource).toContain("exchangeRefreshToken");
+  });
+
   function createStore() {
     const clients = new Map<string, OAuthClientInformationFull>();
     const clientProfiles = new Map<string, ClientProfileId>();

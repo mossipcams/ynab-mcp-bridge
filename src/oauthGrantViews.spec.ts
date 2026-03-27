@@ -5,7 +5,7 @@ import {
   toPendingAuthorizationRecord,
   toPendingConsentRecord,
   toRefreshTokenRecord,
-} from "./oauthGrantViews.js";
+} from "./grantPersistence.js";
 
 describe("oauth grant views", () => {
   const grant = {
@@ -39,7 +39,7 @@ describe("oauth grant views", () => {
       expiresAt: 1_700_000_200_000,
       token: "refresh-1",
     },
-  } as const;
+  };
 
   it("projects shared pending consent and pending authorization records from a grant", () => {
     expect(toPendingConsentRecord(grant)).toEqual({

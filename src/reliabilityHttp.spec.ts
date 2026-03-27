@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { startHttpServer } from "./httpServer.js";
+import { startHttpServer } from "./httpTransport.js";
 import type { ReliabilityRunSummary } from "./reliabilityRunner.js";
 import {
   executeReliabilityHttpCli,

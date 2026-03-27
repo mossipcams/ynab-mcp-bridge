@@ -1,11 +1,12 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { OAuthGrant } from "./oauthGrant.js";
-import { createOAuthStore } from "./oauthStore.js";
+import { createOAuthStore } from "./grantPersistence.js";
 
 describe("oauth store", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -15,6 +16,14 @@ describe("oauth store", () => {
       const cleanup = cleanups.pop();
       await cleanup?.();
     }
+  });
+
+  it("keeps persistence ownership in grantPersistence", () => {
+    const grantPersistenceSource = readFileSync(new URL("./grantPersistence.ts", import.meta.url), "utf8");
+
+    expect(grantPersistenceSource).toContain("export function createOAuthStore");
+    expect(grantPersistenceSource).toContain("migrateLegacyState");
+    expect(grantPersistenceSource).toContain("parseGrants");
   });
 
   it("drops expired consent, authorization, code, and refresh records when reloaded", async () => {

@@ -6,7 +6,7 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
-import { createMcpAuthModule } from "./mcpAuthServer.js";
+import { createMcpAuthModule } from "./oauthRuntime.js";
 import { createCloudflareOAuthAuth } from "./oauthTestHelpers.js";
 
 describe("createCloudflareAccessCompatibilityMiddleware", () => {

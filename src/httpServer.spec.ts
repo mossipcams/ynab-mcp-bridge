@@ -2,10 +2,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { readFileSync } from "node:fs";
 import { createServer as createNodeHttpServer, request as httpRequest } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { startHttpServer } from "./httpServer.js";
+import { startHttpServer } from "./httpTransport.js";
 import {
   approveAuthorizationConsent,
   createCloudflareOAuthAuth,
@@ -353,7 +354,7 @@ describe("startHttpServer", () => {
       details.jsonRpcMethod === "initialize" &&
       details.userAgent === "chatgpt" &&
       details.sessionId === undefined &&
-      details.cleanup === false
+      details.cleanup === true
     ))).toBeTruthy();
     expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
       details.path === "/mcp" &&
@@ -863,7 +864,7 @@ describe("startHttpServer", () => {
     });
 
     expect(initializeResponse.status).toBe(200);
-    expect(initializeResponse.headers.get("mcp-session-id")).toBeTruthy();
+    expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
 
     const streamResponse = await fetch(httpServer.url, {
       headers: {
@@ -874,10 +875,10 @@ describe("startHttpServer", () => {
     });
 
     expect(streamResponse.status).toBe(405);
-    expect(streamResponse.headers.get("allow")).toBe("POST, DELETE");
+    expect(streamResponse.headers.get("allow")).toBe("POST");
   });
 
-  it("returns a JSON initialize response with an MCP session id", async () => {
+  it("returns a JSON initialize response without creating an MCP session", async () => {
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
@@ -912,7 +913,7 @@ describe("startHttpServer", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
-    expect(response.headers.get("mcp-session-id")).toBeTruthy();
+    expect(response.headers.get("mcp-session-id")).toBeNull();
     await expect(response.json()).resolves.toMatchObject({
       jsonrpc: "2.0",
       id: 1,
@@ -955,247 +956,6 @@ describe("startHttpServer", () => {
     await expect(response.text()).resolves.toContain("\"content\"");
   });
 
-  it("issues an MCP session id on initialize and accepts follow-up requests with that session id", async () => {
-    const httpServer = await startHttpServer({
-      ynab,
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      port: 0,
-      path: "/mcp",
-    });
-    cleanups.push(() => httpServer.close());
-
-    const initializeResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: LATEST_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: {
-            name: "stateful-session-client",
-            version: "1.0.0",
-          },
-        },
-      }),
-    });
-
-    expect(initializeResponse.status).toBe(200);
-    const sessionId = initializeResponse.headers.get("mcp-session-id");
-    expect(sessionId).toBeTruthy();
-
-    const followUpResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    expect(followUpResponse.status).toBe(200);
-    expect(followUpResponse.headers.get("mcp-session-id")).toBe(sessionId);
-    await expect(followUpResponse.text()).resolves.toContain("\"ynab_get_mcp_version\"");
-  });
-
-  it("rejects unknown MCP session ids for non-initialize requests", async () => {
-    const httpServer = await startHttpServer({
-      ynab,
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      port: 0,
-      path: "/mcp",
-    });
-    cleanups.push(() => httpServer.close());
-
-    const response = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        "Mcp-Session-Id": "unknown-session-id",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      jsonrpc: "2.0",
-      error: {
-        code: -32001,
-        message: "Session not found",
-      },
-      id: null,
-    });
-  });
-
-  it("expires idle MCP sessions and rejects follow-up requests after the timeout", async () => {
-    const httpServer = await startHttpServer({
-      ynab,
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      port: 0,
-      path: "/mcp",
-      sessionIdleTimeoutMs: 25,
-    } as Parameters<typeof startHttpServer>[0]);
-    cleanups.push(() => httpServer.close());
-
-    const initializeResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: LATEST_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: {
-            name: "idle-expiry-client",
-            version: "1.0.0",
-          },
-        },
-      }),
-    });
-
-    const sessionId = initializeResponse.headers.get("mcp-session-id");
-    expect(sessionId).toBeTruthy();
-
-    await new Promise((resolve) => {
-      setTimeout(resolve, 60);
-    });
-
-    const followUpResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    expect(followUpResponse.status).toBe(404);
-    await expect(followUpResponse.json()).resolves.toEqual({
-      jsonrpc: "2.0",
-      error: {
-        code: -32001,
-        message: "Session not found",
-      },
-      id: null,
-    });
-  });
-
-  it("terminates an issued MCP session with DELETE and rejects later requests for that session", async () => {
-    const httpServer = await startHttpServer({
-      ynab,
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      port: 0,
-      path: "/mcp",
-    });
-    cleanups.push(() => httpServer.close());
-
-    const initializeResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: LATEST_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: {
-            name: "delete-session-client",
-            version: "1.0.0",
-          },
-        },
-      }),
-    });
-
-    const sessionId = initializeResponse.headers.get("mcp-session-id");
-    expect(sessionId).toBeTruthy();
-
-    const deleteResponse = await fetch(httpServer.url, {
-      method: "DELETE",
-      headers: {
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
-      },
-    });
-
-    expect(deleteResponse.status).toBe(200);
-
-    const followUpResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    expect(followUpResponse.status).toBe(404);
-    await expect(followUpResponse.json()).resolves.toEqual({
-      jsonrpc: "2.0",
-      error: {
-        code: -32001,
-        message: "Session not found",
-      },
-      id: null,
-    });
-  });
-
   it("keeps authless probing and MCP transport signals consistent for remote clients", async () => {
     const httpServer = await startHttpServer({
       ynab,
@@ -1225,7 +985,7 @@ describe("startHttpServer", () => {
     });
 
     expect(getResponse.status).toBe(405);
-    expect(getResponse.headers.get("allow")).toBe("POST, DELETE");
+    expect(getResponse.headers.get("allow")).toBe("POST");
     await expect(getResponse.json()).resolves.toEqual({
       jsonrpc: "2.0",
       error: {
@@ -1259,7 +1019,7 @@ describe("startHttpServer", () => {
     });
 
     expect(initializeResponse.status).toBe(200);
-    expect(initializeResponse.headers.get("mcp-session-id")).toBeTruthy();
+    expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
     expect(initializeResponse.headers.get("content-type")).toContain("application/json");
   });
 
@@ -1285,7 +1045,7 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(405);
-    expect(response.headers.get("allow")).toBe("POST, DELETE");
+    expect(response.headers.get("allow")).toBe("POST");
     await expect(response.json()).resolves.toEqual({
       jsonrpc: "2.0",
       error: {
@@ -1410,7 +1170,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("issues a fresh session on initialize even when stale session headers are supplied", async () => {
+  it("ignores stale session headers on initialize and later requests", async () => {
     const httpServer = await startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
@@ -1445,9 +1205,7 @@ describe("startHttpServer", () => {
     });
 
     expect(initializeResponse.status).toBe(200);
-    const issuedSessionId = initializeResponse.headers.get("mcp-session-id");
-    expect(issuedSessionId).toBeTruthy();
-    expect(issuedSessionId).not.toBe("stale-session-id");
+    expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
 
     const response = await fetch(httpServer.url, {
       method: "POST",
@@ -1466,15 +1224,9 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      jsonrpc: "2.0",
-      error: {
-        code: -32001,
-        message: "Session not found",
-      },
-      id: null,
-    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("mcp-session-id")).toBeNull();
+    await expect(response.text()).resolves.toContain("\"name\":\"ynab_get_mcp_version\"");
   });
 
   it("returns 404 for non-MCP paths", async () => {
@@ -1517,7 +1269,7 @@ describe("startHttpServer", () => {
     const firstTransport = new StreamableHTTPClientTransport(new URL(httpServer.url));
 
     await firstClient.connect(firstTransport);
-    expect(firstTransport.sessionId).toBeTruthy();
+    expect(firstTransport.sessionId).toBeUndefined();
 
     const secondClient = new Client({
       name: "ynab-mcp-bridge-test-2",
@@ -1527,113 +1279,10 @@ describe("startHttpServer", () => {
 
     await secondClient.connect(secondTransport);
 
-    expect(secondTransport.sessionId).toBeTruthy();
-    expect(secondTransport.sessionId).not.toBe(firstTransport.sessionId);
+    expect(secondTransport.sessionId).toBeUndefined();
 
     await firstClient.close();
     await secondClient.close();
-  });
-
-  it("reuses one issued session across repeated ChatGPT-style tool calls", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const httpServer = await startHttpServer({
-      ynab,
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      port: 0,
-      path: "/mcp",
-    });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
-
-    const initializeResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        "User-Agent": "openai-mcp/1.0.0",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: LATEST_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: {
-            name: "chatgpt-reuse-client",
-            version: "1.0.0",
-          },
-        },
-      }),
-    });
-
-    const sessionId = initializeResponse.headers.get("mcp-session-id");
-    expect(sessionId).toBeTruthy();
-
-    const listResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        "Mcp-Session-Id": sessionId!,
-        "User-Agent": "openai-mcp/1.0.0",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    expect(listResponse.status).toBe(200);
-
-    const callResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        "Mcp-Session-Id": sessionId!,
-        "User-Agent": "openai-mcp/1.0.0",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 3,
-        method: "tools/call",
-        params: {
-          name: "ynab_get_mcp_version",
-          arguments: {},
-        },
-      }),
-    });
-
-    expect(callResponse.status).toBe(200);
-
-    const chatgptSessionHandshakes = consoleErrorSpy.mock.calls.filter((call) => {
-      const structuredEntry = getStructuredLogEntry(call);
-
-      if (!structuredEntry) {
-        return false;
-      }
-
-      return structuredEntry.scope === "http" &&
-        structuredEntry.event === "transport.handoff" &&
-        structuredEntry.userAgent === "chatgpt" &&
-        structuredEntry.sessionId === sessionId &&
-        structuredEntry.cleanup === false &&
-        (structuredEntry.jsonRpcMethod === "tools/list" || structuredEntry.jsonRpcMethod === "tools/call");
-    });
-
-    expect(chatgptSessionHandshakes).toHaveLength(2);
   });
 
   it("logs the JSON-RPC method for a sessionless tools/call request", async () => {
@@ -1884,6 +1533,19 @@ describe("startHttpServer", () => {
       id: null,
     });
     expect(findLogCall(consoleErrorSpy, "request.error")).toBeUndefined();
+  });
+
+  it("routes request parsing, session handling, and top-level HTTP errors through httpTransport", () => {
+    const httpTransportSource = readFileSync(new URL("./httpTransport.ts", import.meta.url), "utf8");
+
+    expect(httpTransportSource).toContain("const jsonParser = express.json()");
+    expect(httpTransportSource).toContain("writeParseError(");
+    expect(httpTransportSource).toContain("writePayloadTooLarge(");
+    expect(httpTransportSource).toContain("writeInternalServerError(");
+    expect(httpTransportSource).toContain("const errorHandler: ErrorRequestHandler =");
+    expect(httpTransportSource).toContain("export function installMcpPostRoute");
+    expect(httpTransportSource).toContain('"transport.handoff"');
+    expect(httpTransportSource).toContain('reason: "invalid-session-header"');
   });
 
   it("allows the started HTTP server to be closed more than once", async () => {
@@ -3016,367 +2678,6 @@ describe("startHttpServer", () => {
     expect(tokenRequestDetails?.requestId).not.toBe("");
     expect(refreshFailedDetails?.correlationId).toBe(correlationId);
     expect(refreshFailedDetails?.requestId).toBe(tokenRequestDetails?.requestId);
-  });
-
-  it("reuses a persisted oauth client profile on token and authenticated mcp requests when later hints are weak", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const upstream = await startUpstreamOAuthServer(cleanups);
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createCloudflareOAuthAuth({
-        authorizationUrl: upstream.authorizationUrl,
-        issuer: upstream.issuer,
-        jwksUrl: upstream.jwksUrl,
-        tokenUrl: upstream.tokenUrl,
-      }),
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
-
-    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        client_name: "ChatGPT Web",
-        grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://chatgpt.com/oauth/callback"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-      }),
-    });
-
-    expect(registrationResponse.status).toBe(201);
-    const registration = await registrationResponse.json() as {
-      client_id: string;
-    };
-    const codeVerifier = "chatgpt-profile-persist-123456789";
-    const codeChallenge = createCodeChallenge(codeVerifier);
-
-    const authorizeResponse = await fetch(new URL(
-      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://chatgpt.com/oauth/callback")}&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-    });
-
-    expect(authorizeResponse.status).toBe(200);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    expect(consentResponse.status).toBe(302);
-    const upstreamState = new URL(consentResponse.headers.get("location")!, httpServer.url).searchParams.get("state");
-
-    const callbackResponse = await fetch(new URL(
-      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-    });
-    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
-
-    const tokenResponse = await fetch(new URL("/token", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        client_id: registration.client_id,
-        code: localAuthorizationCode!,
-        code_verifier: codeVerifier,
-        grant_type: "authorization_code",
-        redirect_uri: "https://chatgpt.com/oauth/callback",
-        resource: "https://mcp.example.com/mcp",
-      }),
-    });
-
-    expect(tokenResponse.status).toBe(200);
-    const tokens = await tokenResponse.json() as {
-      access_token: string;
-    };
-
-    const mcpResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        Authorization: `Bearer ${tokens.access_token}`,
-        "Content-Type": "application/json",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    expect(mcpResponse.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/token" &&
-      details.method === "POST" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "oauth-client-profile:chatgpt"
-    ))).toBeTruthy();
-    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
-      details.path === "/mcp" &&
-      details.method === "POST" &&
-      details.jsonRpcMethod === "tools/list" &&
-      details.authClientId === registration.client_id &&
-      details.profileId === "chatgpt" &&
-      details.profileReason === "oauth-client-profile:chatgpt"
-    ))).toBeTruthy();
-  });
-
-  it("logs ChatGPT for OpenAI-style OAuth discovery and broker routes when chatgpt user agents drive the flow", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const metadataUserAgent = "chatgpt-web/1.0";
-    const authorizeUserAgent = "chatgpt-browser/1.0";
-    const callbackUserAgent = "chatgpt-callback/1.0";
-    const tokenUserAgent = "chatgpt-token-client/1.0";
-    const upstream = await startUpstreamOAuthServer(cleanups);
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createCloudflareOAuthAuth({
-        authorizationUrl: upstream.authorizationUrl,
-        issuer: upstream.issuer,
-        jwksUrl: upstream.jwksUrl,
-        tokenUrl: upstream.tokenUrl,
-      }),
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
-
-    const metadataResponse = await fetch(new URL("/.well-known/openid-configuration", httpServer.url), {
-      headers: {
-        "User-Agent": metadataUserAgent,
-      },
-    });
-
-    expect(metadataResponse.status).toBe(200);
-
-    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        client_name: "ChatGPT Web",
-        grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://chatgpt.com/oauth/callback"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-      }),
-    });
-
-    expect(registrationResponse.status).toBe(201);
-    const registration = await registrationResponse.json() as {
-      client_id: string;
-    };
-    const codeVerifier = "chatgpt-code-verifier-123456789";
-    const codeChallenge = createCodeChallenge(codeVerifier);
-
-    const authorizeResponse = await fetch(new URL(
-      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://chatgpt.com/oauth/callback")}&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        "User-Agent": authorizeUserAgent,
-      },
-    });
-
-    expect(authorizeResponse.status).toBe(200);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    expect(consentResponse.status).toBe(302);
-    const consentLocation = consentResponse.headers.get("location");
-    expect(consentLocation).toBeTruthy();
-    const upstreamState = new URL(consentLocation!, httpServer.url).searchParams.get("state");
-
-    const callbackResponse = await fetch(new URL(
-      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        "User-Agent": callbackUserAgent,
-      },
-    });
-    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
-
-    const tokenResponse = await fetch(new URL("/token", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": tokenUserAgent,
-      },
-      body: new URLSearchParams({
-        client_id: registration.client_id,
-        code: localAuthorizationCode!,
-        code_verifier: codeVerifier,
-        grant_type: "authorization_code",
-        redirect_uri: "https://chatgpt.com/oauth/callback",
-        resource: "https://mcp.example.com/mcp",
-      }),
-    });
-
-    expect(tokenResponse.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/.well-known/openid-configuration" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/authorize" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/oauth/callback" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/token" &&
-      details.method === "POST" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-  });
-
-  it("logs Codex for OAuth discovery aliases and broker routes when codex user agents drive the flow", async () => {
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const discoveryUserAgent = "OpenAI Codex/0.1.0";
-    const authorizeUserAgent = "OpenAI Codex Browser/0.1.0";
-    const callbackUserAgent = "OpenAI Codex Callback/0.1.0";
-    const tokenUserAgent = "OpenAI Codex Token/0.1.0";
-    const upstream = await startUpstreamOAuthServer(cleanups);
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createCloudflareOAuthAuth({
-        authorizationUrl: upstream.authorizationUrl,
-        issuer: upstream.issuer,
-        jwksUrl: upstream.jwksUrl,
-        tokenUrl: upstream.tokenUrl,
-      }),
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(async () => {
-      consoleErrorSpy.mockRestore();
-      await httpServer.close();
-    });
-
-    const discoveryResponse = await fetch(new URL("/.well-known/oauth-authorization-server/sse", httpServer.url), {
-      headers: {
-        "User-Agent": discoveryUserAgent,
-      },
-    });
-
-    expect(discoveryResponse.status).toBe(200);
-
-    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        client_name: "OpenAI Codex",
-        grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://codex.openai.com/oauth/callback"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-      }),
-    });
-
-    expect(registrationResponse.status).toBe(201);
-    const registration = await registrationResponse.json() as {
-      client_id: string;
-    };
-    const codeVerifier = "codex-code-verifier-123456789";
-    const codeChallenge = createCodeChallenge(codeVerifier);
-
-    const authorizeResponse = await fetch(new URL(
-      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://codex.openai.com/oauth/callback")}&response_type=code&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        "User-Agent": authorizeUserAgent,
-      },
-    });
-
-    expect(authorizeResponse.status).toBe(200);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    expect(consentResponse.status).toBe(302);
-    const consentLocation = consentResponse.headers.get("location");
-    expect(consentLocation).toBeTruthy();
-    const upstreamState = new URL(consentLocation!, httpServer.url).searchParams.get("state");
-
-    const callbackResponse = await fetch(new URL(
-      `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        "User-Agent": callbackUserAgent,
-      },
-    });
-    const localAuthorizationCode = new URL(callbackResponse.headers.get("location")!).searchParams.get("code");
-
-    const tokenResponse = await fetch(new URL("/token", httpServer.url), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": tokenUserAgent,
-      },
-      body: new URLSearchParams({
-        client_id: registration.client_id,
-        code: localAuthorizationCode!,
-        code_verifier: codeVerifier,
-        grant_type: "authorization_code",
-        redirect_uri: "https://codex.openai.com/oauth/callback",
-        resource: "https://mcp.example.com/mcp",
-      }),
-    });
-
-    expect(tokenResponse.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/.well-known/oauth-authorization-server/sse" &&
-      details.profileId === "codex"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/authorize" &&
-      details.profileId === "codex" &&
-      details.reason === "user-agent:codex"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/oauth/callback" &&
-      details.profileId === "codex" &&
-      details.reason === "user-agent:codex"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/token" &&
-      details.method === "POST" &&
-      details.profileId === "codex" &&
-      details.reason === "user-agent:codex"
-    ))).toBeTruthy();
   });
 
   it("reuses a persisted oauth client profile on token and authenticated mcp requests when later hints are weak", async () => {

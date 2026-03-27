@@ -12,8 +12,7 @@
     "noImplicitOverride": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "preserveSymlinks": true
+    "forceConsistentCasingInFileNames": true
   },
   "include": [
     "src/**/*"
