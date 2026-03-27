@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
 import { decodeJwt } from "jose";
+import type { API } from "ynab";
 import {
   hostHeaderValidation,
   localhostHostValidation,
@@ -44,6 +45,7 @@ import {
 import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
 import { createServer, getDiscoveryResourceDocument, getDiscoveryResourceSummaries } from "./serverRuntime.js";
 import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
+import { createYnabApi } from "./ynabApi.js";
 
 type HttpServerOptions = {
   allowedHosts?: string[];
@@ -53,6 +55,11 @@ type HttpServerOptions = {
   path?: string;
   port?: number;
   ynab: YnabConfig;
+};
+
+type HttpServerDependencies = {
+  createApi?: (config: YnabConfig) => API | object;
+  onManagedRequestCreated?: () => void;
 };
 
 type StartedHttpServer = {
@@ -620,11 +627,11 @@ function isPayloadTooLargeError(error: unknown) {
     );
 }
 
-async function createManagedRequest(config: YnabConfig, options: {
+async function createManagedRequest(config: YnabConfig, api: API | object, options: {
   discoveryResourceBaseUrl?: string;
 }) {
   const discoveryResources = getDiscoveryResourceSummaries(options);
-  const mcpServer = createServer(config, undefined, options);
+  const mcpServer = createServer(config, api as API, options);
   const transport = new StreamableHTTPServerTransport({
     enableJsonResponse: true,
   });
@@ -855,7 +862,10 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
   });
 }
 
-export async function startHttpServer(options: HttpServerOptions): Promise<StartedHttpServer> {
+export async function startHttpServer(
+  options: HttpServerOptions,
+  dependencies: HttpServerDependencies = {},
+): Promise<StartedHttpServer> {
   const allowedHosts = options.allowedHosts ?? [];
   const auth = options.auth ?? { deployment: "authless", mode: "none" };
   const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
@@ -863,6 +873,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
   const path = options.path ?? "/mcp";
   const port = options.port ?? 3000;
   const ynab = assertYnabConfig(options.ynab);
+  const sharedApi = dependencies.createApi?.(ynab) ?? createYnabApi(ynab);
 
   if (auth.mode === "oauth") {
     allowedOrigins.add(new URL(auth.publicUrl).origin);
@@ -1058,6 +1069,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     app,
     createManagedRequest: () => createManagedRequest(
       ynab,
+      sharedApi,
       discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {},
     ),
     getInitializeParams,
@@ -1068,7 +1080,15 @@ export async function startHttpServer(options: HttpServerOptions): Promise<Start
     getToolCallName,
     logHttpDebug,
     path,
-    resolveRequest,
+    resolveRequest: async (req, createRequest) => {
+      const resolution = await resolveRequest(req, createRequest);
+
+      if (resolution.status === "ready") {
+        dependencies.onManagedRequestCreated?.();
+      }
+
+      return resolution;
+    },
     writeMethodNotAllowed,
     writeRequestResolution,
   });

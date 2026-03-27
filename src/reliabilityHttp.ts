@@ -34,6 +34,7 @@ export type ReliabilityHttpScenarioOptions = {
   path?: string | undefined;
   port?: number | undefined;
   requestCount: number;
+  toolCalls?: readonly MeasuredToolCall[];
   url?: string | undefined;
   ynab: YnabConfig;
 };
@@ -53,6 +54,10 @@ type ExecuteReliabilityHttpCliDependencies = {
   ynab?: YnabConfig;
 };
 
+type RunHttpReliabilityScenarioDependencies = {
+  runSequence?: typeof runMeasuredHttpSequence;
+};
+
 type TextContentItem = {
   text: string;
   type: "text";
@@ -63,6 +68,19 @@ type CallToolResponseWithContent = {
 };
 
 type SmokeReliabilityProfile = Extract<ReliabilityProfile, { runner: "smoke" }>;
+type ReliabilityClientLike = Pick<Client, "callTool" | "close" | "connect" | "listTools">;
+
+export type MeasuredToolCall = {
+  arguments?: Record<string, unknown>;
+  name: string;
+  validate?: (response: unknown) => void;
+};
+
+type RunMeasuredHttpSequenceOptions = {
+  createClient?: (index: number) => ReliabilityClientLike;
+  createTransport?: (baseUrl: string) => Parameters<Client["connect"]>[0];
+  toolCalls?: readonly MeasuredToolCall[];
+};
 
 class ConnectTransportAdapter {
   onclose?: () => void;
@@ -207,6 +225,20 @@ function extractVersionText(response: unknown) {
     .join("\n");
 }
 
+function normalizeToolCallResponse(response: unknown) {
+  const textContent = extractVersionText(response);
+
+  if (textContent.length === 0) {
+    return response;
+  }
+
+  try {
+    return JSON.parse(textContent) as unknown;
+  } catch {
+    return textContent;
+  }
+}
+
 function requireScenarioUrl(options: ReliabilityHttpScenarioOptions) {
   if (!options.url) {
     throw new Error("Expected an HTTP URL for the reliability scenario.");
@@ -227,6 +259,33 @@ function requireSmokeProfile(): SmokeReliabilityProfile {
 
 function createConnectTransport(baseUrl: string): Parameters<Client["connect"]>[0] {
   return new ConnectTransportAdapter(new StreamableHTTPClientTransport(new URL(baseUrl)));
+}
+
+function createReliabilityClient(index: number): ReliabilityClientLike {
+  return new Client({
+    name: `ynab-mcp-bridge-reliability-${index + 1}`,
+    version: "1.0.0",
+  });
+}
+
+function defaultToolCallValidation(response: unknown) {
+  const normalizedResponse = normalizeToolCallResponse(response);
+
+  if (!isObjectRecord(normalizedResponse) || typeof normalizedResponse["version"] !== "string") {
+    throw new Error("Expected ynab_get_mcp_version to return version text.");
+  }
+}
+
+function getMeasuredToolCalls(toolCalls: readonly MeasuredToolCall[] | undefined): readonly MeasuredToolCall[] {
+  if (toolCalls && toolCalls.length > 0) {
+    return toolCalls;
+  }
+
+  return [{
+    arguments: {},
+    name: "ynab_get_mcp_version",
+    validate: defaultToolCallValidation,
+  }];
 }
 
 function parseReliabilityHttpValueFlag(
@@ -321,12 +380,14 @@ async function readBaselineArtifact(path: string) {
   return parsed;
 }
 
-async function runSequence(baseUrl: string, index: number) {
-  const client = new Client({
-    name: `ynab-mcp-bridge-reliability-${index + 1}`,
-    version: "1.0.0",
-  });
-  const transport = createConnectTransport(baseUrl);
+export async function runMeasuredHttpSequence(
+  baseUrl: string,
+  index: number,
+  options: RunMeasuredHttpSequenceOptions = {},
+) {
+  const client = options.createClient?.(index) ?? createReliabilityClient(index);
+  const transport = options.createTransport?.(baseUrl) ?? createConnectTransport(baseUrl);
+  const toolCalls = getMeasuredToolCalls(options.toolCalls);
   const results: ReliabilityProbeResult[] = [];
   let connected = false;
 
@@ -349,17 +410,15 @@ async function runSequence(baseUrl: string, index: number) {
       }
     }));
 
-    results.push(await measureOperation("tools/call:ynab_get_mcp_version", async () => {
-      const response = await client.callTool({
-        name: "ynab_get_mcp_version",
-        arguments: {},
-      });
-      const versionText = extractVersionText(response);
-
-      if (!versionText.includes("\"version\"")) {
-        throw new Error("Expected ynab_get_mcp_version to return version text.");
-      }
-    }));
+    for (const toolCall of toolCalls) {
+      results.push(await measureOperation(`tools/call:${toolCall.name}`, async () => {
+        const response = await client.callTool({
+          name: toolCall.name,
+          arguments: toolCall.arguments ?? {},
+        });
+        toolCall.validate?.(normalizeToolCallResponse(response));
+      }));
+    }
 
     return results;
   } finally {
@@ -413,13 +472,23 @@ export function formatReliabilitySummary(summary: ReliabilityRunSummary) {
   return lines.join("\n");
 }
 
-export async function runHttpReliabilityScenario(options: ReliabilityHttpScenarioOptions): Promise<ReliabilityHttpScenarioResult> {
+export async function runHttpReliabilityScenario(
+  options: ReliabilityHttpScenarioOptions,
+  dependencies: RunHttpReliabilityScenarioDependencies = {},
+): Promise<ReliabilityHttpScenarioResult> {
   const url = requireScenarioUrl(options);
+  const runSequence = dependencies.runSequence ?? runMeasuredHttpSequence;
 
   const results = await runReliabilityProbes({
     concurrency: options.concurrency,
     count: options.requestCount,
-    probe: async (index) => await runSequence(url, index),
+    probe: async (index) => await runSequence(
+      url,
+      index,
+      options.toolCalls
+        ? { toolCalls: options.toolCalls }
+        : {},
+    ),
   });
 
   return {

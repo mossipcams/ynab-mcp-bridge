@@ -81,4 +81,59 @@ describe("plan tool response helpers", () => {
 
     await expect(withResolvedPlan(undefined, api, async (planId) => planId)).resolves.toBe("plan-b");
   });
+
+  it("deduplicates concurrent default-plan discovery without caching completed results across calls", async () => {
+    let resolvePlans: ((value: {
+      data: {
+        plans: Array<{ id: string }>;
+        default_plan?: { id: string };
+      };
+    }) => void) | undefined;
+    let getPlansCalls = 0;
+    const api = attachYnabApiRuntimeContext({
+      plans: {
+        async getPlans() {
+          getPlansCalls += 1;
+
+          return await new Promise<{
+            data: {
+              plans: Array<{ id: string }>;
+              default_plan?: { id: string };
+            };
+          }>((resolve) => {
+            resolvePlans = resolve;
+          });
+        },
+      },
+    }, {
+      apiToken: "test-token",
+    });
+
+    const first = withResolvedPlan(undefined, api, async (planId) => planId);
+    const second = withResolvedPlan(undefined, api, async (planId) => planId);
+    const third = withResolvedPlan(undefined, api, async (planId) => planId);
+
+    expect(getPlansCalls).toBe(1);
+
+    resolvePlans?.({
+      data: {
+        plans: [{ id: "plan-a" }],
+        default_plan: { id: "plan-a" },
+      },
+    });
+
+    await expect(Promise.all([first, second, third])).resolves.toEqual(["plan-a", "plan-a", "plan-a"]);
+
+    const followUp = withResolvedPlan(undefined, api, async (planId) => planId);
+    expect(getPlansCalls).toBe(2);
+
+    resolvePlans?.({
+      data: {
+        plans: [{ id: "plan-a" }],
+        default_plan: { id: "plan-a" },
+      },
+    });
+
+    await expect(followUp).resolves.toBe("plan-a");
+  });
 });

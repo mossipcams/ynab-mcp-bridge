@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { buildAssignedSpentSummary, formatMilliunits, isWithinMonthRange, normalizeMonthRange, toSpentMilliunits, } from "./financeToolUtils.js";
+import { getCachedPlanMonths } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_cash_flow_summary";
 export const description = "Returns a compact cash flow summary with inflow, outflow, and net cash flow. `net_flow` is cash movement, not savings, and `assigned_vs_spent` reflects budget timing and buffering, not a discipline score.";
@@ -17,7 +18,7 @@ export async function execute(input, api) {
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const [transactionsResponse, monthsResponse] = await Promise.all([
                 api.transactions.getTransactions(planId, fromMonth, undefined, undefined),
-                api.months.getPlanMonths(planId),
+                getCachedPlanMonths(api, planId),
             ]);
             const months = monthsResponse.data.months
                 .filter((month) => !month.deleted && month.month >= fromMonth && month.month <= toMonth)

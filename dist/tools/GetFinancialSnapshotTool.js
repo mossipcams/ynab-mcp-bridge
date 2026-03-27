@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { buildAssignedSpentSummary, compactObject, formatMilliunits, toSpentMilliunits, toTopRollups, } from "./financeToolUtils.js";
+import { getCachedAccounts, getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_financial_snapshot";
 export const description = "Returns a compact personal finance snapshot with net worth, cash, debt, and assigned versus spent. `assigned_vs_spent` reflects budget timing and buffering, not a discipline score.";
@@ -15,8 +16,8 @@ export async function execute(input, api) {
         const month = input.month || "current";
         const result = await withResolvedPlan(input.planId, api, async (planId) => {
             const [accountsResponse, monthResponse] = await Promise.all([
-                api.accounts.getAccounts(planId),
-                api.months.getPlanMonth(planId, month),
+                getCachedAccounts(api, planId),
+                getCachedPlanMonth(api, planId, month),
             ]);
             const accounts = accountsResponse.data.accounts.filter(isActiveAccount);
             const monthDetail = monthResponse.data.month;

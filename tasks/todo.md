@@ -1,3 +1,366 @@
+# Repo Cleanup Plan
+
+# Next Performance Optimization Slice Plan
+
+## Goal
+
+Use the post-change lightweight k6 results to choose the next optimization slice deliberately:
+
+- `initialize` improved from `3.69ms` to `3.28ms`
+- `tools/list` stayed essentially flat at `3.84ms`
+- throughput improved from `1332.78 req/s` to `1371.82 req/s`
+
+That means the lightweight transport path is healthy enough to avoid panic-driven refactors, but it is still worth improving.
+The next slice should therefore target both:
+
+- representative YNAB-backed tool latency
+- measurable transport-path overhead
+
+This is not an either/or choice. The next phase should keep both tracks active and prioritize whichever measured hotspot offers the best next return.
+
+## Tasks
+
+- [x] Task 1: Add a representative YNAB-backed benchmark path for the current post-optimization baseline
+  Test to write:
+  Add a failing focused spec in `src/reliabilityHttp.spec.ts` that records per-operation timings for at least one representative YNAB-backed summary tool in addition to the lightweight MCP path.
+  Code to implement:
+  Extend the reliability helper path with the smallest injection/config seam needed to benchmark a representative cached-read summary tool under controlled dependencies.
+  How to verify it works:
+  Run the new focused spec red first, then green, then capture before numbers for the selected representative tool path alongside the existing lightweight baseline.
+
+- [x] Task 2: Add a focused transport benchmark/assertion for the current post-optimization baseline
+  Test to write:
+  Add a failing focused spec in `src/httpTransport.spec.ts` or `src/reliabilityHttp.spec.ts` that captures one measurable transport-path behavior we still care about, such as connection probing, managed-request creation, or repeated setup work.
+  Code to implement:
+  Add only the smallest seam needed to measure or count the targeted transport-path behavior under controlled dependencies.
+  How to verify it works:
+  Run the focused spec red first, then green, then record the transport-side before numbers or counts so the next transport change is evidence-driven.
+
+- [x] Task 3: Optimize one proven summary-tool hotspot
+  Test to write:
+  Add a failing focused spec for one representative summary-tool family proving we reduce avoidable bridge-side work without changing the public payload.
+  Code to implement:
+  Refactor the hottest measured summary-tool path, likely by reducing repeated scans, duplicate rollup work, or repeated shaping on cached data.
+  How to verify it works:
+  Run the new focused spec red first, then green, then rerun the existing summary-tool specs and compare the representative benchmark before and after.
+
+- [x] Task 4: Optimize one proven transport-path hotspot
+  Test to write:
+  Add a failing focused transport spec proving we reduce measurable connection/setup overhead without changing the public MCP contract.
+  Code to implement:
+  Refactor the hottest measured transport-path issue, such as avoidable request probing cost, repeated setup work, or response-path overhead, while preserving compatibility.
+  How to verify it works:
+  Run the focused transport spec red first, then green, rerun the nearest HTTP/sessionless contract specs, and compare the transport-side benchmark before and after.
+
+- [x] Task 5: Re-measure and choose the next highest-value slice from both tracks
+  Test to write:
+  No new broad test unless the new measurements expose a specific missing regression guard; prefer a narrow failing spec only if a concrete hotspot remains.
+  Code to implement:
+  No production change unless the new numbers clearly point to one more high-value hotspot.
+  How to verify it works:
+  Re-run the representative benchmark plus the lightweight k6 check and confirm whether the next slice should stay in summary/tool work, transport work, or continue both in parallel.
+
+## Expected End State
+
+- We have measured post-optimization latency for the lightweight MCP path, one representative YNAB-backed tool path, and one targeted transport-path behavior.
+- The next code slices are chosen from measured hotspots across both tool/data-path work and transport work.
+- We avoid speculative refactors by requiring a benchmark or count-based proof on each track.
+
+## Results
+
+- Task 1 completed:
+  Added a higher-level reliability scenario seam so representative tool calls can flow through `runHttpReliabilityScenario(...)`, not just the lower-level measured sequence helper.
+
+- Task 2 completed:
+  Added a transport baseline assertion proving the current authless sessionless path creates one managed request per MCP POST. The baseline count for `initialize` plus `tools/list` is `2`.
+
+- Task 3 completed:
+  Optimized `ynab_get_monthly_review` anomaly generation to precompute baseline category spending lookups instead of repeatedly scanning baseline category arrays with `.find(...)`.
+  Focused regression proof:
+  baseline category `.find(...)` scans dropped from `4` to `0` in the targeted monthly-review case while preserving the response payload.
+
+- Task 4 completed:
+  Optimized HTTP startup/request setup so one started HTTP server creates its configured YNAB API once and reuses it across sessionless MCP POSTs.
+  Focused regression proof:
+  the injected API factory is now called `1` time across `initialize` plus `tools/list`.
+
+- Task 5 completed:
+  Re-ran the focused regression suite and a local lightweight HTTP smoke measurement.
+  Lightweight local smoke after the latest transport change:
+  `initialize` avg `7.161ms`, `tools/list` avg `5.676ms`, `tools/call:ynab_get_mcp_version` avg `4.5ms`, `0` failures in the run.
+  This smoke harness is noisier than the prior k6 baseline, so it should be treated as a quick regression check rather than a replacement for k6.
+
+## Next Recommendation
+
+- Continue both tracks.
+- Next transport hotspot:
+  remove or reuse per-request managed-request/server setup, since we now know managed-request creation still happens once per MCP POST even after API reuse.
+- Next summary/tool hotspot:
+  target another repeated-scan summary path, with `ynab_get_financial_health_check` the strongest current candidate because it still performs multiple passes across categories and transactions for one compact payload.
+
+Plan ready. Approve to proceed.
+
+# Performance Optimization Plan
+
+## Goal
+
+Reduce latency for MCP connection setup and tool calls without changing the current public contract:
+
+- HTTP remains sessionless for initialize and follow-up POST requests
+- stdio startup behavior remains unchanged
+- tool outputs and discovery/resource metadata remain identical
+
+## Current Observations
+
+- `src/httpTransport.ts` currently builds a fresh managed request for every MCP POST by calling `createManagedRequest(...)`.
+- `createManagedRequest(...)` currently creates a new `McpServer`, re-registers all 47 tools/resources, creates a new transport, and connects that server on every request.
+- `src/serverRuntime.ts` already keeps tool module definitions at module scope, but discovery summaries and lookup scans are still recomputed from arrays.
+- `src/ynabApi.ts` shares the rate limiter globally, but a fresh YNAB SDK client is still created whenever `createServer(...)` is called without an injected API.
+- Plan resolution is intentionally dynamic when no explicit plan id is provided, so any caching work must preserve the existing “do not bleed between calls” behavior already covered by specs.
+
+## Baseline Measurements
+
+- Baseline run captured at `artifacts/perf/k6-connection-tool-baseline.json`.
+- Focused local k6 probe used `5` VUs for `15s` against `http://127.0.0.1:3100/mcp`.
+- The probe measured the current authless sessionless path for `initialize`, `tools/list`, and `tools/call` for `ynab_get_mcp_version`.
+- Results:
+  `initialize`: avg `3.69ms`, p95 `6.84ms`, p99 `8.25ms`, max `31.76ms`
+  `tools/list`: avg `3.85ms`, p95 `7.15ms`, p99 `8.56ms`, max `16.27ms`
+  `tools/call ynab_get_mcp_version`: avg `3.60ms`, p95 `6.98ms`, p99 `8.41ms`, max `18.19ms`
+  Total throughput: `1332.78 req/s` with `0%` request failures.
+
+## Measurement Readout
+
+- Lightweight bridge-only operations are already in the low single-digit millisecond range locally.
+- Repeated setup work may still be worth removing, but the k6 baseline does not yet prove it is the dominant user-facing bottleneck.
+- The biggest unknown is the latency of representative YNAB-backed tools and how much of that time is bridge overhead versus upstream API time.
+- The plan should therefore start with a repeatable benchmark harness for representative tool paths before we spend our first engineering cycle on metadata micro-optimizations.
+
+## Constraints And Assumptions
+
+- No files under `tests/` will be modified.
+- TDD stays strict after approval: red test first, minimal implementation second, verification third, then stop.
+- The first pass should prefer measurement and low-risk runtime reuse over protocol-shape changes.
+- Any optimization that risks changing session semantics or stale plan selection must stop for re-planning.
+
+## Tasks
+
+- [ ] Task 1: Add a repeatable benchmark harness for representative connection and tool paths
+  Test to write:
+  Add a focused spec or reliability harness extension in `src/reliabilityHttp.spec.ts` and related helpers that records per-operation latency for `initialize`, `tools/list`, `ynab_get_mcp_version`, and at least one representative YNAB-backed tool path using controlled dependencies.
+  Code to implement:
+  Introduce the smallest injection seam needed so the benchmark path can isolate bridge overhead from live YNAB latency and produce repeatable before/after numbers.
+  How to verify it works:
+  Run the new focused Vitest case red first, then green, then confirm it produces stable per-operation metrics aligned with the existing k6 baseline for the lightweight path.
+
+- [ ] Task 2: Pin connection/setup overhead with an HTTP runtime reuse spec
+  Test to write:
+  Add a focused spec in `src/httpServer.spec.ts` or `src/serverFactory.spec.ts` proving that repeated sessionless HTTP requests do not recreate the expensive server-side runtime dependency more than once per started HTTP server.
+  Code to implement:
+  Introduce the smallest dependency-injection seam needed in `src/httpTransport.ts` and/or `src/serverRuntime.ts` so the test can count runtime creation without changing production behavior.
+  How to verify it works:
+  Run the new focused Vitest case red first, then green, then run the nearest existing HTTP/sessionless contract specs to confirm the external behavior is unchanged.
+
+- [ ] Task 3: Reuse a single YNAB API instance across the lifetime of a started server
+  Test to write:
+  Reuse the failing spec from Task 2 or add a narrower unit spec in `src/serverFactory.spec.ts` that proves a started HTTP server and stdio startup path can share one configured API instance instead of recreating it per request/connection.
+  Code to implement:
+  Create the YNAB API once at server startup and thread that shared instance through `startHttpServer(...)`, `createManagedRequest(...)`, and `startStdioServer(...)` while preserving runtime-context attachment and current rate-limiter behavior.
+  How to verify it works:
+  Run the targeted reuse spec, then run the existing sessionless HTTP flow specs plus `src/ynabApi.spec.ts` to confirm behavior and retry/rate-limit coverage still hold.
+
+- [ ] Task 4: Benchmark and tighten one representative YNAB-backed tool family
+  Test to write:
+  Add a focused spec around one representative plan-resolving tool path, proving we can reduce avoidable bridge-side overhead without weakening the existing dynamic fallback and no-bleed behavior.
+  Code to implement:
+  Optimize the hottest proven bridge-side work in the chosen tool family, likely around plan resolution or repeated response shaping, only after the benchmark harness shows it matters.
+  How to verify it works:
+  Run the new spec red then green, then rerun the existing no-bleed and plan-read specs and compare the benchmark numbers before and after.
+
+- [ ] Task 5: Precompute immutable tool/discovery metadata if the benchmark still points there
+  Test to write:
+  Add a spec in `src/serverFactory.spec.ts` that proves discovery summaries/documents and tool lookup are served from stable precomputed metadata rather than repeated array scans/rebuilds.
+  Code to implement:
+  Refactor `src/serverRuntime.ts` to build a keyed tool metadata structure once at module scope, then reuse it for registration, discovery summaries, and direct resource fetches.
+  How to verify it works:
+  Run the new metadata spec red then green, then rerun the existing discovery-resource specs to prove payload shape and aliases are unchanged and compare the benchmark again.
+
+## Expected End State
+
+- We have a repeatable benchmark for both connection/setup paths and at least one representative YNAB-backed tool path.
+- A started server reuses one configured YNAB API client instead of recreating it for every HTTP request or connection startup.
+- Tool/discovery registration still produces the same public MCP surface, but only gets micro-optimized where measurement shows it matters.
+- Sessionless HTTP compatibility remains intact.
+- Future speed work is prioritized from measured bottlenecks instead of assumptions.
+
+## Proposed Order
+
+1. Add repeatable performance measurement for both lightweight and representative YNAB-backed paths.
+2. Pin and remove repeated runtime setup within one started server.
+3. Re-measure and optimize one representative YNAB-backed tool path.
+4. Precompute static metadata only if the measurements still justify it.
+5. Keep the k6 and reliability baselines updated as regression guards.
+
+---
+
+## Goal
+
+Clean up repository housekeeping so:
+
+- `AGENTS.md` and `CLAUDE.md` remain at the repo root but are gitignored
+- all other top-level Markdown files except `README.md` and `CHANGELOG.md` move under `tasks/`
+- `skills/`, `tasks/`, and moved Markdown planning files are ignored by git
+- the resulting tree is easier to maintain without changing runtime code
+
+## Constraints And Assumptions
+
+- This is primarily repository structure and ignore-rule cleanup, not product behavior work.
+- No files under `tests/` will be modified.
+- Verification will rely on git state and file placement proofs unless we discover an existing structural check that should also be updated.
+
+## Tasks
+
+- [ ] Task 1: Classify top-level Markdown files and target locations
+  Test to write:
+  No new automated repo test. This is a file-layout classification step.
+  Code to implement:
+  Confirm the full set of top-level `*.md` files, keep `README.md`, `CHANGELOG.md`, `AGENTS.md`, and `CLAUDE.md` at the root, and identify every other top-level Markdown file that should move into `tasks/`.
+  How to verify it works:
+  Re-run the root file listing and confirm the keep-vs-move set is explicit and complete before any files are moved.
+
+- [ ] Task 2: Update ignore rules for repo housekeeping paths
+  Test to write:
+  No new automated test file unless an existing structural test clearly covers repo metadata. Verification will use `git check-ignore`.
+  Code to implement:
+  Update `.gitignore` so `skills/`, `tasks/`, `AGENTS.md`, `CLAUDE.md`, and the intended housekeeping Markdown patterns are ignored without accidentally hiding `README.md` or `CHANGELOG.md`.
+  How to verify it works:
+  Run `git check-ignore -v` on representative kept and ignored paths to prove the rules match the intended policy.
+
+- [ ] Task 3: Move the non-root-exempt Markdown files into `tasks/`
+  Test to write:
+  No new automated repo test. Verification will use file existence and git diff checks.
+  Code to implement:
+  Move each top-level Markdown plan file other than `README.md`, `CHANGELOG.md`, `AGENTS.md`, and `CLAUDE.md` into `tasks/`, preserving filenames unless a collision requires an explicit rename.
+  How to verify it works:
+  Re-run the top-level file listing and confirm only the exempt Markdown files remain at the root, while the moved files exist under `tasks/`.
+
+- [ ] Task 4: Reconcile tracked-vs-ignored behavior for `tasks/` and `skills/`
+  Test to write:
+  No new automated test file. Verification will use `git status --ignored` and staged diff review.
+  Code to implement:
+  Make sure the git diff reflects the intended tracked cleanup now, while the ignore rules prevent future accidental additions from `tasks/` and `skills/`.
+  How to verify it works:
+  Run `git status --short --ignored` and confirm the repo shows only the expected tracked moves and ignore behavior.
+
+- [ ] Task 5: Final review of the repository layout
+  Test to write:
+  No new automated test file. This is a final proof step.
+  Code to implement:
+  Review the resulting tree and diff for clarity, keeping the cleanup scoped to repository organization and ignore policy.
+  How to verify it works:
+  Confirm the final root Markdown set, confirm the moved files live under `tasks/`, and confirm the ignore rules behave as intended for `skills/` and `tasks/`.
+
+## Expected End State
+
+- Root Markdown files:
+  `README.md`, `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`
+- `tasks/` contains the remaining planning and housekeeping Markdown files
+- `AGENTS.md`, `CLAUDE.md`, `skills/`, and `tasks/` are ignored for future incidental additions
+- The diff is limited to repo organization and ignore policy
+
+---
+
+# Worktree Cleanup Plan
+
+## Goal
+
+Safely reduce the current worktree sprawl, keep any still-useful branches intact, and leave this repository in a predictable state for future branch and PR work.
+
+## Time Horizons
+
+### Now
+
+- Stabilize the primary checkout so it is not an accidental detached-`HEAD` workspace.
+- Reduce the current set of 47 registered worktrees by removing clearly stale or merged entries first.
+- Create one reviewed inventory so cleanup decisions are explicit instead of ad hoc.
+
+### Long Term
+
+- Keep one predictable purpose per worktree: primary `main`, active feature or fix branches, and temporary review or merge worktrees with clear expiration points.
+- Clean up merged or abandoned PR worktrees as part of normal closeout, not as a periodic rescue project.
+- Prevent future detached temp worktree buildup by using a short checklist whenever a PR is merged, abandoned, or superseded.
+
+## Current Observations
+
+- The primary checkout at `/Users/matt/Desktop/Projects/ynab-mcp-bridge` is currently on detached `HEAD` at `f8e62e5`.
+- `git worktree list --porcelain` reports 47 registered worktrees.
+- `git branch --merged main` reports 20 merged local branches including `main`, which suggests there is immediate cleanup available.
+- `git branch --no-merged main` still shows active or at least unmerged branches, so cleanup needs an explicit classification pass before deletion.
+- Repo rules already require post-merge or abandoned-work cleanup using `git fetch --prune`, `git worktree prune`, worktree removal, and local branch deletion when safe.
+
+## Tasks
+
+- [ ] Task 1: Build a worktree inventory with decision categories
+  Test to write:
+  No repo test. This is an operational inventory step.
+  Code to implement:
+  Gather a table of every registered worktree with path, branch or detached commit, merged status relative to `main`, and a proposed disposition such as `keep`, `review`, `archive`, or `remove`.
+  How to verify it works:
+  Re-run `git worktree list --porcelain` and confirm every listed worktree appears once in the inventory with an explicit decision.
+
+- [ ] Task 2: Identify safe-delete candidates and protect anything still in flight
+  Test to write:
+  No repo test. This is a safety review step.
+  Code to implement:
+  Mark worktrees on merged branches, abandoned PR branches, and stale temporary detached worktrees as cleanup candidates, while explicitly excluding any branch with ongoing work, unknown status, or unmerged commits.
+  How to verify it works:
+  For each proposed removal, confirm the branch is merged or intentionally abandoned, and confirm there is no uncommitted work inside that worktree before deletion.
+
+- [ ] Task 3: Normalize the primary checkout strategy
+  Test to write:
+  No repo test. This is a repo-operations step.
+  Code to implement:
+  Decide whether `/Users/matt/Desktop/Projects/ynab-mcp-bridge` should become a stable `main` checkout again or remain a detached inspection checkout, and define the exact commands needed to get there safely without disturbing unrelated work.
+  How to verify it works:
+  Run `git status --short --branch` in the primary checkout and confirm it matches the intended steady-state branch strategy.
+
+- [ ] Task 4: Remove approved stale worktrees and branches in small batches
+  Test to write:
+  No repo test. This is an administrative git cleanup step.
+  Code to implement:
+  For each approved candidate, run `git worktree remove <path>` when clean, then delete the corresponding local branch if it is no longer needed; use force only for worktrees explicitly confirmed as disposable.
+  How to verify it works:
+  After each batch, re-run `git worktree list --porcelain` and `git branch --format='%(refname:short)'` to confirm the removed paths and branches are gone and no unintended worktree disappeared.
+
+- [ ] Task 5: Prune stale metadata and document the new maintenance routine
+  Test to write:
+  No repo test. This is a final verification and documentation step.
+  Code to implement:
+  Run `git fetch --prune` and `git worktree prune`, then add a short maintenance checklist covering when to remove merged PR worktrees, when to keep long-lived branches, and how to avoid detached-`HEAD` drift in the primary checkout.
+  How to verify it works:
+  Confirm `git worktree list` shows only intentional worktrees, confirm branch refs no longer point at deleted worktrees, and spot-check that the maintenance checklist matches the commands actually used.
+
+## Proposed Execution Notes
+
+- Start with classification only; do not delete anything in the first pass.
+- Clean up merged branch worktrees first because they are the lowest-risk wins.
+- Treat detached worktrees under `/private/tmp` as suspicious and verify whether they still matter before removal.
+- Keep a short deletion log during execution so any later question can be answered from one place.
+
+## Recommended Operating Model
+
+- Keep `/Users/matt/Desktop/Projects/ynab-mcp-bridge` as the stable `main` checkout whenever possible.
+- Use named worktrees only for active branches that still need code changes, review, or CI follow-up.
+- Treat temporary merge or conflict-resolution worktrees as disposable and remove them immediately after the task is complete.
+- After every merged or abandoned PR, run the closeout sequence:
+  `git fetch --prune`
+  `git worktree prune`
+  `git worktree remove <path>`
+  `git branch -d <branch>`
+- Review worktree count periodically with a simple threshold, for example: if the repo reaches more than 8 to 10 active worktrees, pause and classify before adding more.
+
+---
+
 # CI Blocker Remediation Plan
 
 ## Goal

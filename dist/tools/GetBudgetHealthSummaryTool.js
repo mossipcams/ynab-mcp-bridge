@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { buildBudgetHealthMonthSummary, compactObject, formatMilliunits } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_budget_health_summary";
@@ -13,7 +14,7 @@ export async function execute(input, api) {
         const month = input.month || "current";
         const topN = input.topN ?? 5;
         return await withResolvedPlan(input.planId, api, async (planId) => {
-            const response = await api.months.getPlanMonth(planId, month);
+            const response = await getCachedPlanMonth(api, planId, month);
             const monthDetail = response.data.month;
             const { overspent_categories: overspentCategories, underfunded_categories: underfundedCategories, ...budgetHealthSummary } = buildBudgetHealthMonthSummary(monthDetail);
             return toTextResult({

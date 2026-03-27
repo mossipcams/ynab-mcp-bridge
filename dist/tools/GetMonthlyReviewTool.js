@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { previousMonths } from "./financialDiagnosticsUtils.js";
 import { buildBudgetHealthMonthSummary, formatMilliunits, isWithinMonthRange, normalizeMonthInput, toSpentMilliunits, toTopRollups, } from "./financeToolUtils.js";
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_monthly_review";
 export const description = "Returns a compact monthly review with income, cash flow, budget health, top spending, and notable spending changes, including assigned versus spent as a buffering and timing signal rather than a discipline score.";
@@ -24,6 +25,9 @@ function addRollup(bucket, key, value) {
         transactionCount: 1,
     });
 }
+function buildBaselineSpentLookup(responses) {
+    return responses.map((response) => new Map(response.data.month.categories.map((category) => [category.id, toSpentMilliunits(category.activity)])));
+}
 export async function execute(input, api) {
     try {
         const month = normalizeMonthInput(input.month);
@@ -33,14 +37,15 @@ export async function execute(input, api) {
             const baselineMonthIds = previousMonths(month, baselineMonths);
             const [transactionsResponse, baselineResponses, currentMonthResponse] = await Promise.all([
                 api.transactions.getTransactions(planId, month, undefined, undefined),
-                Promise.all(baselineMonthIds.map((baselineMonth) => api.months.getPlanMonth(planId, baselineMonth))),
-                api.months.getPlanMonth(planId, month),
+                Promise.all(baselineMonthIds.map((baselineMonth) => getCachedPlanMonth(api, planId, baselineMonth))),
+                getCachedPlanMonth(api, planId, month),
             ]);
             if (!currentMonthResponse) {
                 throw new Error("Month review requires a current month response.");
             }
             const monthDetail = currentMonthResponse.data.month;
             const categories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden);
+            const baselineSpentLookups = buildBaselineSpentLookup(baselineResponses);
             const budgetHealthDetails = buildBudgetHealthMonthSummary(monthDetail);
             const budgetHealthSummary = {
                 ready_to_assign: budgetHealthDetails.ready_to_assign,
@@ -74,10 +79,7 @@ export async function execute(input, api) {
             const anomalies = categories
                 .map((category) => {
                 const latestSpent = toSpentMilliunits(category.activity);
-                const baselineValues = baselineResponses.map((response) => {
-                    const baselineCategory = response.data.month.categories.find((candidate) => candidate.id === category.id);
-                    return baselineCategory ? toSpentMilliunits(baselineCategory.activity) : 0;
-                });
+                const baselineValues = baselineSpentLookups.map((lookup) => lookup.get(category.id) ?? 0);
                 const baselineAverage = baselineValues.length === 0
                     ? 0
                     : baselineValues.reduce((sum, value) => sum + value, 0) / baselineValues.length;

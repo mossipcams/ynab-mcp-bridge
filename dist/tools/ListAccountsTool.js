@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { formatAmountMilliunits, hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
+import { getCachedAccounts } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_list_accounts";
 export const description = "Lists accounts for a YNAB plan with optional compact projections and pagination.";
@@ -18,7 +19,7 @@ export const inputSchema = {
 };
 export async function execute(input, api) {
     try {
-        const response = await withResolvedPlan(input.planId, api, async (planId) => api.accounts.getAccounts(planId));
+        const response = await withResolvedPlan(input.planId, api, async (planId) => getCachedAccounts(api, planId));
         const accounts = response.data.accounts
             .filter((account) => !account.deleted)
             .map((account) => ({

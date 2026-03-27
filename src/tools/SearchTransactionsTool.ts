@@ -3,14 +3,13 @@ import * as ynab from "ynab";
 
 import {
   formatAmountMilliunits,
-  renderCollectionResult,
 } from "./collectionToolUtils.js";
 import { compactObject } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 import {
+  buildTransactionCollectionResult,
   compareTransactions,
   matchesTransactionFilters,
-  toDisplayTransactions,
   transactionFields,
   type TransactionSort,
 } from "../transactionQueryEngine.js";
@@ -80,14 +79,11 @@ export async function execute(
       .filter((transaction) => !transaction.deleted)
       .filter((transaction) => matchesTransactionFilters(transaction, input))
       .sort((left, right) => compareTransactions(left, right, sort));
-    const transactions = toDisplayTransactions(matchingTransactions);
 
     return toTextResult({
-      ...renderCollectionResult(
-        transactions,
-        transactionFields,
+      ...buildTransactionCollectionResult(
+        matchingTransactions,
         input,
-        "transactions",
         "match_count",
       ),
       filters: compactObject({

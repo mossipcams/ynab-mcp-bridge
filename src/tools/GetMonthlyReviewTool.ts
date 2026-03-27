@@ -10,6 +10,7 @@ import {
   toSpentMilliunits,
   toTopRollups,
 } from "./financeToolUtils.js";
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_monthly_review";
@@ -47,6 +48,14 @@ function addRollup(
   });
 }
 
+function buildBaselineSpentLookup(
+  responses: Array<{ data: { month: { categories: Array<{ activity: number; id: string }> } } }>,
+) {
+  return responses.map((response) => new Map(
+    response.data.month.categories.map((category) => [category.id, toSpentMilliunits(category.activity)] as const),
+  ));
+}
+
 export async function execute(
   input: { planId?: string; month?: string; baselineMonths?: number; topN?: number },
   api: ynab.API,
@@ -60,8 +69,8 @@ export async function execute(
       const baselineMonthIds = previousMonths(month, baselineMonths);
       const [transactionsResponse, baselineResponses, currentMonthResponse] = await Promise.all([
         api.transactions.getTransactions(planId, month, undefined, undefined),
-        Promise.all(baselineMonthIds.map((baselineMonth) => api.months.getPlanMonth(planId, baselineMonth))),
-        api.months.getPlanMonth(planId, month),
+        Promise.all(baselineMonthIds.map((baselineMonth) => getCachedPlanMonth(api, planId, baselineMonth))),
+        getCachedPlanMonth(api, planId, month),
       ]);
 
       if (!currentMonthResponse) {
@@ -70,6 +79,7 @@ export async function execute(
 
       const monthDetail = currentMonthResponse.data.month;
       const categories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden);
+      const baselineSpentLookups = buildBaselineSpentLookup(baselineResponses);
       const budgetHealthDetails = buildBudgetHealthMonthSummary(monthDetail);
       const budgetHealthSummary = {
         ready_to_assign: budgetHealthDetails.ready_to_assign,
@@ -108,10 +118,7 @@ export async function execute(
       const anomalies = categories
         .map((category) => {
           const latestSpent = toSpentMilliunits(category.activity);
-          const baselineValues = baselineResponses.map((response) => {
-            const baselineCategory = response.data.month.categories.find((candidate) => candidate.id === category.id);
-            return baselineCategory ? toSpentMilliunits(baselineCategory.activity) : 0;
-          });
+          const baselineValues = baselineSpentLookups.map((lookup) => lookup.get(category.id) ?? 0);
           const baselineAverage = baselineValues.length === 0
             ? 0
             : baselineValues.reduce((sum, value) => sum + value, 0) / baselineValues.length;

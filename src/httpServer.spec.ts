@@ -1466,6 +1466,124 @@ describe("startHttpServer", () => {
     await expect(response.text()).resolves.toContain("\"ynab_get_mcp_version\"");
   });
 
+  it("creates a managed request for each sessionless MCP POST in the current transport baseline", async () => {
+    let managedRequestCount = 0;
+    const httpServer = await (startHttpServer as any)({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    }, {
+      onManagedRequestCreated: () => {
+        managedRequestCount += 1;
+      },
+    });
+    cleanups.push(() => httpServer.close());
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "managed-request-baseline-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(initializeResponse.status).toBe(200);
+
+    const toolListResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(toolListResponse.status).toBe(200);
+    expect(managedRequestCount).toBe(2);
+  });
+
+  it("reuses one configured API instance across sessionless MCP POSTs", async () => {
+    const createApi = vi.fn(() => ({}));
+    const httpServer = await (startHttpServer as any)({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    }, {
+      createApi,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "shared-api-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(initializeResponse.status).toBe(200);
+
+    const toolListResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(toolListResponse.status).toBe(200);
+    expect(createApi).toHaveBeenCalledTimes(1);
+  });
+
   it("returns 405 for GET requests after initialization", async () => {
     const httpServer = await startHttpServer({
       ynab,
