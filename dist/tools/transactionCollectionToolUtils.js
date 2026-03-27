@@ -1,13 +1,15 @@
 import { z } from "zod";
-import { assertTransactionMonth, buildTransactionCollectionResult, compareTransactions, transactionFields, toDisplayTransactions, } from "../transactionQueryEngine.js";
+import { assertTransactionMonth, buildTransactionCollectionResult, compareTransactions, transactionFields, } from "../transactionQueryEngine.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 async function runTransactionCollectionTool(input, api, fetchTransactions, options = {}) {
     try {
         const normalizedInput = options.normalizeInput ? options.normalizeInput(input) : input;
         const transactions = await withResolvedPlan(normalizedInput.planId, api, async (planId) => fetchTransactions(api, planId, normalizedInput));
-        const sortedTransactions = [...transactions].sort((left, right) => compareTransactions(left, right, "date_desc"));
+        const sortedTransactions = transactions
+            .filter((transaction) => !transaction.deleted)
+            .sort((left, right) => compareTransactions(left, right, "date_desc"));
         return toTextResult({
-            ...buildTransactionCollectionResult(toDisplayTransactions(sortedTransactions), normalizedInput, "transaction_count"),
+            ...buildTransactionCollectionResult(sortedTransactions, normalizedInput, "transaction_count"),
         });
     }
     catch (error) {

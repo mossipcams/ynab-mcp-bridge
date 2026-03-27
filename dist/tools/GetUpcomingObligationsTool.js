@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { buildUpcomingWindowSummary, expandScheduledOccurrences, formatMilliunits } from "./financeToolUtils.js";
+import { getCachedScheduledTransactions } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_upcoming_obligations";
 export const description = "Returns compact 7, 14, and 30 day windows for due outflows and expected inflows from scheduled transactions, excluding transfers.";
@@ -17,7 +18,7 @@ export async function execute(input, api) {
         const asOfDate = input.asOfDate ?? getTodayIsoDate();
         const topN = input.topN ?? 5;
         return await withResolvedPlan(input.planId, api, async (planId) => {
-            const response = await api.scheduledTransactions.getScheduledTransactions(planId, undefined);
+            const response = await getCachedScheduledTransactions(api, planId);
             const scheduledTransactions = expandScheduledOccurrences(response.data.scheduled_transactions.filter((transaction) => !transaction.deleted), asOfDate, 30)
                 .sort((left, right) => {
                 const dayDifference = left.days_until_due - right.days_until_due;

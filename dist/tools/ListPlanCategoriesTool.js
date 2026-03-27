@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getCachedCategories } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
 import { hasPaginationControls, hasProjectionControls, paginateEntries } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
@@ -17,7 +18,7 @@ export const inputSchema = {
 };
 export async function execute(input, api) {
     try {
-        const response = await withResolvedPlan(input.planId, api, async (planId) => api.categories.getCategories(planId));
+        const response = await withResolvedPlan(input.planId, api, async (planId) => getCachedCategories(api, planId));
         const groups = response.data.category_groups
             .filter((group) => !group.deleted && !group.hidden)
             .map((group) => ({

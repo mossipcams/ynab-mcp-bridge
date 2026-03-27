@@ -1,6 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
+import { getCachedAccounts } from "./cachedYnabReads.js";
 import {
   formatAmount,
   formatRatio,
@@ -24,7 +25,7 @@ export async function execute(
   try {
     const topN = input.topN ?? 5;
     return await withResolvedPlan(input.planId, api, async (planId) => {
-      const response = await api.accounts.getAccounts(planId);
+      const response = await getCachedAccounts(api, planId);
       const accounts = response.data.accounts.filter((account) => !account.deleted && !account.closed);
       const debtAccounts = accounts.filter((account) => account.balance < 0)
         .sort((left, right) => left.balance - right.balance);

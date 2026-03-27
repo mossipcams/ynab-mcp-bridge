@@ -8,6 +8,7 @@ import {
   paginateEntries,
   projectRecord,
 } from "./collectionToolUtils.js";
+import { getCachedAccounts } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_list_accounts";
@@ -38,7 +39,7 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
-    const response = await withResolvedPlan(input.planId, api, async (planId) => api.accounts.getAccounts(planId));
+    const response = await withResolvedPlan(input.planId, api, async (planId) => getCachedAccounts(api, planId));
     const accounts = response.data.accounts
       .filter((account) => !account.deleted)
       .map((account) => ({

@@ -8,6 +8,7 @@ import {
   toSpentMilliunits,
   toTopRollups,
 } from "./financeToolUtils.js";
+import { getCachedAccounts, getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_financial_snapshot";
@@ -29,8 +30,8 @@ export async function execute(input: { planId?: string; month?: string }, api: y
     const month = input.month || "current";
     const result = await withResolvedPlan(input.planId, api, async (planId) => {
       const [accountsResponse, monthResponse] = await Promise.all([
-        api.accounts.getAccounts(planId),
-        api.months.getPlanMonth(planId, month),
+        getCachedAccounts(api, planId),
+        getCachedPlanMonth(api, planId, month),
       ]);
 
       const accounts = accountsResponse.data.accounts.filter(isActiveAccount);

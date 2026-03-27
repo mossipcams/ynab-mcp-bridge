@@ -10,6 +10,7 @@ import {
   normalizeMonthRange,
   reconstructHistoricalAccountBalances,
 } from "./financeToolUtils.js";
+import { getCachedAccounts } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_net_worth_trajectory";
@@ -38,7 +39,7 @@ export async function execute(
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const [accountsResponse, transactionsResponse] = await Promise.all([
-        api.accounts.getAccounts(planId),
+        getCachedAccounts(api, planId),
         api.transactions.getTransactions(planId, fromMonth, undefined, undefined),
       ]);
 

@@ -7,6 +7,7 @@ import {
   paginateEntries,
   projectRecord,
 } from "./collectionToolUtils.js";
+import { getCachedPlanMonths } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_list_plan_months";
@@ -36,7 +37,7 @@ export async function execute(
   api: ynab.API,
 ) {
   try {
-    const response = await withResolvedPlan(input.planId, api, async (planId) => api.months.getPlanMonths(planId));
+    const response = await withResolvedPlan(input.planId, api, async (planId) => getCachedPlanMonths(api, planId));
     const months = response.data.months
       .filter((month) => !month.deleted)
       .map((month) => ({

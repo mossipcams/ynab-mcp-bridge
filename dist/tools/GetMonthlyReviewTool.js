@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { previousMonths } from "./financialDiagnosticsUtils.js";
 import { buildBudgetHealthMonthSummary, formatMilliunits, isWithinMonthRange, normalizeMonthInput, toSpentMilliunits, toTopRollups, } from "./financeToolUtils.js";
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_monthly_review";
 export const description = "Returns a compact monthly review with income, cash flow, budget health, top spending, and notable spending changes, including assigned versus spent as a buffering and timing signal rather than a discipline score.";
@@ -33,8 +34,8 @@ export async function execute(input, api) {
             const baselineMonthIds = previousMonths(month, baselineMonths);
             const [transactionsResponse, baselineResponses, currentMonthResponse] = await Promise.all([
                 api.transactions.getTransactions(planId, month, undefined, undefined),
-                Promise.all(baselineMonthIds.map((baselineMonth) => api.months.getPlanMonth(planId, baselineMonth))),
-                api.months.getPlanMonth(planId, month),
+                Promise.all(baselineMonthIds.map((baselineMonth) => getCachedPlanMonth(api, planId, baselineMonth))),
+                getCachedPlanMonth(api, planId, month),
             ]);
             if (!currentMonthResponse) {
                 throw new Error("Month review requires a current month response.");

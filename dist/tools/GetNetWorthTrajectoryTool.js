@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { debtMilliunits, formatMilliunits, liquidCashMilliunits, listMonthsInRange, netWorthMilliunits, normalizeMonthRange, reconstructHistoricalAccountBalances, } from "./financeToolUtils.js";
+import { getCachedAccounts } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_net_worth_trajectory";
 export const description = "Returns a compact month-by-month net worth trajectory with liquid cash and debt across a month range.";
@@ -16,7 +17,7 @@ export async function execute(input, api) {
         const { fromMonth, toMonth } = normalizeMonthRange(input.fromMonth, input.toMonth);
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const [accountsResponse, transactionsResponse] = await Promise.all([
-                api.accounts.getAccounts(planId),
+                getCachedAccounts(api, planId),
                 api.transactions.getTransactions(planId, fromMonth, undefined, undefined),
             ]);
             const accounts = accountsResponse.data.accounts.filter(isIncludedAccount);

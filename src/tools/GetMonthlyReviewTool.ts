@@ -10,6 +10,7 @@ import {
   toSpentMilliunits,
   toTopRollups,
 } from "./financeToolUtils.js";
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_monthly_review";
@@ -60,8 +61,8 @@ export async function execute(
       const baselineMonthIds = previousMonths(month, baselineMonths);
       const [transactionsResponse, baselineResponses, currentMonthResponse] = await Promise.all([
         api.transactions.getTransactions(planId, month, undefined, undefined),
-        Promise.all(baselineMonthIds.map((baselineMonth) => api.months.getPlanMonth(planId, baselineMonth))),
-        api.months.getPlanMonth(planId, month),
+        Promise.all(baselineMonthIds.map((baselineMonth) => getCachedPlanMonth(api, planId, baselineMonth))),
+        getCachedPlanMonth(api, planId, month),
       ]);
 
       if (!currentMonthResponse) {

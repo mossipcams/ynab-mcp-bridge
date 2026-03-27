@@ -6,7 +6,6 @@ import {
   buildTransactionCollectionResult,
   compareTransactions,
   transactionFields,
-  toDisplayTransactions,
   type TransactionLike,
   type TransactionProjectionInput,
 } from "../transactionQueryEngine.js";
@@ -33,11 +32,13 @@ async function runTransactionCollectionTool<TInput extends TransactionProjection
       api,
       async (planId) => fetchTransactions(api, planId, normalizedInput),
     );
-    const sortedTransactions = [...transactions].sort((left, right) => compareTransactions(left, right, "date_desc"));
+    const sortedTransactions = transactions
+      .filter((transaction) => !transaction.deleted)
+      .sort((left, right) => compareTransactions(left, right, "date_desc"));
 
     return toTextResult({
       ...buildTransactionCollectionResult(
-        toDisplayTransactions(sortedTransactions),
+        sortedTransactions,
         normalizedInput,
         "transaction_count",
       ),

@@ -2,6 +2,7 @@ import { z } from "zod";
 import * as ynab from "ynab";
 
 import { buildUpcomingWindowSummary, expandScheduledOccurrences, formatMilliunits } from "./financeToolUtils.js";
+import { getCachedScheduledTransactions } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_upcoming_obligations";
@@ -28,7 +29,7 @@ export async function execute(
     const topN = input.topN ?? 5;
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
-      const response = await api.scheduledTransactions.getScheduledTransactions(planId, undefined);
+      const response = await getCachedScheduledTransactions(api, planId);
       const scheduledTransactions = expandScheduledOccurrences(
         response.data.scheduled_transactions.filter((transaction) => !transaction.deleted),
         asOfDate,

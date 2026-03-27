@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { compactRisk, daysUntil, formatAmount, formatPercent, getTodayIsoDate, liquidCashMilliunits, netWorthMilliunits, recentMonths, totalDebtMilliunits, spreadPercent, } from "./financialDiagnosticsUtils.js";
+import { getCachedAccounts, getCachedPlanMonth, getCachedPlanMonths, getCachedScheduledTransactions, } from "./cachedYnabReads.js";
 import { isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_financial_health_check";
@@ -20,11 +21,11 @@ export async function execute(input, api) {
         const topN = input.topN ?? 5;
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const [accountsResponse, monthResponse, monthsResponse, transactionsResponse, scheduledResponse] = await Promise.all([
-                api.accounts.getAccounts(planId),
-                api.months.getPlanMonth(planId, month),
-                api.months.getPlanMonths(planId),
+                getCachedAccounts(api, planId),
+                getCachedPlanMonth(api, planId, month),
+                getCachedPlanMonths(api, planId),
                 api.transactions.getTransactions(planId, month, undefined, undefined),
-                api.scheduledTransactions.getScheduledTransactions(planId, undefined),
+                getCachedScheduledTransactions(api, planId),
             ]);
             const accounts = accountsResponse.data.accounts;
             const monthDetail = monthResponse.data.month;

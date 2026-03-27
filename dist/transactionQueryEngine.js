@@ -32,24 +32,29 @@ function applyTransactionProjection(transactions, input) {
     return transactions.map((transaction) => projectRecord(transaction, transactionFields, input));
 }
 export function buildTransactionCollectionResult(transactions, input, totalKey, extra = {}) {
+    const totalCount = transactions.length;
     if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
         return {
-            transactions,
-            [totalKey]: transactions.length,
+            transactions: toDisplayTransactions(transactions),
+            [totalKey]: totalCount,
             ...extra,
         };
     }
     if (!hasPaginationControls(input)) {
+        const displayTransactions = toDisplayTransactions(transactions);
         return {
-            transactions: applyTransactionProjection(transactions, input),
-            [totalKey]: transactions.length,
+            transactions: applyTransactionProjection(displayTransactions, input),
+            [totalKey]: totalCount,
             ...extra,
         };
     }
     const pagedTransactions = paginateEntries([...transactions], input);
+    const displayTransactions = toDisplayTransactions(pagedTransactions.entries);
     return {
-        transactions: applyTransactionProjection([...pagedTransactions.entries], input),
-        [totalKey]: transactions.length,
+        transactions: hasProjectionControls(input)
+            ? applyTransactionProjection(displayTransactions, input)
+            : displayTransactions,
+        [totalKey]: totalCount,
         ...pagedTransactions.metadata,
         ...extra,
     };

@@ -9,6 +9,7 @@ import {
   executeReliabilityHttpCli,
   formatReliabilitySummary,
   parseReliabilityHttpArgs,
+  runMeasuredHttpSequence,
   runHttpReliabilityScenario,
 } from "./reliabilityHttp.js";
 
@@ -158,6 +159,80 @@ describe("reliability http", () => {
       "initialize",
       "tools/list",
       "tools/call:ynab_get_mcp_version",
+    ]);
+  });
+
+  it("measures a representative YNAB-backed tool path with controlled dependencies", async () => {
+    const calls: string[] = [];
+    const fakeClient = {
+      async close() {
+        calls.push("close");
+      },
+      async connect(_transport: unknown) {
+        calls.push("connect");
+      },
+      async listTools() {
+        calls.push("tools/list");
+        return {
+          tools: [
+            { name: "ynab_get_mcp_version" },
+            { name: "ynab_get_budget_health_summary" },
+          ],
+        };
+      },
+      async callTool(input: { arguments: Record<string, unknown>; name: string }) {
+        calls.push(`tools/call:${input.name}`);
+
+        if (input.name === "ynab_get_mcp_version") {
+          return {
+            content: [{
+              text: "{\"version\":\"0.14.6\"}",
+              type: "text",
+            }],
+          };
+        }
+
+        return {
+          content: [{
+            text: "{\"summary\":true}",
+            type: "text",
+          }],
+        };
+      },
+    };
+
+    const results = await runMeasuredHttpSequence("http://127.0.0.1:4100/mcp", 0, {
+      createClient: () => fakeClient as any,
+      createTransport: () => ({ transport: "fake" }),
+      toolCalls: [
+        {
+          name: "ynab_get_mcp_version",
+        },
+        {
+          arguments: {
+            month: "2026-03-01",
+          },
+          name: "ynab_get_budget_health_summary",
+          validate: (response) => {
+            expect(JSON.stringify(response)).toContain("\"summary\":true");
+          },
+        },
+      ],
+    });
+
+    expect(results.map((entry) => entry.operation)).toEqual([
+      "initialize",
+      "tools/list",
+      "tools/call:ynab_get_mcp_version",
+      "tools/call:ynab_get_budget_health_summary",
+    ]);
+    expect(results.every((entry) => entry.ok)).toBe(true);
+    expect(calls).toEqual([
+      "connect",
+      "tools/list",
+      "tools/call:ynab_get_mcp_version",
+      "tools/call:ynab_get_budget_health_summary",
+      "close",
     ]);
   });
 

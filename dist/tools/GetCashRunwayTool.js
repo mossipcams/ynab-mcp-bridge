@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { averageDailyOutflowMilliunits, formatAmount, liquidCashMilliunits, recentMonths, } from "./financialDiagnosticsUtils.js";
+import { getCachedAccounts, getCachedPlanMonths } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 export const name = "ynab_get_cash_runway";
@@ -14,8 +15,8 @@ export async function execute(input, api) {
         const monthsBack = input.monthsBack ?? 3;
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const [accountsResponse, monthsResponse] = await Promise.all([
-                api.accounts.getAccounts(planId),
-                api.months.getPlanMonths(planId),
+                getCachedAccounts(api, planId),
+                getCachedPlanMonths(api, planId),
             ]);
             const liquidCash = liquidCashMilliunits(accountsResponse.data.accounts);
             const months = recentMonths(monthsResponse.data.months, input.asOfMonth, monthsBack);

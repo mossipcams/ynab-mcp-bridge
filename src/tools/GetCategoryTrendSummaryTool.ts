@@ -7,6 +7,7 @@ import {
   normalizeMonthRange,
   toSpentMilliunits,
 } from "./financeToolUtils.js";
+import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 export const name = "ynab_get_category_trend_summary";
@@ -37,7 +38,7 @@ export async function execute(
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const months = await Promise.all(
-        listMonthsInRange(fromMonth, toMonth).map((month) => api.months.getPlanMonth(planId, month)),
+        listMonthsInRange(fromMonth, toMonth).map((month) => getCachedPlanMonth(api, planId, month)),
       );
 
       const periods = months.map((response) => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
+import { getCachedCategories } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
 import { hasPaginationControls, hasProjectionControls, paginateEntries } from "./collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
@@ -41,7 +42,7 @@ export async function execute(
       categories: CategorySummary[];
     };
 
-    const response = await withResolvedPlan(input.planId, api, async (planId) => api.categories.getCategories(planId));
+    const response = await withResolvedPlan(input.planId, api, async (planId) => getCachedCategories(api, planId));
     const groups: CategoryGroupSummary[] = response.data.category_groups
       .filter((group) => !group.deleted && !group.hidden)
       .map((group) => ({

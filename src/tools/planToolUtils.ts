@@ -20,9 +20,15 @@ type PlanResolverApi = {
   };
 };
 
+const inFlightPlanResolutionSymbol = Symbol("ynabInFlightPlanResolution");
+
 type ResolvePlanIdOptions = {
   excludePlanIds?: string[];
   ignoreConfiguredPlanId?: boolean;
+};
+
+type PlanResolverApiWithInFlightResolutions = PlanResolverApi & {
+  [inFlightPlanResolutionSymbol]?: Map<string, Promise<string>>;
 };
 
 function getApiConfiguredPlanId(api: object) {
@@ -66,6 +72,32 @@ function isMissingPlanError(error: unknown) {
   return message.includes("not found") || message.includes("no entity was found");
 }
 
+function getInFlightPlanResolutionStore(api: PlanResolverApi) {
+  const target = api as PlanResolverApiWithInFlightResolutions;
+
+  if (target[inFlightPlanResolutionSymbol]) {
+    return target[inFlightPlanResolutionSymbol];
+  }
+
+  const store = new Map<string, Promise<string>>();
+  Object.defineProperty(target, inFlightPlanResolutionSymbol, {
+    configurable: false,
+    enumerable: false,
+    value: store,
+    writable: false,
+  });
+
+  return store;
+}
+
+function getPlanResolutionCacheKey(options: ResolvePlanIdOptions) {
+  const excludedPlanIds = [...(options.excludePlanIds ?? [])].sort();
+  return [
+    options.ignoreConfiguredPlanId === true ? "ignore-configured" : "allow-configured",
+    excludedPlanIds.join(","),
+  ].join(":");
+}
+
 async function resolvePlanId(
   inputPlanId: string | undefined,
   api: PlanResolverApi,
@@ -78,16 +110,34 @@ async function resolvePlanId(
     return configuredPlanId;
   }
 
-  const response = await api.plans.getPlans();
-  const resolvedPlanId = pickResolvedPlanId(response.data.plans, response.data.default_plan?.id, excludedPlanIds);
+  const inFlightStore = getInFlightPlanResolutionStore(api);
+  const cacheKey = getPlanResolutionCacheKey(options);
+  const inFlightResolution = inFlightStore.get(cacheKey);
 
-  if (resolvedPlanId) {
-    return resolvedPlanId;
+  if (inFlightResolution) {
+    return await inFlightResolution;
   }
 
-  throw new Error(
-    "No plan ID provided. Please provide a plan ID, set YNAB_PLAN_ID, or configure a default YNAB plan.",
-  );
+  const pendingResolution = (async () => {
+    const response = await api.plans.getPlans();
+    const resolvedPlanId = pickResolvedPlanId(response.data.plans, response.data.default_plan?.id, excludedPlanIds);
+
+    if (resolvedPlanId) {
+      return resolvedPlanId;
+    }
+
+    throw new Error(
+      "No plan ID provided. Please provide a plan ID, set YNAB_PLAN_ID, or configure a default YNAB plan.",
+    );
+  })();
+
+  inFlightStore.set(cacheKey, pendingResolution);
+
+  try {
+    return await pendingResolution;
+  } finally {
+    inFlightStore.delete(cacheKey);
+  }
 }
 
 export async function withResolvedPlan<T>(
