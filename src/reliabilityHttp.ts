@@ -228,7 +228,8 @@ function normalizeToolCallResponse(response: unknown) {
   }
 
   try {
-    return JSON.parse(textContent) as unknown;
+    const parsed: unknown = JSON.parse(textContent);
+    return parsed;
   } catch {
     return textContent;
   }

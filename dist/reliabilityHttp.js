@@ -129,7 +129,8 @@ function normalizeToolCallResponse(response) {
         return response;
     }
     try {
-        return JSON.parse(textContent);
+        const parsed = JSON.parse(textContent);
+        return parsed;
     }
     catch {
         return textContent;
