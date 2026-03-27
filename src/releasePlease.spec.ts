@@ -82,11 +82,20 @@ describe("release-please automation", () => {
     expect(workflow).toContain("feat|fix|deps|revert");
   });
 
-  it("documents squash merge and releasable PR titles for release automation", () => {
-    const instructions = readFileSync(new URL("../CLAUDE.md", import.meta.url), "utf8");
+  it("keeps release automation rules in tracked GitHub workflows instead of agent instruction files", () => {
+    const releaseWorkflow = readFileSync(
+      new URL("../.github/workflows/release-please.yml", import.meta.url),
+      "utf8",
+    );
+    const titleWorkflow = readFileSync(
+      new URL("../.github/workflows/validate-pr-title.yml", import.meta.url),
+      "utf8",
+    );
 
-    expect(instructions).toContain("Use squash merge");
-    expect(instructions).toContain("The PR title must be a releasable Conventional Commit");
+    expect(releaseWorkflow).toContain("googleapis/release-please-action@v4");
+    expect(titleWorkflow).toContain("PR title must use a releasable Conventional Commit title");
+    expect(titleWorkflow).toContain("feat|fix|deps|revert");
+    expect(titleWorkflow).not.toContain("CLAUDE.md");
   });
 
   it("tracks the current package version in the release manifest", () => {
