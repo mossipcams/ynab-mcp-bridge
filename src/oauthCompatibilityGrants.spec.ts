@@ -5,7 +5,7 @@ import {
   createPendingAuthorizationCompatibilityGrant,
   createPendingConsentCompatibilityGrant,
   createRefreshTokenCompatibilityGrant,
-} from "./oauthCompatibilityGrants.js";
+} from "./grantPersistence.js";
 
 describe("oauth compatibility grants", () => {
   it("builds normalized compatibility grants for persisted authorization code and refresh token records", () => {

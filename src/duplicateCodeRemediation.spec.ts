@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -25,6 +25,19 @@ const sharedBudgetHealthTools = [
 ] as const;
 const sharedTransactionBrowseTools = [
   "SearchTransactionsTool.ts",
+] as const;
+const supersededHttpModules = [
+  "httpServerIngress.ts",
+  "httpServerShared.ts",
+  "httpServerTransportRoutes.ts",
+];
+const supersededOAuthModules = [
+  "oauthCompatibilityGrants.ts",
+  "oauthGrantViews.ts",
+  "oauthStoreMigration.ts",
+];
+const supersededServerModules = [
+  "toolDefinition.ts",
 ] as const;
 
 describe("duplicate code remediation", () => {
@@ -83,7 +96,7 @@ describe("duplicate code remediation", () => {
   it("centralizes transaction browse rendering behind shared transaction helpers", () => {
     const helperSource = readFileSync(transactionLookupUtilsPath, "utf8");
 
-    expect(helperSource).toContain("export const transactionFields");
+    expect(helperSource).toContain('export { transactionFields, toDisplayTransactions } from "../transactionQueryEngine.js";');
 
     for (const toolFile of sharedTransactionBrowseTools) {
       const toolSource = readFileSync(path.join(projectRoot, "src", "tools", toolFile), "utf8");
@@ -91,8 +104,23 @@ describe("duplicate code remediation", () => {
       expect(toolSource).toContain("transactionFields");
       expect(toolSource).toContain("toDisplayTransactions(");
       expect(toolSource).not.toContain("const transactionFields = [");
-      expect(toolSource).not.toContain("amount: formatAmountMilliunits(transaction.amount)");
     }
+  });
+
+  it("routes active transaction browse filtering and ordering through transactionQueryEngine", () => {
+    const queryEngineSource = readFileSync(path.join(projectRoot, "src", "transactionQueryEngine.ts"), "utf8");
+    const searchToolSource = readFileSync(path.join(projectRoot, "src", "tools", "SearchTransactionsTool.ts"), "utf8");
+    const transactionToolUtilsSource = readFileSync(transactionLookupUtilsPath, "utf8");
+
+    expect(queryEngineSource).toContain("export function compareTransactions(");
+    expect(queryEngineSource).toContain("export function matchesTransactionFilters(");
+    expect(searchToolSource).toContain('from "../transactionQueryEngine.js"');
+    expect(searchToolSource).toContain("matchesTransactionFilters(");
+    expect(searchToolSource).toContain("compareTransactions(");
+    expect(searchToolSource).not.toContain("function matchesFilters(");
+    expect(searchToolSource).not.toContain("function compareTransactions(");
+    expect(transactionToolUtilsSource).toContain('export { transactionFields, toDisplayTransactions } from "../transactionQueryEngine.js";');
+    expect(transactionToolUtilsSource).not.toContain("formatAmountMilliunits(");
   });
 
   it("centralizes reliability summary shaping behind a shared helper", () => {
@@ -110,30 +138,22 @@ describe("duplicate code remediation", () => {
     }
   });
 
-  it("keeps oauth grant record view shaping local to oauthStore while preserving standalone helper coverage", () => {
-    const helperPath = path.join(projectRoot, "src", "oauthGrantViews.ts");
-    const helperSource = readFileSync(helperPath, "utf8");
+  it("routes runtime entrypoints through the modular-monolith owner files", () => {
+    const indexSource = readFileSync(path.join(projectRoot, "src", "index.ts"), "utf8");
+    const stdioSource = readFileSync(path.join(projectRoot, "src", "stdioServer.ts"), "utf8");
+    const httpTransportSource = readFileSync(path.join(projectRoot, "src", "httpTransport.ts"), "utf8");
+    const oauthRuntimeSource = readFileSync(path.join(projectRoot, "src", "oauthRuntime.ts"), "utf8");
 
-    expect(helperSource).toContain("export function toPendingConsentRecord");
-    expect(helperSource).toContain("export function toPendingAuthorizationRecord");
-    expect(helperSource).toContain("export function toAuthorizationCodeRecord");
-    expect(helperSource).toContain("export function toRefreshTokenRecord");
-
-    const oauthStoreSource = readFileSync(path.join(projectRoot, "src", "grantPersistence.ts"), "utf8");
-    const oauthCoreSource = readFileSync(path.join(projectRoot, "src", "grantLifecycle.ts"), "utf8");
-
-    expect(oauthStoreSource).not.toContain('from "./oauthGrantViews.js"');
-    expect(oauthStoreSource).toContain("toPendingConsentRecord(");
-    expect(oauthStoreSource).toContain("toPendingAuthorizationRecord(");
-    expect(oauthStoreSource).toContain("toAuthorizationCodeRecord(");
-    expect(oauthStoreSource).toContain("toRefreshTokenRecord(");
-    expect(oauthStoreSource).toContain("function toPendingConsentRecord(");
-    expect(oauthStoreSource).toContain("function toPendingAuthorizationRecord(");
-    expect(oauthStoreSource).toContain("function toAuthorizationCodeRecord(");
-    expect(oauthStoreSource).toContain("function toRefreshTokenRecord(");
-
-    expect(oauthCoreSource).toContain("function toPendingConsent(");
-    expect(oauthCoreSource).not.toContain("toPendingConsentRecord(");
+    expect(indexSource).toContain('from "./httpTransport.js"');
+    expect(indexSource).not.toContain('from "./httpServer.js"');
+    expect(stdioSource).toContain('from "./serverRuntime.js"');
+    expect(stdioSource).not.toContain('from "./server.js"');
+    expect(httpTransportSource).toContain('from "./oauthRuntime.js"');
+    expect(httpTransportSource).toContain('from "./serverRuntime.js"');
+    expect(oauthRuntimeSource).toContain('from "./grantLifecycle.js"');
+    expect(oauthRuntimeSource).toContain('from "./grantPersistence.js"');
+    expect(oauthRuntimeSource).not.toContain('from "./oauthCore.js"');
+    expect(oauthRuntimeSource).not.toContain('from "./oauthStore.js"');
   });
 
   it("keeps authorization-code validation explicit at the two oauth core call sites", () => {
@@ -146,66 +166,38 @@ describe("duplicate code remediation", () => {
     expect(oauthCoreSource.match(/Authorization code has expired\./g)?.length ?? 0).toBe(2);
   });
 
-  it("keeps compatibility grant builders standalone while oauthStore owns live persistence methods", () => {
-    const helperPath = path.join(projectRoot, "src", "oauthCompatibilityGrants.ts");
-    const helperSource = readFileSync(helperPath, "utf8");
-    const oauthStoreSource = readFileSync(path.join(projectRoot, "src", "grantPersistence.ts"), "utf8");
+  it("targets the superseded HTTP spread-out runtime helpers for deletion", () => {
+    const httpTransportSource = readFileSync(path.join(projectRoot, "src", "httpTransport.ts"), "utf8");
 
-    expect(helperSource).toContain("export function createAuthorizationCodeCompatibilityGrant");
-    expect(helperSource).toContain("export function createPendingAuthorizationCompatibilityGrant");
-    expect(helperSource).toContain("export function createPendingConsentCompatibilityGrant");
-    expect(helperSource).toContain("export function createRefreshTokenCompatibilityGrant");
+    expect(httpTransportSource).not.toContain('from "./httpServerIngress.js"');
+    expect(httpTransportSource).not.toContain('from "./httpServerShared.js"');
+    expect(httpTransportSource).not.toContain('from "./httpServerTransportRoutes.js"');
 
-    expect(oauthStoreSource).not.toContain('from "./oauthCompatibilityGrants.js"');
-    expect(oauthStoreSource).toContain("saveAuthorizationCode(code: string, record: AuthorizationCodeRecord)");
-    expect(oauthStoreSource).toContain("savePendingAuthorization(stateId: string, record: PendingAuthorizationRecord)");
-    expect(oauthStoreSource).toContain("savePendingConsent(consentId: string, record: PendingConsentRecord)");
-    expect(oauthStoreSource).toContain("saveRefreshToken(refreshToken: string, record: RefreshTokenRecord)");
-    expect(oauthStoreSource).toContain("[`compat-code:${code}`]: normalizeGrant({");
-    expect(oauthStoreSource).toContain("[`compat-authorization:${stateId}`]: normalizeGrant({");
-    expect(oauthStoreSource).toContain("[`compat-consent:${consentId}`]: normalizeGrant({");
-    expect(oauthStoreSource).toContain("[`compat-refresh:${refreshToken}`]: normalizeGrant({");
+    for (const fileName of supersededHttpModules) {
+      expect(existsSync(path.join(projectRoot, "src", fileName))).toBe(false);
+    }
   });
 
-  it("keeps compatibility persistence localized to dedicated oauthStore save methods", () => {
-    const helperSource = readFileSync(path.join(projectRoot, "src", "oauthCompatibilityGrants.ts"), "utf8");
-    const oauthStoreSource = readFileSync(path.join(projectRoot, "src", "grantPersistence.ts"), "utf8");
+  it("targets the superseded OAuth helper modules for deletion", () => {
+    const grantPersistenceSource = readFileSync(path.join(projectRoot, "src", "grantPersistence.ts"), "utf8");
 
-    expect(helperSource).not.toContain("persist(");
-    expect(helperSource).not.toContain("state =");
+    expect(grantPersistenceSource).not.toContain('from "./oauthCompatibilityGrants.js"');
+    expect(grantPersistenceSource).not.toContain('from "./oauthGrantViews.js"');
+    expect(grantPersistenceSource).not.toContain('from "./oauthStoreMigration.js"');
 
-    expect(oauthStoreSource).not.toContain("function saveCompatibilityGrant(");
-    expect(oauthStoreSource.match(/saveAuthorizationCode\(/g)?.length ?? 0).toBe(1);
-    expect(oauthStoreSource.match(/savePendingAuthorization\(/g)?.length ?? 0).toBe(1);
-    expect(oauthStoreSource.match(/savePendingConsent\(/g)?.length ?? 0).toBe(1);
-    expect(oauthStoreSource.match(/saveRefreshToken\(/g)?.length ?? 0).toBe(1);
-    expect(oauthStoreSource.match(/persist\(\);/g)?.length ?? 0).toBeGreaterThanOrEqual(8);
+    for (const fileName of supersededOAuthModules) {
+      expect(existsSync(path.join(projectRoot, "src", fileName))).toBe(false);
+    }
   });
 
-  it("keeps oauth migration helpers standalone while oauthStore still owns live load-state parsing", () => {
-    const migrationSource = readFileSync(path.join(projectRoot, "src", "oauthStoreMigration.ts"), "utf8");
-    const oauthStoreSource = readFileSync(path.join(projectRoot, "src", "grantPersistence.ts"), "utf8");
+  it("targets superseded server tool-definition scaffolding for deletion", () => {
+    const serverRuntimeSource = readFileSync(path.join(projectRoot, "src", "serverRuntime.ts"), "utf8");
 
-    expect(migrationSource).toContain("export function loadPersistedOAuthState(");
-    expect(migrationSource).toContain("export function deserializePersistedOAuthState(");
-    expect(oauthStoreSource).toContain("function loadState(");
-    expect(oauthStoreSource).not.toContain('from "./oauthStoreMigration.js"');
-    expect(oauthStoreSource).toContain("function parseGrantRecord(");
-    expect(oauthStoreSource).toContain("function migrateLegacyState(");
-  });
+    expect(serverRuntimeSource).not.toContain('from "./toolDefinition.js"');
 
-  it("keeps migration helpers free of file I/O while oauthStore owns file access and JSON parsing", () => {
-    const migrationSource = readFileSync(path.join(projectRoot, "src", "oauthStoreMigration.ts"), "utf8");
-    const oauthStoreSource = readFileSync(path.join(projectRoot, "src", "grantPersistence.ts"), "utf8");
-
-    expect(migrationSource).toContain("export function deserializePersistedOAuthState(");
-    expect(migrationSource).not.toContain("readFileSync(");
-    expect(migrationSource).not.toContain("writeFileSync(");
-    expect(migrationSource).not.toContain("renameSync(");
-    expect(oauthStoreSource).not.toContain("deserializePersistedOAuthState(");
-    expect(oauthStoreSource).toContain("JSON.parse(");
-    expect(oauthStoreSource).toContain("readFileSync(");
-    expect(oauthStoreSource).toContain("writeFileSync(");
+    for (const fileName of supersededServerModules) {
+      expect(existsSync(path.join(projectRoot, "src", fileName))).toBe(false);
+    }
   });
 
   it("keeps oauth grant mutation explicit through store.saveGrant at transition sites", () => {

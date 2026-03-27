@@ -5,7 +5,7 @@ import {
   toPendingAuthorizationRecord,
   toPendingConsentRecord,
   toRefreshTokenRecord,
-} from "./oauthGrantViews.js";
+} from "./grantPersistence.js";
 
 describe("oauth grant views", () => {
   const grant = {

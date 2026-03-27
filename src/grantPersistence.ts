@@ -62,7 +62,7 @@ type LegacyPersistedOAuthState = {
   version?: number;
 };
 
-type PersistedOAuthState = {
+export type PersistedOAuthState = {
   approvals: ApprovalRecord[];
   clients: Record<string, OAuthClientInformationFull>;
   clientProfiles: Record<string, ClientProfileId>;
@@ -428,25 +428,31 @@ function pruneExpiredEntries(state: PersistedOAuthState) {
   };
 }
 
+export function loadPersistedOAuthState(parsed: unknown): PersistedOAuthState {
+  if (isRecord(parsed) && (parsed["version"] === 2 || parsed["grants"] !== undefined)) {
+    return {
+      approvals: parseApprovals(parsed["approvals"]),
+      clients: parseClients(parsed["clients"]),
+      clientProfiles: parseClientProfiles(parsed["clientProfiles"]),
+      grants: parseGrants(parsed["grants"]),
+      version: 2,
+    };
+  }
+
+  return migrateLegacyState(isRecord(parsed) ? parsed : {});
+}
+
+export function deserializePersistedOAuthState(serialized: string): PersistedOAuthState {
+  return loadPersistedOAuthState(JSON.parse(serialized));
+}
+
 function loadState(storePath: string | undefined): PersistedOAuthState {
   if (!storePath) {
     return createEmptyState();
   }
 
   try {
-    const parsed = JSON.parse(readFileSync(storePath, "utf8"));
-
-    if (isRecord(parsed) && (parsed["version"] === 2 || parsed["grants"] !== undefined)) {
-      return {
-        approvals: parseApprovals(parsed["approvals"]),
-        clients: parseClients(parsed["clients"]),
-        clientProfiles: parseClientProfiles(parsed["clientProfiles"]),
-        grants: parseGrants(parsed["grants"]),
-        version: 2,
-      };
-    }
-
-    return migrateLegacyState(isRecord(parsed) ? parsed : {});
+    return deserializePersistedOAuthState(readFileSync(storePath, "utf8"));
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -461,7 +467,7 @@ function loadState(storePath: string | undefined): PersistedOAuthState {
   }
 }
 
-function toPendingConsentRecord(grant: OAuthGrant): PendingConsentRecord | undefined {
+export function toPendingConsentRecord(grant: OAuthGrant): PendingConsentRecord | undefined {
   if (!grant.consent) {
     return undefined;
   }
@@ -478,7 +484,7 @@ function toPendingConsentRecord(grant: OAuthGrant): PendingConsentRecord | undef
   };
 }
 
-function toPendingAuthorizationRecord(grant: OAuthGrant): PendingAuthorizationRecord | undefined {
+export function toPendingAuthorizationRecord(grant: OAuthGrant): PendingAuthorizationRecord | undefined {
   if (!grant.pendingAuthorization) {
     return undefined;
   }
@@ -494,7 +500,7 @@ function toPendingAuthorizationRecord(grant: OAuthGrant): PendingAuthorizationRe
   };
 }
 
-function toAuthorizationCodeRecord(grant: OAuthGrant): AuthorizationCodeRecord | undefined {
+export function toAuthorizationCodeRecord(grant: OAuthGrant): AuthorizationCodeRecord | undefined {
   if (!grant.authorizationCode || !grant.principalId || !grant.upstreamTokens) {
     return undefined;
   }
@@ -512,7 +518,7 @@ function toAuthorizationCodeRecord(grant: OAuthGrant): AuthorizationCodeRecord |
   };
 }
 
-function toRefreshTokenRecord(grant: OAuthGrant): RefreshTokenRecord | undefined {
+export function toRefreshTokenRecord(grant: OAuthGrant): RefreshTokenRecord | undefined {
   if (!grant.refreshToken || !grant.principalId || !grant.upstreamTokens) {
     return undefined;
   }
@@ -538,6 +544,86 @@ function sanitizePersistedUpstreamTokens(tokens: OAuthGrantUpstreamTokens | unde
 
   const { access_token: _accessToken, ...persistedTokens } = tokens;
   return persistedTokens;
+}
+
+export function createAuthorizationCodeCompatibilityGrant(
+  code: string,
+  record: AuthorizationCodeRecord,
+): OAuthGrant {
+  return normalizeGrant({
+    authorizationCode: {
+      code,
+      expiresAt: record.expiresAt,
+    },
+    clientId: record.clientId,
+    codeChallenge: record.codeChallenge,
+    grantId: `compat-code:${code}`,
+    redirectUri: record.redirectUri,
+    resource: record.resource,
+    scopes: record.scopes,
+    state: record.state,
+    principalId: record.principalId,
+    upstreamTokens: record.upstreamTokens,
+  });
+}
+
+export function createPendingAuthorizationCompatibilityGrant(
+  stateId: string,
+  record: PendingAuthorizationRecord,
+): OAuthGrant {
+  return normalizeGrant({
+    clientId: record.clientId,
+    codeChallenge: record.codeChallenge,
+    grantId: `compat-authorization:${stateId}`,
+    pendingAuthorization: {
+      expiresAt: record.expiresAt,
+      stateId,
+    },
+    redirectUri: record.redirectUri,
+    resource: record.resource,
+    scopes: record.scopes,
+    state: record.state,
+  });
+}
+
+export function createPendingConsentCompatibilityGrant(
+  consentId: string,
+  record: PendingConsentRecord,
+): OAuthGrant {
+  return normalizeGrant({
+    clientId: record.clientId,
+    clientName: record.clientName,
+    codeChallenge: record.codeChallenge,
+    consent: {
+      challenge: consentId,
+      expiresAt: record.expiresAt,
+    },
+    grantId: `compat-consent:${consentId}`,
+    redirectUri: record.redirectUri,
+    resource: record.resource,
+    scopes: record.scopes,
+    state: record.state,
+  });
+}
+
+export function createRefreshTokenCompatibilityGrant(
+  refreshToken: string,
+  record: RefreshTokenRecord,
+): OAuthGrant {
+  return normalizeGrant({
+    clientId: record.clientId,
+    codeChallenge: "",
+    grantId: `compat-refresh:${refreshToken}`,
+    redirectUri: "",
+    refreshToken: {
+      expiresAt: record.expiresAt,
+      token: refreshToken,
+    },
+    resource: record.resource,
+    scopes: record.scopes,
+    principalId: record.principalId,
+    upstreamTokens: record.upstreamTokens,
+  });
 }
 
 function createPersistedStateSnapshot(state: PersistedOAuthState): PersistedOAuthState {
@@ -712,21 +798,7 @@ export function createOAuthStore(storePath: string | undefined) {
         ...state,
         grants: {
           ...state.grants,
-          [`compat-code:${code}`]: normalizeGrant({
-            authorizationCode: {
-              code,
-              expiresAt: record.expiresAt,
-            },
-            clientId: record.clientId,
-            codeChallenge: record.codeChallenge,
-            grantId: `compat-code:${code}`,
-            redirectUri: record.redirectUri,
-            resource: record.resource,
-            scopes: record.scopes,
-            state: record.state,
-            principalId: record.principalId,
-            upstreamTokens: record.upstreamTokens,
-          }),
+          [`compat-code:${code}`]: createAuthorizationCodeCompatibilityGrant(code, record),
         },
       };
       persist();
@@ -766,19 +838,7 @@ export function createOAuthStore(storePath: string | undefined) {
         ...state,
         grants: {
           ...state.grants,
-          [`compat-authorization:${stateId}`]: normalizeGrant({
-            clientId: record.clientId,
-            codeChallenge: record.codeChallenge,
-            grantId: `compat-authorization:${stateId}`,
-            pendingAuthorization: {
-              expiresAt: record.expiresAt,
-              stateId,
-            },
-            redirectUri: record.redirectUri,
-            resource: record.resource,
-            scopes: record.scopes,
-            state: record.state,
-          }),
+          [`compat-authorization:${stateId}`]: createPendingAuthorizationCompatibilityGrant(stateId, record),
         },
       };
       persist();
@@ -788,20 +848,7 @@ export function createOAuthStore(storePath: string | undefined) {
         ...state,
         grants: {
           ...state.grants,
-          [`compat-consent:${consentId}`]: normalizeGrant({
-            clientId: record.clientId,
-            clientName: record.clientName,
-            codeChallenge: record.codeChallenge,
-            consent: {
-              challenge: consentId,
-              expiresAt: record.expiresAt,
-            },
-            grantId: `compat-consent:${consentId}`,
-            redirectUri: record.redirectUri,
-            resource: record.resource,
-            scopes: record.scopes,
-            state: record.state,
-          }),
+          [`compat-consent:${consentId}`]: createPendingConsentCompatibilityGrant(consentId, record),
         },
       };
       persist();
@@ -811,20 +858,7 @@ export function createOAuthStore(storePath: string | undefined) {
         ...state,
         grants: {
           ...state.grants,
-          [`compat-refresh:${refreshToken}`]: normalizeGrant({
-            clientId: record.clientId,
-            codeChallenge: "",
-            grantId: `compat-refresh:${refreshToken}`,
-            redirectUri: "",
-            refreshToken: {
-              expiresAt: record.expiresAt,
-              token: refreshToken,
-            },
-            resource: record.resource,
-            scopes: record.scopes,
-            principalId: record.principalId,
-            upstreamTokens: record.upstreamTokens,
-          }),
+          [`compat-refresh:${refreshToken}`]: createRefreshTokenCompatibilityGrant(refreshToken, record),
         },
       };
       persist();

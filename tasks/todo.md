@@ -492,3 +492,71 @@ Close the remaining Task 12 blockers, get the modular-monolith branch to a clean
   - Build and typecheck both passed with the updated TypeScript invocation and narrower compile-time surface in the extracted runtime modules.
   - No retired shim imports remain outside `dist/`.
   - PR created: `https://github.com/mossipcams/ynab-mcp-bridge/pull/167`
+
+---
+
+# Duplicate Cleanup Plan
+
+## Goal
+
+Clean up the duplicates still left after the modular-monolith extraction by:
+- deleting superseded spread-out production modules that the new owner files absorbed
+- consolidating the still-active transaction-query duplication
+- removing dead tool-definition scaffolding
+- proving the cleanup with targeted structure specs, `jscpd`, tests, and build verification
+
+## Scope
+
+- Treat `src/httpTransport.ts`, `src/oauthRuntime.ts`, `src/grantPersistence.ts`, and `src/serverRuntime.ts` as the intended owners.
+- Treat duplicate hits against the old spread-out files as cleanup candidates, not as evidence that the monolith extraction itself was wrong.
+- If any supposedly dead file still has a live production import discovered during execution, stop and re-plan before deleting it.
+
+## Tasks
+
+- [x] Task 1: Pin the duplicate-cleanup ownership boundary with failing source-shape assertions
+  Test to write:
+  Update `src/duplicateCodeRemediation.spec.ts` so it fails unless production imports flow through `httpTransport`, `oauthRuntime`, `grantPersistence`, and `serverRuntime`, and unless the old spread-out modules (`httpServerIngress.ts`, `httpServerTransportRoutes.ts`, `httpServerShared.ts`, `oauthStoreMigration.ts`, `oauthCompatibilityGrants.ts`, `oauthGrantViews.ts`, `toolDefinition.ts`) are either unreferenced by production code or explicitly marked as transitional.
+  Code to implement:
+  No production code in this task. Only the failing guardrail spec that captures the intended owner files and identifies the leftover modules as cleanup targets.
+  How to verify it works:
+  Run `npx vitest run src/duplicateCodeRemediation.spec.ts` and show the red failure first.
+
+- [x] Task 2: Delete the superseded HTTP spread-out modules
+  Test to write:
+  Reuse the failing `src/duplicateCodeRemediation.spec.ts` assertions from Task 1 and add the smallest relevant structure check in `src/httpServerStructure.spec.ts` only if needed to prove the live HTTP runtime still routes entirely through `httpTransport.ts`.
+  Code to implement:
+  Remove `src/httpServerIngress.ts`, `src/httpServerTransportRoutes.ts`, and `src/httpServerShared.ts`, or collapse any required residue into `src/httpTransport.ts` if a last live helper remains there.
+  How to verify it works:
+  Re-run `npx vitest run src/duplicateCodeRemediation.spec.ts src/httpServerStructure.spec.ts src/httpServer.spec.ts` and show the passing suite.
+
+- [x] Task 3: Delete the superseded OAuth persistence helper modules
+  Test to write:
+  Reuse the failing ownership assertions from Task 1 and extend the smallest relevant source-shape coverage in `src/oauthStore.spec.ts` or `src/subsystemExtraction.spec.ts` only if needed so it fails unless persistence and compatibility-grant ownership live solely in `grantPersistence.ts`.
+  Code to implement:
+  Remove `src/oauthStoreMigration.ts`, `src/oauthCompatibilityGrants.ts`, and `src/oauthGrantViews.ts`, inlining or moving any still-needed logic into `src/grantPersistence.ts`.
+  How to verify it works:
+  Re-run `npx vitest run src/duplicateCodeRemediation.spec.ts src/oauthStore.spec.ts src/subsystemExtraction.spec.ts` and show the passing suite.
+
+- [x] Task 4: Remove dead tool-definition scaffolding
+  Test to write:
+  Reuse `src/duplicateCodeRemediation.spec.ts` and add the smallest source-shape assertion in `src/serverFactory.spec.ts` only if needed so it fails unless `serverRuntime.ts` is the sole owner of the live tool registrar shape.
+  Code to implement:
+  Delete `src/toolDefinition.ts` if it is truly dead, or fold its last reusable piece into `src/serverRuntime.ts` and update imports so there is only one live tool-definition owner.
+  How to verify it works:
+  Re-run `npx vitest run src/duplicateCodeRemediation.spec.ts src/serverFactory.spec.ts` and show the passing suite.
+
+- [x] Task 5: Consolidate the active transaction-query duplication
+  Test to write:
+  Extend `src/transactionToolFamily.spec.ts` and, if necessary, `src/duplicateCodeRemediation.spec.ts` so they fail unless search/list/query-engine transaction filtering, row projection, and sort behavior share one helper contract rather than repeating logic across `transactionQueryUtils.ts`, `transactionQueryEngine.ts`, `SearchTransactionsTool.ts`, and `transactionToolUtils.ts`.
+  Code to implement:
+  Move the shared transaction compare/filter/row-building logic into one owner module, update the call sites to consume that shared contract, and delete or slim any now-redundant helper surface.
+  How to verify it works:
+  Run `npx vitest run src/transactionToolFamily.spec.ts src/duplicateCodeRemediation.spec.ts` and show the red failure first, then the passing suite after the implementation.
+
+- [x] Task 6: Re-run duplicate detection and final verification
+  Test to write:
+  No new test definitions unless earlier tasks reveal a real contract gap; if they do, stop and re-plan before broadening scope.
+  Code to implement:
+  No new implementation unless verification finds another true duplicate hotspot worth addressing in this branch.
+  How to verify it works:
+  Run `npm run lint:duplicates`, then run the focused Vitest suites touched above, then run `npm run build`, and compare the new `jscpd` output with the current baseline so we can confirm the unwanted duplicates were actually removed.
