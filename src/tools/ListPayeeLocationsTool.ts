@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_list_payee_locations";
 export const description = "Lists payee locations for a single YNAB plan.";

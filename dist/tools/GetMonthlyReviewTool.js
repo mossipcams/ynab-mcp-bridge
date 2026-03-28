@@ -2,7 +2,7 @@ import { z } from "zod";
 import { previousMonths } from "./financialDiagnosticsUtils.js";
 import { buildBudgetHealthMonthSummary, formatMilliunits, isWithinMonthRange, normalizeMonthInput, toSpentMilliunits, toTopRollups, } from "./financeToolUtils.js";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
-import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseItem, proseRecordItem } from "./proseFormatUtils.js";
 export const name = "ynab_get_monthly_review";
 export const description = "Monthly review with income, cash flow, budget health, top spending, and notable changes.";

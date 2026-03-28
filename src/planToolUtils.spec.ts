@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
-import { attachYnabApiRuntimeContext } from "./ynabApi.js";
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./tools/planToolUtils.js";
 
 describe("plan tool response helpers", () => {
@@ -82,7 +83,7 @@ describe("plan tool response helpers", () => {
 
   it("resolves the default plan independently for each call when no explicit plan id is provided", async () => {
     let availablePlanIds = ["plan-a"];
-    const api = attachYnabApiRuntimeContext({
+    const api = {
       plans: {
         async getPlans() {
           return {
@@ -93,15 +94,17 @@ describe("plan tool response helpers", () => {
           };
         },
       },
-    }, {
-      apiToken: "test-token",
-    });
+    };
 
-    await expect(withResolvedPlan(undefined, api, async (planId) => planId)).resolves.toBe("plan-a");
+    await expect(withResolvedPlan(undefined, api, async (planId) => planId, {
+      configuredPlanId: "plan-a",
+    })).resolves.toBe("plan-a");
 
     availablePlanIds = ["plan-b"];
 
-    await expect(withResolvedPlan(undefined, api, async (planId) => planId)).resolves.toBe("plan-b");
+    await expect(withResolvedPlan(undefined, api, async (planId) => planId, {
+      configuredPlanId: "plan-b",
+    })).resolves.toBe("plan-b");
   });
 
   it("deduplicates concurrent default-plan discovery without caching completed results across calls", async () => {
@@ -112,7 +115,7 @@ describe("plan tool response helpers", () => {
       };
     }) => void) | undefined;
     let getPlansCalls = 0;
-    const api = attachYnabApiRuntimeContext({
+    const api = {
       plans: {
         async getPlans() {
           getPlansCalls += 1;
@@ -127,9 +130,7 @@ describe("plan tool response helpers", () => {
           });
         },
       },
-    }, {
-      apiToken: "test-token",
-    });
+    };
 
     const first = withResolvedPlan(undefined, api, async (planId) => planId);
     const second = withResolvedPlan(undefined, api, async (planId) => planId);
@@ -157,5 +158,29 @@ describe("plan tool response helpers", () => {
     });
 
     await expect(followUp).resolves.toBe("plan-a");
+  });
+
+  it("keeps configured-plan lookup explicit instead of importing ynab runtime context", async () => {
+    const source = readFileSync(new URL("./tools/planToolUtils.ts", import.meta.url), "utf8");
+
+    expect(source).not.toContain("../ynabApi.js");
+    expect(source).toContain("configuredPlanId");
+
+    const api = {
+      plans: {
+        async getPlans() {
+          return {
+            data: {
+              plans: [{ id: "plan-a" }],
+              default_plan: { id: "plan-a" },
+            },
+          };
+        },
+      },
+    };
+
+    await expect(withResolvedPlan(undefined, api, async (planId) => planId, {
+      configuredPlanId: "configured-plan",
+    })).resolves.toBe("configured-plan");
   });
 });

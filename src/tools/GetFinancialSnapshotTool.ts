@@ -9,7 +9,7 @@ import {
   toTopRollups,
 } from "./financeToolUtils.js";
 import { getCachedAccounts, getCachedPlanMonth } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_get_financial_snapshot";
 export const description =

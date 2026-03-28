@@ -73,6 +73,9 @@ export function attachYnabApiRuntimeContext(api, config) {
 export function getYnabApiRuntimeContext(api) {
     return api[runtimeContextSymbol];
 }
+export function getConfiguredPlanId(api) {
+    return getYnabApiRuntimeContext(api)?.config.planId?.trim();
+}
 export function createYnabApi(configOrToken, options = {}) {
     const config = normalizeYnabConfig(configOrToken);
     const api = attachYnabApiRuntimeContext(new ynab.API(config.apiToken), config);

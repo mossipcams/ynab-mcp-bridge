@@ -3,7 +3,7 @@ import * as ynab from "ynab";
 
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { compactObject, formatMilliunits } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_get_goal_progress_summary";
 export const description =

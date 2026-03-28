@@ -1,4 +1,9 @@
 /** @type {import("dependency-cruiser").IConfiguration} */
+const entryLayer = "^src/index\\.ts$";
+const transportLayer = "^src/(httpTransport|stdioServer)\\.ts$";
+const compositionLayer = "^src/(serverRuntime|oauthRuntime)\\.ts$";
+const domainLayer = "^src/(?!index\\.ts$|httpTransport\\.ts$|stdioServer\\.ts$|serverRuntime\\.ts$|oauthRuntime\\.ts$).+\\.ts$";
+
 const config = {
   // Layers: entry, transport, composition, domain.
   // Selectors are expressed with dependency-cruiser from.path and to.path matchers.
@@ -23,7 +28,7 @@ const config = {
       from: {
         orphan: true,
         path: [
-          "^src/(index|httpServer|stdioServer|server|cloudflareCompatibility|config|localTokenService|logger|mcpAuthServer|oauthBroker|oauthCore|oauthGrant|oauthStore|oauthVerifier|originPolicy|packageInfo|runtimeConfig|startupLogging|upstreamOAuthAdapter|ynabApi|ynabRateLimiter)\\.ts$",
+          "^src/(index|httpTransport|stdioServer|serverRuntime|oauthRuntime|cloudflareCompatibility|config|grantLifecycle|grantPersistence|headerUtils|localTokenService|logger|oauthGrant|oauthSchemas|oauthVerifier|originPolicy|packageInfo|requestContext|runtimeConfig|startupLogging|transactionQueryEngine|typeUtils|upstreamOAuthAdapter|ynabApi|ynabConfig|ynabRateLimiter)\\.ts$",
           "^src/clientProfiles/(?!types\\.ts$).+\\.ts$",
           "^src/tools/.+\\.ts$",
         ],
@@ -39,7 +44,7 @@ const config = {
         pathNot: "\\.spec\\.ts$",
       },
       to: {
-        path: "^src/index\\.ts$",
+        path: entryLayer,
       },
     },
     {
@@ -47,10 +52,10 @@ const config = {
       comment: "The transport layer must not depend on the entry layer.",
       severity: "error",
       from: {
-        path: "^src/(httpServer|stdioServer)\\.ts$",
+        path: transportLayer,
       },
       to: {
-        path: "^src/index\\.ts$",
+        path: entryLayer,
       },
     },
     {
@@ -58,10 +63,10 @@ const config = {
       comment: "The composition layer must not depend on transport or entry.",
       severity: "error",
       from: {
-        path: "^src/server\\.ts$",
+        path: compositionLayer,
       },
       to: {
-        path: "^src/(index|httpServer|stdioServer)\\.ts$",
+        path: [entryLayer, transportLayer],
       },
     },
     {
@@ -69,11 +74,11 @@ const config = {
       comment: "The domain layer must not depend on composition, transport, or entry.",
       severity: "error",
       from: {
-        path: "^src/(?!index\\.ts$|httpServer\\.ts$|stdioServer\\.ts$|server\\.ts$).+\\.ts$",
+        path: domainLayer,
         pathNot: "\\.spec\\.ts$",
       },
       to: {
-        path: "^src/(index|httpServer|stdioServer|server)\\.ts$",
+        path: [entryLayer, transportLayer, compositionLayer],
       },
     },
   ],

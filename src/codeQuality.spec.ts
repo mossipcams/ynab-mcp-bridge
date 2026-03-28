@@ -31,6 +31,11 @@ describe("code quality guardrails", () => {
     expect(dependencyCruiserConfig).toContain("orphan");
     expect(dependencyCruiserConfig).toContain("from.path");
     expect(dependencyCruiserConfig).toContain("to.path");
+    expect(dependencyCruiserConfig).toContain("httpTransport");
+    expect(dependencyCruiserConfig).toContain("serverRuntime");
+    expect(dependencyCruiserConfig).not.toContain("httpServer|stdioServer");
+    expect(dependencyCruiserConfig).not.toContain("httpServer\\.ts");
+    expect(dependencyCruiserConfig).not.toContain("server\\.ts");
     expect(packageJson.devDependencies["dependency-cruiser"]).toBeTruthy();
     expect(packageJson.scripts["lint:deps"]).toBeTruthy();
     expect(workflow).toContain("Run dependency rules");

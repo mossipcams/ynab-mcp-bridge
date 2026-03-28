@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { buildAssignedSpentSummary, formatMilliunits, isWithinMonthRange, normalizeMonthRange, toSpentMilliunits, } from "./financeToolUtils.js";
 import { getCachedPlanMonths } from "./cachedYnabReads.js";
-import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseItem } from "./proseFormatUtils.js";
 export const name = "ynab_get_cash_flow_summary";
 export const description = "Cash flow summary with inflow, outflow, net flow, and assigned vs spent.";

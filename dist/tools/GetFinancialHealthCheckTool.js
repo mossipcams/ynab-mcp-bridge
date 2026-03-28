@@ -2,7 +2,7 @@ import { z } from "zod";
 import { compactRisk, daysUntil, formatAmount, formatPercent, getTodayIsoDate, liquidCashMilliunits, netWorthMilliunits, recentMonths, totalDebtMilliunits, spreadPercent, } from "./financialDiagnosticsUtils.js";
 import { getCachedAccounts, getCachedPlanMonth, getCachedPlanMonths, getCachedScheduledTransactions, } from "./cachedYnabReads.js";
 import { compactObject, isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
-import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 export const name = "ynab_get_financial_health_check";
 export const description = "Compact health check across cash, debt, budget stress, cleanup, and near-term obligations.";

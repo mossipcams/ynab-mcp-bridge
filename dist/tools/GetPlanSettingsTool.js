@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_plan_settings";
 export const description = "Gets plan-level settings such as date and currency formatting.";
 export const inputSchema = {

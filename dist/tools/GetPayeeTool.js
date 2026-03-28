@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { compactObject } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_payee";
 export const description = "Gets a single payee by ID. Returns a compact projection by default, with an explicit full-view opt-in.";
 export const inputSchema = {

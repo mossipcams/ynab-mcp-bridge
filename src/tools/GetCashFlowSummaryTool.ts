@@ -9,8 +9,8 @@ import {
   toSpentMilliunits,
 } from "./financeToolUtils.js";
 import { getCachedPlanMonths } from "./cachedYnabReads.js";
-import type { OutputFormat } from "./planToolUtils.js";
-import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import type { OutputFormat } from "../runtimePlanToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseItem } from "./proseFormatUtils.js";
 
 export const name = "ynab_get_cash_flow_summary";

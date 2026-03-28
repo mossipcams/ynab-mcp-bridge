@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_plan_month";
 export const description = "Gets a single plan month snapshot. Returns a compact summary by default, with an explicit full-view opt-in.";
 export const inputSchema = {

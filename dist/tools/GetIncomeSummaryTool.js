@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { formatMilliunits, isReadyToAssignInflowCategory, isWithinMonthRange, listMonthsInRange, normalizeMonthRange, toTopRollups, } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_income_summary";
 export const description = "Returns a compact monthly income summary using positive transactions categorized to `Inflow: Ready to Assign`, with totals, stability metrics, and top income sources.";
 export const inputSchema = {
