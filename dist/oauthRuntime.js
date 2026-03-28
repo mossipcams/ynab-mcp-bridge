@@ -352,7 +352,6 @@ export function createOAuthBroker(config) {
         callbackPath: config.callbackPath,
         callbackUrl,
         getClientCompatibilityProfile: core.getClientCompatibilityProfile,
-        saveClientCompatibilityProfile: core.saveClientCompatibilityProfile,
         getIssuerUrl: () => new URL(issuerUrl.href),
         handleConsent,
         provider,
@@ -406,7 +405,6 @@ export function createMcpAuthModule(auth) {
             verifier: oauthBroker.provider,
         }),
         getClientCompatibilityProfile: oauthBroker.getClientCompatibilityProfile,
-        saveClientCompatibilityProfile: oauthBroker.saveClientCompatibilityProfile,
         protectedResourceMetadata: {
             authorization_servers: [oauthBroker.getIssuerUrl().href],
             resource: publicServerUrl.href,
@@ -473,14 +471,6 @@ export function installOAuthRoutes(options) {
             return;
         }
         const persistedProfileId = mcpAuthModule.getClientCompatibilityProfile(req.auth.clientId);
-        const resolvedProfile = getResolvedClientProfile(res.locals);
-        if (resolvedProfile?.profileId &&
-            resolvedProfile.profileId !== "generic" &&
-            (!persistedProfileId || persistedProfileId === "generic")) {
-            mcpAuthModule.saveClientCompatibilityProfile(req.auth.clientId, resolvedProfile.profileId);
-            next();
-            return;
-        }
         if (!persistedProfileId) {
             next();
             return;
@@ -489,6 +479,7 @@ export function installOAuthRoutes(options) {
             profileId: persistedProfileId,
             reason: getPersistedOAuthProfileReason(persistedProfileId),
         };
+        const resolvedProfile = getResolvedClientProfile(res.locals);
         if (resolvedProfile?.profileId !== persistedProfile.profileId ||
             resolvedProfile.reason !== persistedProfile.reason) {
             setResolvedClientProfile(res.locals, persistedProfile);
