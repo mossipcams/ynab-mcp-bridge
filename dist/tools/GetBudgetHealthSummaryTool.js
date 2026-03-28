@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { buildBudgetHealthMonthSummary, compactObject, formatMilliunits } from "./financeToolUtils.js";
-import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 export const name = "ynab_get_budget_health_summary";
 export const description = "Budget health summary with funds available, overspending, underfunding, and assigned vs spent.";

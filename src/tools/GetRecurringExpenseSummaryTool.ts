@@ -2,7 +2,7 @@ import { z } from "zod";
 import * as ynab from "ynab";
 
 import { formatAmount } from "./financialDiagnosticsUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 type RecurringCandidate = {
   payeeId?: string | null | undefined;

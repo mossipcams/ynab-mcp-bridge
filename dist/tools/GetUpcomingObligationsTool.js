@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { buildUpcomingWindowSummary, expandScheduledOccurrences, formatMilliunits } from "./financeToolUtils.js";
 import { getCachedScheduledTransactions } from "./cachedYnabReads.js";
-import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseItem } from "./proseFormatUtils.js";
 export const name = "ynab_get_upcoming_obligations";
 export const description = "Upcoming scheduled inflows and outflows across 7, 14, and 30 day windows.";

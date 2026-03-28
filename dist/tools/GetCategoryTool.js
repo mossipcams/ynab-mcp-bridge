@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { compactObject, formatMilliunits } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_category";
 export const description = "Gets a single category by ID. Returns a compact projection by default, with an explicit full-view opt-in.";
 export const inputSchema = {

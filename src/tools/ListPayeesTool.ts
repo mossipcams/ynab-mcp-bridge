@@ -7,7 +7,7 @@ import {
   paginateEntries,
   projectRecord,
 } from "./collectionToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_list_payees";
 export const description =

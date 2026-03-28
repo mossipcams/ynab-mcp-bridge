@@ -2,7 +2,7 @@ import { z } from "zod";
 import { averageMonthlySpendingMilliunits, formatAmount, liquidCashMilliunits, recentMonths, scheduledNetNext30dMilliunits, } from "./financialDiagnosticsUtils.js";
 import { getCachedAccounts, getCachedPlanMonths, getCachedScheduledTransactions } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_emergency_fund_coverage";
 export const description = "Estimates how many months of recent spending your liquid cash can cover.";
 export const inputSchema = {

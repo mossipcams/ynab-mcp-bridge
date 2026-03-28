@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_list_payee_locations";
 export const description = "Lists payee locations for a single YNAB plan.";
 export const inputSchema = {

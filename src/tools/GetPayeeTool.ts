@@ -2,7 +2,7 @@ import { z } from "zod";
 import * as ynab from "ynab";
 
 import { compactObject } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_get_payee";
 export const description =

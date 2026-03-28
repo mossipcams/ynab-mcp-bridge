@@ -8,7 +8,7 @@ import {
   normalizeMonthInput,
 } from "./financeToolUtils.js";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_get_budget_cleanup_summary";
 export const description =

@@ -20,8 +20,8 @@ import {
   getCachedScheduledTransactions,
 } from "./cachedYnabReads.js";
 import { compactObject, isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
-import type { OutputFormat } from "./runtimePlanToolUtils.js";
-import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import type { OutputFormat } from "../runtimePlanToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 
 type Risk = {

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { compactObject, formatMilliunits, isWithinMonthRange, normalizeMonthInput, } from "./financeToolUtils.js";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_budget_cleanup_summary";
 export const description = "Returns a compact cleanup punch-list for uncategorized, unapproved, uncleared, and overspent items.";
 export const inputSchema = {

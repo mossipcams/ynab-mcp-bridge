@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getCachedCategories } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
 import { hasPaginationControls, hasProjectionControls, paginateEntries } from "./collectionToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_list_categories";
 export const description = "Lists category groups for a YNAB plan with optional category expansion controls, compact projections, and pagination.";
 const categoryGroupFields = [

@@ -9,7 +9,7 @@ import {
   projectRecord,
 } from "./collectionToolUtils.js";
 import { getCachedAccounts } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_list_accounts";
 export const description =

@@ -11,8 +11,8 @@ import {
   toTopRollups,
 } from "./financeToolUtils.js";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
-import type { OutputFormat } from "./runtimePlanToolUtils.js";
-import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import type { OutputFormat } from "../runtimePlanToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseItem, proseRecordItem } from "./proseFormatUtils.js";
 
 export const name = "ynab_get_monthly_review";

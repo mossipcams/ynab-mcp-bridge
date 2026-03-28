@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_money_movements";
 export const description = "Gets all money movements for a single YNAB plan.";
 export const inputSchema = {

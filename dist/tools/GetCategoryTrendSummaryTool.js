@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { formatMilliunits, listMonthsInRange, normalizeMonthRange, toSpentMilliunits, } from "./financeToolUtils.js";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_category_trend_summary";
 export const description = "Returns a compact assigned, spent, and available trend for a category or category group across months.";
 export const inputSchema = {

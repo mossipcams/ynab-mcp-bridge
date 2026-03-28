@@ -3,8 +3,8 @@ import * as ynab from "ynab";
 
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { buildBudgetHealthMonthSummary, compactObject, formatMilliunits } from "./financeToolUtils.js";
-import type { OutputFormat } from "./runtimePlanToolUtils.js";
-import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import type { OutputFormat } from "../runtimePlanToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 
 export const name = "ynab_get_budget_health_summary";

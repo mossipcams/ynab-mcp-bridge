@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { formatAmount, formatPercent, previousMonths } from "./financialDiagnosticsUtils.js";
 import { isCreditCardPaymentCategoryName, toSpentMilliunits } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_spending_anomalies";
 export const description = "Flags category spending spikes in a month against a trailing monthly baseline.";
 export const inputSchema = {

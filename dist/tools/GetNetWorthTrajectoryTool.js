@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { debtMilliunits, formatMilliunits, liquidCashMilliunits, listMonthsInRange, netWorthMilliunits, normalizeMonthRange, reconstructHistoricalAccountBalances, } from "./financeToolUtils.js";
 import { getCachedAccounts } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_get_net_worth_trajectory";
 export const description = "Returns a compact month-by-month net worth trajectory with liquid cash and debt across a month range.";
 export const inputSchema = {
