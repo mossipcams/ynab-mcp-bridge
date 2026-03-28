@@ -6,6 +6,7 @@ export default defineConfig({
     environment: "node",
     include: [
       "src/collectionToolUtils.spec.ts",
+      "src/transactionCollectionToolUtils.spec.ts",
       "src/transactionQueryEngine.spec.ts",
       "src/mutationTooling.spec.ts",
     ],

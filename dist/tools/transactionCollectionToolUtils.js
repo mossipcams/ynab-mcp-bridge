@@ -6,6 +6,7 @@ async function runTransactionCollectionTool(input, api, fetchTransactions, optio
         const normalizedInput = options.normalizeInput ? options.normalizeInput(input) : input;
         const transactions = await withResolvedPlan(normalizedInput.planId, api, async (planId) => fetchTransactions(api, planId, normalizedInput));
         const sortedTransactions = Array.from(transactions)
+            .filter((transaction) => !transaction.deleted)
             .sort((left, right) => compareTransactions(left, right, "date_desc"));
         return toTextResult({
             ...buildTransactionCollectionResult(sortedTransactions, normalizedInput, "transaction_count"),

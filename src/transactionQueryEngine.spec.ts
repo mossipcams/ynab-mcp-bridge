@@ -211,6 +211,12 @@ describe("transaction query engine", () => {
     expect(() => assertTransactionMonth("2026-03-02")).toThrow(
       "Month must be 'current' or the first day of a month in YYYY-MM-DD format.",
     );
+    expect(() => assertTransactionMonth("prefix-2026-03-01")).toThrow(
+      "Month must be 'current' or the first day of a month in YYYY-MM-DD format.",
+    );
+    expect(() => assertTransactionMonth("2026-03-01-suffix")).toThrow(
+      "Month must be 'current' or the first day of a month in YYYY-MM-DD format.",
+    );
   });
 
   it("omits deleted rows when formatting display transactions directly", () => {
@@ -437,6 +443,21 @@ describe("transaction query engine", () => {
     })).toBe(false);
   });
 
+  it("does not filter transfers, approval state, or amount bounds when those filters are omitted", () => {
+    expect(matchesTransactionFilters({
+      id: "txn-transfer-allowed",
+      date: "2026-03-10",
+      amount: -2500,
+      transfer_account_id: "transfer-1",
+      approved: false,
+    }, {
+      includeTransfers: true,
+      approved: undefined,
+      minAmount: undefined,
+      maxAmount: undefined,
+    })).toBe(true);
+  });
+
   it("uses stable ordering rules for each supported sort mode", () => {
     expect(compareTransactions(
       { id: "txn-b", date: "2026-03-05", amount: -1500 },
@@ -457,9 +478,60 @@ describe("transaction query engine", () => {
     )).toBeLessThan(0);
 
     expect(compareTransactions(
+      { id: "txn-a", date: "2026-03-05", amount: -1000 },
+      { id: "txn-b", date: "2026-03-06", amount: 1000 },
+      "amount_asc",
+    )).toBeLessThan(0);
+
+    expect(compareTransactions(
       { id: "txn-a", date: "2026-03-05", amount: 2000 },
       { id: "txn-b", date: "2026-03-04", amount: 1000 },
       "amount_desc",
     )).toBeLessThan(0);
+  });
+
+  it("sorts transaction arrays in the expected order for each supported mode", () => {
+    const transactions = [
+      { id: "txn-c", date: "2026-03-04", amount: 1000 },
+      { id: "txn-a", date: "2026-03-05", amount: -1000 },
+      { id: "txn-b", date: "2026-03-05", amount: -1000 },
+    ] satisfies Array<Pick<TransactionLike, "id" | "date" | "amount">>;
+
+    expect([...transactions].sort((left, right) => compareTransactions(left, right, "date_asc"))).toEqual([
+      { id: "txn-c", date: "2026-03-04", amount: 1000 },
+      { id: "txn-a", date: "2026-03-05", amount: -1000 },
+      { id: "txn-b", date: "2026-03-05", amount: -1000 },
+    ]);
+    expect([...transactions].sort((left, right) => compareTransactions(left, right, "date_desc"))).toEqual([
+      { id: "txn-a", date: "2026-03-05", amount: -1000 },
+      { id: "txn-b", date: "2026-03-05", amount: -1000 },
+      { id: "txn-c", date: "2026-03-04", amount: 1000 },
+    ]);
+    expect([...transactions].sort((left, right) => compareTransactions(left, right, "amount_asc"))).toEqual([
+      { id: "txn-a", date: "2026-03-05", amount: -1000 },
+      { id: "txn-b", date: "2026-03-05", amount: -1000 },
+      { id: "txn-c", date: "2026-03-04", amount: 1000 },
+    ]);
+    expect([...transactions].sort((left, right) => compareTransactions(left, right, "amount_desc"))).toEqual([
+      { id: "txn-c", date: "2026-03-04", amount: 1000 },
+      { id: "txn-a", date: "2026-03-05", amount: -1000 },
+      { id: "txn-b", date: "2026-03-05", amount: -1000 },
+    ]);
+  });
+
+  it("uses id as a final deterministic tie-breaker for amount-based sorts", () => {
+    const tiedTransactions = [
+      { id: "txn-b", date: "2026-03-05", amount: 1000 },
+      { id: "txn-a", date: "2026-03-05", amount: 1000 },
+    ] satisfies Array<Pick<TransactionLike, "id" | "date" | "amount">>;
+
+    expect([...tiedTransactions].sort((left, right) => compareTransactions(left, right, "amount_asc"))).toEqual([
+      { id: "txn-a", date: "2026-03-05", amount: 1000 },
+      { id: "txn-b", date: "2026-03-05", amount: 1000 },
+    ]);
+    expect([...tiedTransactions].sort((left, right) => compareTransactions(left, right, "amount_desc"))).toEqual([
+      { id: "txn-a", date: "2026-03-05", amount: 1000 },
+      { id: "txn-b", date: "2026-03-05", amount: 1000 },
+    ]);
   });
 });

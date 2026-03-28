@@ -384,6 +384,82 @@ describe("createOAuthCore", () => {
     )).rejects.toThrow(InvalidGrantError);
   });
 
+  it("rejects refresh grants missing upstream refresh context before contacting the upstream provider", async () => {
+    const { core, store, upstreamRefreshExchanges } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+
+    store.saveGrant({
+      clientId: client.client_id,
+      codeChallenge: "pkce-challenge",
+      grantId: "grant-missing-upstream-refresh-token",
+      principalId: client.client_id,
+      redirectUri: "https://claude.ai/oauth/callback",
+      refreshToken: {
+        expiresAt: 1_700_100_000_000,
+        token: "local-refresh-token",
+      },
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["offline_access", "openid", "profile"],
+      upstreamTokens: {
+        access_token: "upstream-access-token",
+        expires_in: 1800,
+        token_type: "Bearer",
+      },
+    });
+
+    await expect(core.exchangeRefreshToken(
+      client,
+      "local-refresh-token",
+      undefined,
+      new URL("https://mcp.example.com/mcp"),
+    )).rejects.toThrow("Refresh token is missing upstream credentials.");
+    expect(upstreamRefreshExchanges).toEqual([]);
+  });
+
+  it("rejects refresh grants missing principal context before contacting the upstream provider", async () => {
+    const { core, store, upstreamRefreshExchanges } = createCore();
+    const client = await core.registerClient({
+      client_name: "Claude Web",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://claude.ai/oauth/callback"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+
+    store.saveGrant({
+      clientId: client.client_id,
+      codeChallenge: "pkce-challenge",
+      grantId: "grant-missing-principal-id",
+      redirectUri: "https://claude.ai/oauth/callback",
+      refreshToken: {
+        expiresAt: 1_700_100_000_000,
+        token: "local-refresh-token-without-principal",
+      },
+      resource: "https://mcp.example.com/mcp",
+      scopes: ["offline_access", "openid", "profile"],
+      upstreamTokens: {
+        access_token: "upstream-access-token",
+        expires_in: 1800,
+        refresh_token: "upstream-refresh-token",
+        token_type: "Bearer",
+      },
+    });
+
+    await expect(core.exchangeRefreshToken(
+      client,
+      "local-refresh-token-without-principal",
+      undefined,
+      new URL("https://mcp.example.com/mcp"),
+    )).rejects.toThrow("Refresh token is missing grant context.");
+    expect(upstreamRefreshExchanges).toEqual([]);
+  });
+
   it("returns an OAuth error redirect when consent is denied and rejects unknown callback state", async () => {
     const { core } = createCore();
     const client = await core.registerClient({

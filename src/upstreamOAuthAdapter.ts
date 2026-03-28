@@ -85,14 +85,20 @@ function isOAuthTokens(value: unknown): value is OAuthTokens {
 }
 
 async function exchangeTokens(url: string, body: URLSearchParams, failureMessage: string) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body,
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  } catch {
+    throw new ServerError(`${failureMessage} due to a network error.`);
+  }
 
   if (!response.ok) {
     const bodyText = await response.text();
@@ -102,7 +108,13 @@ async function exchangeTokens(url: string, body: URLSearchParams, failureMessage
     );
   }
 
-  const tokens: unknown = await response.json();
+  let tokens: unknown;
+
+  try {
+    tokens = await response.json();
+  } catch {
+    throw new ServerError("Upstream token exchange returned an invalid JSON response.");
+  }
 
   if (!isOAuthTokens(tokens)) {
     throw new ServerError("Upstream token exchange returned an invalid token payload.");

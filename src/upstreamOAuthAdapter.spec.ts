@@ -172,4 +172,107 @@ describe("createUpstreamOAuthAdapter", () => {
       upstreamErrorFields: ["error", "error_description"],
     });
   });
+
+  it("surfaces a safe server error when a successful token exchange returns invalid JSON", async () => {
+    const server = createNodeHttpServer((req, res) => {
+      const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+
+      if (requestUrl.pathname === "/token" && req.method === "POST") {
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end("{not-valid-json");
+        return;
+      }
+
+      res.statusCode = 404;
+      res.end();
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    });
+
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Test server did not expose a TCP address");
+    }
+
+    const origin = `http://127.0.0.1:${address.port}`;
+    const adapter = createUpstreamOAuthAdapter({
+      authorizationUrl: `${origin}/authorize`,
+      callbackUrl: "https://mcp.example.com/oauth/callback",
+      clientId: "cloudflare-client-id",
+      clientSecret: "cloudflare-client-secret",
+      tokenUrl: `${origin}/token`,
+    });
+
+    await expect(adapter.exchangeAuthorizationCode("upstream-code-123")).rejects.toMatchObject({
+      message: "Upstream token exchange returned an invalid JSON response.",
+      name: "ServerError",
+    });
+  });
+
+  it("surfaces a safe server error when the upstream token endpoint cannot be reached", async () => {
+    const server = createNodeHttpServer((_req, res) => {
+      res.statusCode = 204;
+      res.end();
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Test server did not expose a TCP address");
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+
+    const origin = `http://127.0.0.1:${address.port}`;
+    const adapter = createUpstreamOAuthAdapter({
+      authorizationUrl: `${origin}/authorize`,
+      callbackUrl: "https://mcp.example.com/oauth/callback",
+      clientId: "cloudflare-client-id",
+      clientSecret: "cloudflare-client-secret",
+      tokenUrl: `${origin}/token`,
+    });
+
+    await expect(adapter.exchangeRefreshToken("upstream-refresh-token")).rejects.toMatchObject({
+      message: "Upstream refresh exchange failed due to a network error.",
+      name: "ServerError",
+    });
+  });
 });
