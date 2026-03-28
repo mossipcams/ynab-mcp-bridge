@@ -134,6 +134,7 @@ export function createOAuthBroker(config) {
             callbackUrl,
             defaultResource: config.publicUrl,
             defaultScopes: effectiveScopes,
+            ...(config.skipLocalConsent !== undefined ? { skipLocalConsent: config.skipLocalConsent } : {}),
         },
         dependencies: {
             createId: () => crypto.randomBytes(24).toString("base64url"),

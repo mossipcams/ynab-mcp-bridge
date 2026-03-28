@@ -95,7 +95,7 @@ function validateClientMetadata(client) {
     if (responseTypes.length !== 1 || responseTypes[0] !== "code") {
         throw new InvalidClientMetadataError("response_types must be exactly [\"code\"].");
     }
-    const allowedAuthMethods = new Set(["client_secret_post", "none"]);
+    const allowedAuthMethods = new Set(["none"]);
     const tokenEndpointAuthMethod = client.token_endpoint_auth_method ?? "none";
     if (!allowedAuthMethods.has(tokenEndpointAuthMethod)) {
         throw new InvalidClientMetadataError(`Unsupported token endpoint auth method: ${tokenEndpointAuthMethod}`);
@@ -138,8 +138,9 @@ export function createOAuthCore({ config, dependencies, store }) {
         const scopes = getEffectiveOAuthScopes(params.scopes && params.scopes.length > 0 ? params.scopes : config.defaultScopes);
         const resource = params.resource?.href ?? config.defaultResource;
         const compatibilityProfileId = store.getClientCompatibilityProfile(client.client_id);
-        if (store.isClientApproved({
+        if (config.skipLocalConsent || store.isClientApproved({
             clientId: client.client_id,
+            redirectUri: params.redirectUri,
             resource,
             scopes,
         })) {
@@ -211,6 +212,7 @@ export function createOAuthCore({ config, dependencies, store }) {
         }
         store.approveClient({
             clientId: grant.clientId,
+            redirectUri: grant.redirectUri,
             resource: grant.resource,
             scopes: grant.scopes,
         });

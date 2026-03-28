@@ -19,7 +19,7 @@ describe("createOAuthCore", () => {
   function createStore() {
     const clients = new Map<string, OAuthClientInformationFull>();
     const clientProfiles = new Map<string, ClientProfileId>();
-    const approvals: Array<{ clientId: string; resource: string; scopes: string[] }> = [];
+    const approvals: Array<{ clientId: string; redirectUri?: string; resource: string; scopes: string[] }> = [];
     const deletedGrantIds: string[] = [];
     const grants = new Map<string, OAuthGrant>();
     let failNextSaveGrant = false;
@@ -29,7 +29,7 @@ describe("createOAuthCore", () => {
     }
 
     return {
-      approveClient(record: { clientId: string; resource: string; scopes: string[] }) {
+      approveClient(record: { clientId: string; redirectUri: string; resource: string; scopes: string[] }) {
         approvals.push({
           ...record,
           scopes: [...record.scopes],
@@ -57,9 +57,9 @@ describe("createOAuthCore", () => {
       getRefreshTokenGrant(refreshToken: string) {
         return findGrant((grant) => grant.refreshToken?.token === refreshToken);
       },
-      isClientApproved(record: { clientId: string; resource: string; scopes: string[] }) {
+      isClientApproved(record: { clientId: string; redirectUri: string; resource: string; scopes: string[] }) {
         return approvals.some((approval) => (
-          approval.clientId === record.clientId &&
+          approval.redirectUri === record.redirectUri &&
           approval.resource === record.resource &&
           approval.scopes.join(" ") === record.scopes.join(" ")
         ));
