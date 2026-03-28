@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { previousMonths } from "./financialDiagnosticsUtils.js";
-import { buildBudgetHealthMonthSummary, formatMilliunits, isWithinMonthRange, normalizeMonthInput, toSpentMilliunits, toTopRollups, } from "./financeToolUtils.js";
+import { buildBudgetHealthMonthSummary, buildCategorySpentLookup, buildSpendingAnomalies, formatMilliunits, isWithinMonthRange, normalizeMonthInput, toTopRollups, } from "./financeToolUtils.js";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseItem, proseRecordItem } from "./proseFormatUtils.js";
@@ -27,9 +27,6 @@ function addRollup(bucket, key, value) {
         transactionCount: 1,
     });
 }
-function buildBaselineSpentLookup(responses) {
-    return responses.map((response) => new Map(response.data.month.categories.map((category) => [category.id, toSpentMilliunits(category.activity)])));
-}
 export async function execute(input, api) {
     try {
         const month = normalizeMonthInput(input.month);
@@ -48,7 +45,7 @@ export async function execute(input, api) {
             }
             const monthDetail = currentMonthResponse.data.month;
             const categories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden);
-            const baselineSpentLookups = buildBaselineSpentLookup(baselineResponses);
+            const baselineSpentLookups = buildCategorySpentLookup(baselineResponses);
             const budgetHealthDetails = buildBudgetHealthMonthSummary(monthDetail);
             const budgetHealthSummary = {
                 ready_to_assign: budgetHealthDetails.ready_to_assign,
@@ -79,31 +76,15 @@ export async function execute(input, api) {
                     amountMilliunits: Math.abs(transaction.amount),
                 });
             }
-            const anomalies = categories
-                .map((category) => {
-                const latestSpent = toSpentMilliunits(category.activity);
-                const baselineValues = baselineSpentLookups.map((lookup) => lookup.get(category.id) ?? 0);
-                const baselineAverage = baselineValues.length === 0
-                    ? 0
-                    : baselineValues.reduce((sum, value) => sum + value, 0) / baselineValues.length;
-                if (baselineAverage <= 0
-                    || latestSpent < baselineAverage * 2
-                    || latestSpent - baselineAverage < 10_000) {
-                    return undefined;
-                }
-                return {
-                    category_id: category.id,
-                    category_name: category.name,
-                    latest_spent: formatMilliunits(latestSpent),
-                    baseline_average: formatMilliunits(Math.round(baselineAverage)),
-                    change_percent: (((latestSpent - baselineAverage) / baselineAverage) * 100).toFixed(2),
-                    sort_difference: latestSpent - baselineAverage,
-                };
-            })
-                .filter((anomaly) => !!anomaly)
-                .sort((left, right) => right.sort_difference - left.sort_difference)
-                .slice(0, topN)
-                .map(({ sort_difference: _sortDifference, ...anomaly }) => anomaly);
+            const anomalies = buildSpendingAnomalies({
+                baselineSpentLookups,
+                categories,
+                formatAmount: formatMilliunits,
+                formatPercent: (value) => value.toFixed(2),
+                minimumDifference: 10_000,
+                thresholdMultiplier: 2,
+                topN,
+            });
             const payload = {
                 month: monthDetail.month,
                 income: formatMilliunits(monthDetail.income),

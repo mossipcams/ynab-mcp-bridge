@@ -1078,6 +1078,22 @@ export async function startHttpServer(
   const app = express();
   const jsonParser = express.json();
   const urlencodedParser = express.urlencoded({ extended: false });
+  let discoveryResourceBaseUrl: string | undefined;
+  let fastPathCache:
+    | {
+        initializeResult: ReturnType<typeof getInitializeResult>;
+        resourcesListResult?: ReturnType<typeof getResourcesListResult>;
+        toolCallResults: Map<string, CallToolResult>;
+        toolsListResult: ReturnType<typeof getToolsListResult>;
+      }
+    | undefined;
+  let runtimePool: ManagedRequestRuntimePool | undefined;
+  let resolveStartupReady: (() => void) | undefined;
+  let rejectStartupReady: ((error: unknown) => void) | undefined;
+  const startupReady = new Promise<void>((resolve, reject) => {
+    resolveStartupReady = resolve;
+    rejectStartupReady = reject;
+  });
 
   function getRequestAuthDebugOptions(
     req: Pick<Request, "path" | "url">,
@@ -1203,6 +1219,12 @@ export async function startHttpServer(
     next();
   });
 
+  app.use((_req, _res, next) => {
+    startupReady.then(() => {
+      next();
+    }, next);
+  });
+
   app.use((req, res, next) => {
     if (auth.mode !== "oauth" && getRequestPath(req) === path && req.method === "POST") {
       jsonParser(req, res, next);
@@ -1250,6 +1272,10 @@ export async function startHttpServer(
   installMcpPostRoute({
     app,
     createManagedRequest: () => {
+      if (!runtimePool) {
+        throw new Error("Managed request runtime pool is not initialized.");
+      }
+
       return createManagedRequestFromRuntimePool(
         runtimePool,
         discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {},
@@ -1337,36 +1363,44 @@ export async function startHttpServer(
 
   const resolvedAddress: AddressInfo = address;
   let closed = false;
-  const resourceOrigin = auth.mode === "oauth"
-    ? new URL(auth.publicUrl).origin
-    : `http://${host}:${resolvedAddress.port}`;
-  const discoveryResourceBaseUrl = new URL(`${path.replace(/\/$/, "")}/resources/`, resourceOrigin).toString();
-  const fastPathCache = {
-    toolCallResults: await createFastPathToolCallResults(),
-    initializeResult: getInitializeResult(),
-    toolsListResult: getToolsListResult(),
-    resourcesListResult: getResourcesListResult({ discoveryResourceBaseUrl }),
-  };
-  const runtimePool = createManagedRequestRuntimePool(
-    ynab,
-    sharedApi,
-    { discoveryResourceBaseUrl },
-    dependencies.createServer ?? createServer,
-  );
+  try {
+    const resourceOrigin = auth.mode === "oauth"
+      ? new URL(auth.publicUrl).origin
+      : `http://${host}:${resolvedAddress.port}`;
+    discoveryResourceBaseUrl = new URL(`${path.replace(/\/$/, "")}/resources/`, resourceOrigin).toString();
+    fastPathCache = {
+      toolCallResults: await createFastPathToolCallResults(),
+      initializeResult: getInitializeResult(),
+      toolsListResult: getToolsListResult(),
+      resourcesListResult: getResourcesListResult({ discoveryResourceBaseUrl }),
+    };
+    runtimePool = createManagedRequestRuntimePool(
+      ynab,
+      sharedApi,
+      { discoveryResourceBaseUrl },
+      dependencies.createServer ?? createServer,
+    );
 
-  return {
-    host,
-    path,
-    port: resolvedAddress.port,
-    url: `http://${host}:${resolvedAddress.port}${path}`,
-    close: async () => {
-      if (closed) {
-        return;
-      }
+    resolveStartupReady?.();
 
-      closed = true;
-      await closeNodeServer(server);
-      await runtimePool?.close();
-    },
-  };
+    return {
+      host,
+      path,
+      port: resolvedAddress.port,
+      url: `http://${host}:${resolvedAddress.port}${path}`,
+      close: async () => {
+        if (closed) {
+          return;
+        }
+
+        closed = true;
+        await closeNodeServer(server);
+        await runtimePool?.close();
+      },
+    };
+  } catch (error) {
+    rejectStartupReady?.(error);
+    await closeNodeServer(server);
+    throw error;
+  }
 }

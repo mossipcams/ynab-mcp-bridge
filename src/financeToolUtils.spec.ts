@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAccountSnapshotSummary,
   buildAssignedSpentSummary,
   buildAllocationBreakdown,
+  buildCategorySpentLookup,
   buildBudgetHealthMonthSummary,
+  buildCleanupTransactionSummary,
+  buildVisibleCategoryHealthSummary,
+  buildSpendingAnomalies,
   buildUpcomingWindowSummary,
   compactObject,
   formatMilliunits,
@@ -24,6 +29,80 @@ describe("finance tool utils", () => {
       spent: "175.00",
       assigned_vs_spent: "75.00",
     });
+  });
+
+  it("builds indexed category spending lookups for baseline months", () => {
+    expect(buildCategorySpentLookup([
+      {
+        data: {
+          month: {
+            categories: [
+              { id: "cat-1", activity: -12000 },
+              { id: "cat-2", activity: 5000 },
+            ],
+          },
+        },
+      },
+      {
+        data: {
+          month: {
+            categories: [
+              { id: "cat-1", activity: -18000 },
+              { id: "cat-3", activity: -7000 },
+            ],
+          },
+        },
+      },
+    ])).toEqual([
+      new Map([
+        ["cat-1", 12000],
+        ["cat-2", 0],
+      ]),
+      new Map([
+        ["cat-1", 18000],
+        ["cat-3", 7000],
+      ]),
+    ]);
+  });
+
+  it("builds sorted spending anomalies from indexed baselines", () => {
+    expect(buildSpendingAnomalies({
+      baselineSpentLookups: [
+        new Map([
+          ["cat-1", 12000],
+          ["cat-2", 7000],
+        ]),
+        new Map([
+          ["cat-1", 10000],
+          ["cat-2", 6000],
+        ]),
+      ],
+      categories: [
+        {
+          id: "cat-1",
+          name: "Groceries",
+          activity: -45000,
+        },
+        {
+          id: "cat-2",
+          name: "Dining",
+          activity: -8000,
+        },
+      ],
+      formatAmount: (value) => `${value}m`,
+      formatPercent: (value) => `${value.toFixed(1)}%`,
+      minimumDifference: 10000,
+      thresholdMultiplier: 1.5,
+      topN: 5,
+    })).toEqual([
+      {
+        category_id: "cat-1",
+        category_name: "Groceries",
+        latest_spent: "45000m",
+        baseline_average: "11000m",
+        change_percent: "309.1%",
+      },
+    ]);
   });
 
   it("builds shared budget-health month metrics from visible categories", () => {
@@ -101,6 +180,212 @@ describe("finance tool utils", () => {
           amountMilliunits: 60000,
         },
       ],
+    });
+  });
+
+  it("builds single-pass visible category health summaries", () => {
+    expect(buildVisibleCategoryHealthSummary([
+      {
+        id: "cat-1",
+        name: "Dining Out",
+        hidden: false,
+        deleted: false,
+        balance: -20000,
+        goal_under_funded: 0,
+      },
+      {
+        id: "cat-2",
+        name: "Emergency Fund",
+        hidden: false,
+        deleted: false,
+        balance: 30000,
+        goal_under_funded: 120000,
+      },
+      {
+        id: "cat-hidden",
+        name: "Hidden",
+        hidden: true,
+        deleted: false,
+        balance: -99999,
+        goal_under_funded: 99999,
+      },
+    ])).toEqual({
+      overspentCategories: [
+        {
+          id: "cat-1",
+          name: "Dining Out",
+          balance: -20000,
+          hidden: false,
+          deleted: false,
+          goal_under_funded: 0,
+        },
+      ],
+      underfundedCategories: [
+        {
+          id: "cat-2",
+          name: "Emergency Fund",
+          balance: 30000,
+          hidden: false,
+          deleted: false,
+          goal_under_funded: 120000,
+        },
+      ],
+      availableTotalMilliunits: 30000,
+    });
+  });
+
+  it("builds single-pass cleanup transaction summaries", () => {
+    expect(buildCleanupTransactionSummary([
+      {
+        id: "tx-1",
+        approved: false,
+        cleared: "uncleared",
+        category_id: null,
+      },
+      {
+        id: "tx-2",
+        approved: true,
+        cleared: "uncleared",
+        category_id: "cat-1",
+      },
+      {
+        id: "tx-3",
+        approved: false,
+        cleared: "cleared",
+        category_id: "cat-2",
+      },
+    ])).toEqual({
+      uncategorizedTransactions: [
+        {
+          id: "tx-1",
+          approved: false,
+          cleared: "uncleared",
+          category_id: null,
+        },
+      ],
+      unapprovedTransactions: [
+        {
+          id: "tx-1",
+          approved: false,
+          cleared: "uncleared",
+          category_id: null,
+        },
+        {
+          id: "tx-3",
+          approved: false,
+          cleared: "cleared",
+          category_id: "cat-2",
+        },
+      ],
+      unclearedTransactions: [
+        {
+          id: "tx-1",
+          approved: false,
+          cleared: "uncleared",
+          category_id: null,
+        },
+        {
+          id: "tx-2",
+          approved: true,
+          cleared: "uncleared",
+          category_id: "cat-1",
+        },
+      ],
+    });
+  });
+
+  it("builds single-pass account snapshot summaries", () => {
+    expect(buildAccountSnapshotSummary([
+      {
+        id: "acct-1",
+        name: "Checking",
+        on_budget: true,
+        deleted: false,
+        closed: false,
+        balance: 320000,
+      },
+      {
+        id: "acct-2",
+        name: "Savings",
+        on_budget: true,
+        deleted: false,
+        closed: false,
+        balance: 180000,
+      },
+      {
+        id: "acct-3",
+        name: "Visa",
+        on_budget: true,
+        deleted: false,
+        closed: false,
+        balance: -90000,
+      },
+      {
+        id: "acct-4",
+        name: "Closed",
+        on_budget: true,
+        deleted: false,
+        closed: true,
+        balance: 50000,
+      },
+    ])).toEqual({
+      activeAccounts: [
+        {
+          id: "acct-1",
+          name: "Checking",
+          on_budget: true,
+          deleted: false,
+          closed: false,
+          balance: 320000,
+        },
+        {
+          id: "acct-2",
+          name: "Savings",
+          on_budget: true,
+          deleted: false,
+          closed: false,
+          balance: 180000,
+        },
+        {
+          id: "acct-3",
+          name: "Visa",
+          on_budget: true,
+          deleted: false,
+          closed: false,
+          balance: -90000,
+        },
+      ],
+      positiveAccounts: [
+        {
+          id: "acct-1",
+          name: "Checking",
+          on_budget: true,
+          deleted: false,
+          closed: false,
+          balance: 320000,
+        },
+        {
+          id: "acct-2",
+          name: "Savings",
+          on_budget: true,
+          deleted: false,
+          closed: false,
+          balance: 180000,
+        },
+      ],
+      negativeAccounts: [
+        {
+          id: "acct-3",
+          name: "Visa",
+          on_budget: true,
+          deleted: false,
+          closed: false,
+          balance: -90000,
+        },
+      ],
+      netWorthMilliunits: 410000,
+      liquidCashMilliunits: 500000,
+      onBudgetAccountCount: 3,
     });
   });
 
