@@ -27,6 +27,17 @@ describe("collection tool utils", () => {
     });
   });
 
+  it("ignores requested fields that are not present and never synthesizes a missing id", () => {
+    expect(projectRecord({
+      amount: "12.34",
+      date: "2026-03-01",
+    }, ["date", "amount", "payee_name"] as const, {
+      fields: ["payee_name", "amount"],
+    })).toEqual({
+      amount: "12.34",
+    });
+  });
+
   it("paginates entries with stable metadata", () => {
     expect(paginateEntries(["a", "b", "c", "d"], {
       limit: 2,
@@ -39,6 +50,21 @@ describe("collection tool utils", () => {
         limit: 2,
         has_more: true,
         next_offset: 3,
+      },
+    });
+  });
+
+  it("uses default pagination values when limit and offset are omitted", () => {
+    expect(paginateEntries(["a", "b"], {
+      limit: undefined,
+      offset: undefined,
+    })).toEqual({
+      entries: ["a", "b"],
+      metadata: {
+        returned_count: 2,
+        offset: 0,
+        limit: 50,
+        has_more: false,
       },
     });
   });
@@ -103,6 +129,34 @@ describe("collection tool utils", () => {
         { visible: "first" },
       ],
       item_count: 1,
+    });
+  });
+
+  it("projects paginated entries when projection controls are provided", () => {
+    expect(buildCollectionResult({
+      entries: [
+        { id: "a", visible: "first", internal_note: "keep me" },
+        { id: "b", visible: "second", internal_note: "keep me too" },
+      ],
+      entryKey: "items",
+      countKey: "item_count",
+      allFields: ["visible"] as const,
+      input: {
+        limit: 1,
+        offset: 0,
+        fields: ["visible"],
+        includeIds: false,
+      },
+    })).toEqual({
+      items: [
+        { visible: "first" },
+      ],
+      item_count: 2,
+      returned_count: 1,
+      offset: 0,
+      limit: 1,
+      has_more: true,
+      next_offset: 1,
     });
   });
 
