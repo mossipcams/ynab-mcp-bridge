@@ -3309,6 +3309,69 @@ describe("startHttpServer", () => {
     ))).toBeTruthy();
   });
 
+  it("reuses a persisted Claude profile on authorize after generic desktop registration hints", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const desktopRedirectUri = "https://claude.ai/api/mcp/auth_callback";
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: {
+        ...createCloudflareOAuthAuth({
+          authorizationUrl: upstream.authorizationUrl,
+          issuer: upstream.issuer,
+          jwksUrl: upstream.jwksUrl,
+          tokenUrl: upstream.tokenUrl,
+        }),
+        skipLocalConsent: true,
+      },
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      consoleErrorSpy.mockRestore();
+      await httpServer.close();
+    });
+
+    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "User-Agent": "python-httpx/0.28.1",
+      },
+      body: JSON.stringify({
+        client_name: "Claude Desktop",
+        grant_types: ["authorization_code", "refresh_token"],
+        redirect_uris: [desktopRedirectUri],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+
+    expect(registrationResponse.status).toBe(201);
+    const registration = await registrationResponse.json() as { client_id: string };
+
+    const authorizeResponse = await fetch(new URL(
+      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent(desktopRedirectUri)}&response_type=code&code_challenge=${encodeURIComponent("desktop-test-challenge")}&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "User-Agent": "python-httpx/0.28.1",
+      },
+    });
+
+    expect(authorizeResponse.status).toBe(302);
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
+      details.path === "/authorize" &&
+      details.method === "GET" &&
+      details.profileId === "claude" &&
+      details.reason === "oauth-client-profile:claude"
+    ))).toBeTruthy();
+  });
+
   it("escapes client metadata and sends hardened headers on the consent page", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({

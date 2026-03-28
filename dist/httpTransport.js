@@ -768,15 +768,22 @@ export async function startHttpServer(options, dependencies = {}) {
             req.method === "POST"
             ? getBodyStringValue(req.body, "client_id")
             : undefined;
+        const authorizeClientId = auth.mode === "oauth" &&
+            getRequestPath(req) === "/authorize" &&
+            req.method === "GET" &&
+            typeof req.query["client_id"] === "string"
+            ? req.query["client_id"]
+            : undefined;
+        const compatibilityClientId = tokenClientId ?? authorizeClientId;
         const requestProfile = detectClientProfile(toClientProfileRequestContext(req));
-        const persistedProfileId = auth.mode === "oauth" && tokenClientId
-            ? mcpAuthModule?.getClientCompatibilityProfile(tokenClientId)
+        const persistedProfileId = auth.mode === "oauth" && compatibilityClientId
+            ? mcpAuthModule?.getClientCompatibilityProfile(compatibilityClientId)
             : undefined;
         if (auth.mode === "oauth" &&
-            tokenClientId &&
+            compatibilityClientId &&
             requestProfile.profileId !== "generic" &&
             (!persistedProfileId || persistedProfileId === "generic")) {
-            mcpAuthModule?.saveClientCompatibilityProfile(tokenClientId, requestProfile.profileId);
+            mcpAuthModule?.saveClientCompatibilityProfile(compatibilityClientId, requestProfile.profileId);
         }
         const detectedProfile = persistedProfileId && requestProfile.profileId === "generic"
             ? {
