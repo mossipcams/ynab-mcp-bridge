@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.3...ynab-mcp-bridge-v0.15.4) (2026-03-28)
+
+
+### Bug Fixes
+
+* reuse persisted Claude profile on authorize ([896d94a](https://github.com/mossipcams/ynab-mcp-bridge/commit/896d94a227b2d524a4e01d3f051efe51cd08b665))
+
 ## [0.15.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.2...ynab-mcp-bridge-v0.15.3) (2026-03-28)
 
 
