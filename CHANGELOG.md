@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.0...ynab-mcp-bridge-v0.15.1) (2026-03-28)
+
+
+### Bug Fixes
+
+* harden oauth token exchange and tool-call auth ([5dfb96e](https://github.com/mossipcams/ynab-mcp-bridge/commit/5dfb96e658114bdb68803178ca95b1024c4a6db2))
+* harden startup sequencing and summary hot paths ([796b2ee](https://github.com/mossipcams/ynab-mcp-bridge/commit/796b2eecb69936fe0e941a9daf6be54de667cd0b))
+* move runtime plan adapter out of tool catalog ([f9c9519](https://github.com/mossipcams/ynab-mcp-bridge/commit/f9c9519646524ddf184ca3ac705a93c65a16be48))
+* sync release metadata with published version ([205784d](https://github.com/mossipcams/ynab-mcp-bridge/commit/205784d65b89e1fc98b787a36b578eff2f53fac4))
+* tighten architecture guardrails ([f39f98a](https://github.com/mossipcams/ynab-mcp-bridge/commit/f39f98ae7fe82be756fe8480651fd0af1b49629e))
+* tighten architecture guardrails ([4763842](https://github.com/mossipcams/ynab-mcp-bridge/commit/47638429d31c07da13628cba694d92780f4a5bf0))
+
 ## [0.15.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.11...ynab-mcp-bridge-v0.15.0) (2026-03-27)
 
 
