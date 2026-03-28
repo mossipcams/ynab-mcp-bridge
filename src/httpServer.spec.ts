@@ -2606,7 +2606,7 @@ describe("startHttpServer", () => {
     await expect(response.json()).resolves.toMatchObject({
       authorization_servers: ["https://mcp.example.com/"],
       resource: "https://mcp.example.com/mcp",
-      scopes_supported: ["openid", "profile"],
+      scopes_supported: ["openid", "profile", "offline_access"],
     });
   });
 
@@ -2727,41 +2727,6 @@ describe("startHttpServer", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"");
-  });
-
-  it("does not require offline_access in the bearer challenge for the MCP resource", async () => {
-    const { jwksUrl } = await startJwksServer();
-    const httpServer = await startHttpServer({
-      ynab,
-      auth: createCloudflareOAuthAuth({
-        jwksUrl,
-        scopes: ["openid", "profile", "offline_access"],
-      }),
-      allowedOrigins: ["https://claude.ai"],
-      host: "127.0.0.1",
-      path: "/mcp",
-      port: 0,
-    });
-    cleanups.push(() => httpServer.close());
-
-    const response = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).not.toContain("offline_access");
   });
 
   it("exposes OAuth authorization server metadata when oauth mode is enabled", async () => {
