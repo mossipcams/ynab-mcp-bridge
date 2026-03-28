@@ -398,6 +398,7 @@ export function createOAuthCore({ config, dependencies, store }) {
         getClientCompatibilityProfile: store.getClientCompatibilityProfile,
         handleCallback,
         registerClient,
+        saveClientCompatibilityProfile: store.saveClientCompatibilityProfile,
         startAuthorization,
     };
 }
