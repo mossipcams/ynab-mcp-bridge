@@ -10,11 +10,11 @@ const sortableValues = [
     "amount_desc",
 ];
 export const name = "ynab_search_transactions";
-export const description = "Searches transactions with compact filters, projections, and pagination for AI-friendly drill-down.";
+export const description = "Transaction search with compact filters, projections, and pagination.";
 export const inputSchema = {
-    planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
-    fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Optional inclusive start date."),
-    toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Optional inclusive end date."),
+    planId: z.string().optional().describe("Plan ID (uses env default)"),
+    fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Start date (ISO)"),
+    toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("End date (ISO)"),
     payeeId: z.string().optional().describe("Optional payee id filter."),
     accountId: z.string().optional().describe("Optional account id filter."),
     categoryId: z.string().optional().describe("Optional category id filter."),
@@ -23,10 +23,10 @@ export const inputSchema = {
     minAmount: z.number().optional().describe("Optional minimum amount in YNAB milliunits."),
     maxAmount: z.number().optional().describe("Optional maximum amount in YNAB milliunits."),
     includeTransfers: z.boolean().default(false).describe("When false, omits transfer transactions."),
-    limit: z.number().int().min(1).max(500).default(50).describe("Maximum number of transactions to return."),
-    offset: z.number().int().min(0).default(0).describe("Number of matching transactions to skip."),
-    includeIds: z.boolean().optional().describe("When false, omits transaction ids from the output."),
-    fields: z.array(z.enum(transactionFields)).optional().describe("Optional transaction fields to include in each row."),
+    limit: z.number().int().min(1).max(500).default(50).describe("Max results"),
+    offset: z.number().int().min(0).default(0).describe("Skip N results"),
+    includeIds: z.boolean().optional().describe("Include IDs"),
+    fields: z.array(z.enum(transactionFields)).optional().describe("Fields to include"),
     sort: z.enum(sortableValues).default("date_desc").describe("Sort order for matching transactions."),
 };
 export async function execute(input, api) {

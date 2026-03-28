@@ -1,4 +1,4 @@
-import { compactObject, formatMilliunits } from "./financeToolUtils.js";
+import { compactObject, expandScheduledOccurrences, formatMilliunits } from "./financeToolUtils.js";
 function activeAccounts(accounts) {
     return accounts.filter((account) => !account.deleted && !account.closed);
 }
@@ -66,6 +66,9 @@ export function formatAmount(value) {
 }
 export function compactRisk(code, severity) {
     return compactObject({ code, severity });
+}
+export function scheduledNetNext30dMilliunits(transactions, asOfDate) {
+    return expandScheduledOccurrences(transactions.filter((transaction) => !transaction.deleted), asOfDate, 30).reduce((sum, transaction) => sum + transaction.amount, 0);
 }
 export function previousMonths(latestMonth, count) {
     const months = [];

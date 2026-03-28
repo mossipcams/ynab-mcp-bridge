@@ -9,30 +9,30 @@ import {
   toSpentMilliunits,
 } from "./financeToolUtils.js";
 import { getCachedPlanMonths } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import type { OutputFormat } from "./runtimePlanToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
+import { buildProse, proseItem } from "./proseFormatUtils.js";
 
 export const name = "ynab_get_cash_flow_summary";
 export const description =
-  "Returns a compact cash flow summary with inflow, outflow, and net cash flow. `net_flow` is cash movement, not savings, and `assigned_vs_spent` reflects budget timing and buffering, not a discipline score.";
+  "Cash flow summary with inflow, outflow, net flow, and assigned vs spent.";
 export const inputSchema = {
-  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
-  fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe(
-    "The first month in ISO format or the string 'current'.",
-  ),
-  toMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).optional().describe(
-    "The last month in ISO format. Defaults to fromMonth.",
-  ),
+  planId: z.string().optional().describe("Plan ID (uses env default)"),
+  fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("Start month (ISO or 'current')"),
+  toMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).optional().describe("End month (defaults to start)"),
+  format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
 };
 function toMonthKey(date: string) {
   return `${date.slice(0, 7)}-01`;
 }
 
 export async function execute(
-  input: { planId?: string; fromMonth?: string; toMonth?: string },
+  input: { planId?: string; fromMonth?: string; toMonth?: string; format?: OutputFormat },
   api: ynab.API,
 ) {
   try {
     const { fromMonth, toMonth } = normalizeMonthRange(input.fromMonth, input.toMonth);
+    const format = input.format ?? "compact";
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const [transactionsResponse, monthsResponse] = await Promise.all([
@@ -70,7 +70,7 @@ export async function execute(
       const assignedMilliunits = months.reduce((sum, month) => sum + month.budgeted, 0);
       const spentMilliunits = months.reduce((sum, month) => sum + toSpentMilliunits(month.activity), 0);
 
-      return toTextResult({
+      const payload = {
         from_month: fromMonth,
         to_month: toMonth,
         inflow: formatMilliunits(inflowMilliunits),
@@ -88,7 +88,26 @@ export async function execute(
             ...buildAssignedSpentSummary(month.budgeted, toSpentMilliunits(month.activity)),
           };
         }),
-      });
+      };
+
+      if (format === "prose") {
+        return toProseResult(buildProse(
+          `Cash Flow Summary (${payload.from_month} to ${payload.to_month})`,
+          [
+            ["inflow", payload.inflow],
+            ["outflow", payload.outflow],
+            ["net_flow", payload.net_flow],
+            ["assigned", payload.assigned],
+            ["spent", payload.spent],
+            ["assigned_vs_spent", payload.assigned_vs_spent],
+          ],
+          [
+            { heading: "Periods", items: payload.periods.map((period) => proseItem(period.month, period.net_flow)) },
+          ],
+        ));
+      }
+
+      return toTextResult(payload, format);
     });
   } catch (error) {
     return toErrorResult(error);

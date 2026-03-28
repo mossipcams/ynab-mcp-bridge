@@ -12,6 +12,10 @@ function parseText(result: Awaited<ReturnType<typeof GetFinancialSnapshotTool.ex
   return JSON.parse(result.content[0].text);
 }
 
+function readText(result: { content: Array<{ text: string }> }) {
+  return result.content[0].text;
+}
+
 function registerHandlers(api: unknown) {
   const handlers = new Map<string, (input: Record<string, unknown>) => Promise<unknown>>();
 
@@ -157,6 +161,110 @@ describe("finance summary tools", () => {
       ],
     });
     expect(baselineFindCalls).toBe(0);
+  });
+
+  it("renders the monthly review as prose when requested", async () => {
+    const api = {
+      plans: {
+        getPlans: vi.fn().mockResolvedValue({
+          data: {
+            plans: [{ id: "plan-1" }],
+            default_plan: { id: "plan-1" },
+          },
+        }),
+      },
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "txn-1",
+                date: "2026-03-15",
+                amount: -30000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-groceries",
+                category_name: "Groceries",
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonth: vi.fn(async (_planId: string, month: string) => {
+          if (month === "2026-03-01") {
+            return {
+              data: {
+                month: {
+                  month: "2026-03-01",
+                  income: 500000,
+                  budgeted: 300000,
+                  activity: -120000,
+                  to_be_budgeted: 20000,
+                  age_of_money: 25,
+                  deleted: false,
+                  categories: [
+                    {
+                      id: "cat-groceries",
+                      name: "Groceries",
+                      activity: -45000,
+                      deleted: false,
+                      hidden: false,
+                    },
+                    {
+                      id: "cat-dining",
+                      name: "Dining",
+                      activity: -8000,
+                      deleted: false,
+                      hidden: false,
+                    },
+                  ],
+                },
+              },
+            };
+          }
+
+          if (month === "2026-02-01") {
+            return {
+              data: {
+                month: {
+                  month: "2026-02-01",
+                  deleted: false,
+                  categories: [
+                    { id: "cat-groceries", name: "Groceries", activity: -12000, deleted: false, hidden: false },
+                    { id: "cat-dining", name: "Dining", activity: -7000, deleted: false, hidden: false },
+                  ],
+                },
+              },
+            };
+          }
+
+          return {
+            data: {
+              month: {
+                month: "2026-01-01",
+                deleted: false,
+                categories: [
+                  { id: "cat-groceries", name: "Groceries", activity: -10000, deleted: false, hidden: false },
+                  { id: "cat-dining", name: "Dining", activity: -6000, deleted: false, hidden: false },
+                ],
+              },
+            },
+          };
+        }),
+      },
+    };
+
+    const result = await GetMonthlyReviewTool.execute(
+      { planId: "plan-1", month: "2026-03-01", baselineMonths: 2, topN: 5, format: "prose" } as any,
+      api as any,
+    );
+
+    expect(readText(result as any)).toBe([
+      "Monthly Review (2026-03-01): income 500.00 | inflow 0.00 | outflow 30.00 | net_flow -30.00 | ready_to_assign 20.00",
+      "Top Spending: Groceries 30.00",
+      "Anomalies: Groceries 45.00 vs 11.00",
+    ].join("\n"));
   });
 
   it("reuses low-churn account and month snapshots across repeated tool calls on the same API object", async () => {
@@ -570,6 +678,254 @@ describe("finance summary tools", () => {
     });
   });
 
+  it("adds budget variance details to top categories for single-month spending summaries", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-03-05",
+                amount: -45000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-1",
+                category_name: "Groceries",
+                payee_id: "payee-3",
+                payee_name: "Costco",
+              },
+              {
+                id: "tx-2",
+                date: "2026-03-07",
+                amount: -80000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-2",
+                category_name: "Rent",
+                payee_id: "payee-2",
+                payee_name: "Landlord",
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonths: vi.fn().mockResolvedValue({
+          data: {
+            months: [
+              {
+                month: "2026-03-01",
+                budgeted: 275000,
+                activity: -125000,
+                deleted: false,
+              },
+            ],
+          },
+        }),
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              categories: [
+                {
+                  id: "cat-1",
+                  name: "Groceries",
+                  deleted: false,
+                  hidden: false,
+                  budgeted: 60000,
+                  activity: -45000,
+                  balance: 15000,
+                },
+                {
+                  id: "cat-2",
+                  name: "Rent",
+                  deleted: false,
+                  hidden: false,
+                  budgeted: 75000,
+                  activity: -80000,
+                  balance: -5000,
+                },
+              ],
+            },
+          },
+        }),
+      },
+      categories: {
+        getCategories: vi.fn().mockResolvedValue({
+          data: {
+            category_groups: [
+              {
+                id: "group-1",
+                name: "Living",
+                deleted: false,
+                hidden: false,
+                categories: [
+                  { id: "cat-1", name: "Groceries", deleted: false, hidden: false },
+                  { id: "cat-2", name: "Rent", deleted: false, hidden: false },
+                ],
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetSpendingSummaryTool.execute(
+      { planId: "plan-1", fromMonth: "2026-03-01", toMonth: "2026-03-01", topN: 2 },
+      api as any,
+    );
+
+    expect(api.months.getPlanMonth).toHaveBeenCalledWith("plan-1", "2026-03-01");
+    expect(parseText(result as any)).toEqual({
+      from_month: "2026-03-01",
+      to_month: "2026-03-01",
+      assigned: "275.00",
+      spent: "125.00",
+      assigned_vs_spent: "150.00",
+      transaction_count: 2,
+      average_transaction: "62.50",
+      top_categories: [
+        {
+          id: "cat-2",
+          name: "Rent",
+          amount: "80.00",
+          transaction_count: 1,
+          budgeted: "75.00",
+          spent: "80.00",
+          variance: "-5.00",
+          variance_pct: "-6.67",
+        },
+        {
+          id: "cat-1",
+          name: "Groceries",
+          amount: "45.00",
+          transaction_count: 1,
+          budgeted: "60.00",
+          spent: "45.00",
+          variance: "15.00",
+          variance_pct: "25.00",
+        },
+      ],
+      top_category_groups: [
+        {
+          name: "Living",
+          amount: "125.00",
+          transaction_count: 2,
+        },
+      ],
+      top_payees: [
+        {
+          id: "payee-2",
+          name: "Landlord",
+          amount: "80.00",
+          transaction_count: 1,
+        },
+        {
+          id: "payee-3",
+          name: "Costco",
+          amount: "45.00",
+          transaction_count: 1,
+        },
+      ],
+    });
+  });
+
+  it("renders the spending summary as prose when requested", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-02-02",
+                amount: -125000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-1",
+                category_name: "Groceries",
+                payee_id: "payee-1",
+                payee_name: "Trader Joe's",
+              },
+              {
+                id: "tx-2",
+                date: "2026-02-10",
+                amount: -220000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-2",
+                category_name: "Rent",
+                payee_id: "payee-2",
+                payee_name: "Landlord",
+              },
+              {
+                id: "tx-3",
+                date: "2026-03-05",
+                amount: -45000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-1",
+                category_name: "Groceries",
+                payee_id: "payee-3",
+                payee_name: "Costco",
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonths: vi.fn().mockResolvedValue({
+          data: {
+            months: [
+              {
+                month: "2026-02-01",
+                budgeted: 250000,
+                activity: -345000,
+                deleted: false,
+              },
+              {
+                month: "2026-03-01",
+                budgeted: 275000,
+                activity: -95000,
+                deleted: false,
+              },
+            ],
+          },
+        }),
+      },
+      categories: {
+        getCategories: vi.fn().mockResolvedValue({
+          data: {
+            category_groups: [
+              {
+                id: "group-1",
+                name: "Living",
+                deleted: false,
+                hidden: false,
+                categories: [
+                  { id: "cat-1", name: "Groceries", deleted: false, hidden: false },
+                  { id: "cat-2", name: "Rent", deleted: false, hidden: false },
+                ],
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetSpendingSummaryTool.execute(
+      { planId: "plan-1", fromMonth: "2026-02-01", toMonth: "2026-03-01", topN: 2, format: "prose" } as any,
+      api as any,
+    );
+
+    expect(readText(result as any)).toBe([
+      "Spending Summary (2026-02-01 to 2026-03-01): assigned 525.00 | spent 390.00 | assigned_vs_spent 135.00 | transaction_count 3 | average_transaction 130.00",
+      "Top Categories: Rent 220.00, Groceries 170.00",
+      "Top Payees: Landlord 220.00, Trader Joe's 125.00",
+    ].join("\n"));
+  });
+
   it("builds a compact cash flow summary with monthly trend buckets", async () => {
     const api = {
       transactions: {
@@ -674,6 +1030,77 @@ describe("finance summary tools", () => {
         },
       ],
     });
+  });
+
+  it("renders the cash flow summary as prose when requested", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-02-03",
+                amount: 400000,
+                deleted: false,
+                transfer_account_id: null,
+              },
+              {
+                id: "tx-2",
+                date: "2026-02-05",
+                amount: -150000,
+                deleted: false,
+                transfer_account_id: null,
+              },
+              {
+                id: "tx-3",
+                date: "2026-03-01",
+                amount: 25000,
+                deleted: false,
+                transfer_account_id: null,
+              },
+              {
+                id: "tx-4",
+                date: "2026-03-07",
+                amount: -80000,
+                deleted: false,
+                transfer_account_id: null,
+              },
+            ],
+          },
+        }),
+      },
+      months: {
+        getPlanMonths: vi.fn().mockResolvedValue({
+          data: {
+            months: [
+              {
+                month: "2026-02-01",
+                budgeted: 200000,
+                activity: -150000,
+                deleted: false,
+              },
+              {
+                month: "2026-03-01",
+                budgeted: 100000,
+                activity: -80000,
+                deleted: false,
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetCashFlowSummaryTool.execute(
+      { planId: "plan-1", fromMonth: "2026-02-01", toMonth: "2026-03-01", format: "prose" } as any,
+      api as any,
+    );
+
+    expect(readText(result as any)).toBe([
+      "Cash Flow Summary (2026-02-01 to 2026-03-01): inflow 425.00 | outflow 230.00 | net_flow 195.00 | assigned 300.00 | spent 230.00 | assigned_vs_spent 70.00",
+      "Periods: 2026-02-01 250.00, 2026-03-01 -55.00",
+    ].join("\n"));
   });
 
   it("defaults cash flow month ranges to the current month before applying date math", async () => {
@@ -877,6 +1304,83 @@ describe("finance summary tools", () => {
         },
       ],
     });
+  });
+
+  it("renders the budget health summary as prose when requested", async () => {
+    const api = {
+      months: {
+        getPlanMonth: vi.fn().mockResolvedValue({
+          data: {
+            month: {
+              month: "2026-03-01",
+              income: 500000,
+              budgeted: 355000,
+              activity: -318000,
+              to_be_budgeted: 25000,
+              age_of_money: 38,
+              deleted: false,
+              categories: [
+                {
+                  id: "cat-1",
+                  name: "Dining Out",
+                  category_group_name: "Lifestyle",
+                  hidden: false,
+                  deleted: false,
+                  budgeted: 50000,
+                  activity: -70000,
+                  balance: -20000,
+                  goal_under_funded: 0,
+                },
+                {
+                  id: "cat-2",
+                  name: "Emergency Fund",
+                  category_group_name: "Savings",
+                  hidden: false,
+                  deleted: false,
+                  budgeted: 30000,
+                  activity: 0,
+                  balance: 30000,
+                  goal_under_funded: 120000,
+                },
+                {
+                  id: "cat-3",
+                  name: "Travel",
+                  category_group_name: "Savings",
+                  hidden: false,
+                  deleted: false,
+                  budgeted: 40000,
+                  activity: -10000,
+                  balance: 30000,
+                  goal_under_funded: 60000,
+                },
+                {
+                  id: "cat-4",
+                  name: "Coffee",
+                  category_group_name: "Lifestyle",
+                  hidden: false,
+                  deleted: false,
+                  budgeted: 15000,
+                  activity: -18000,
+                  balance: -3000,
+                  goal_under_funded: 0,
+                },
+              ],
+            },
+          },
+        }),
+      },
+    };
+
+    const result = await GetBudgetHealthSummaryTool.execute(
+      { planId: "plan-1", month: "2026-03-01", topN: 2, format: "prose" } as any,
+      api as any,
+    );
+
+    expect(readText(result as any)).toBe([
+      "Budget Health (2026-03-01): ready_to_assign 25.00 | available_total 60.00 | overspent_total 23.00 | underfunded_total 180.00 | age_of_money 38",
+      "Overspent: Dining Out 20.00, Coffee 3.00",
+      "Underfunded: Emergency Fund 120.00, Travel 60.00",
+    ].join("\n"));
   });
 
   it("builds a month-by-month net worth trajectory across a range", async () => {

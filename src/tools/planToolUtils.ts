@@ -159,9 +159,13 @@ export async function withResolvedPlan<T>(
   }
 }
 
-type OutputFormat = "compact" | "pretty";
+export type OutputFormat = "compact" | "pretty" | "prose";
 
 function serializePayload(payload: unknown, format: OutputFormat) {
+  if (format === "prose") {
+    return typeof payload === "string" ? payload : JSON.stringify(payload);
+  }
+
   return format === "pretty"
     ? JSON.stringify(payload, null, 2)
     : JSON.stringify(payload);
@@ -174,6 +178,10 @@ export function toTextResult(payload: unknown, format: OutputFormat = "compact")
       text: serializePayload(payload, format),
     }],
   };
+}
+
+export function toProseResult(text: string) {
+  return toTextResult(text, "prose");
 }
 
 export function toErrorResult(error: unknown, format: OutputFormat = "compact") {

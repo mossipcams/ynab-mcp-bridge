@@ -2,7 +2,8 @@ import { getConfiguredPlanId } from "../ynabApi.js";
 
 import { withResolvedPlan as withExplicitResolvedPlan } from "./planToolUtils.js";
 
-export { toErrorResult, toTextResult } from "./planToolUtils.js";
+export type { OutputFormat } from "./planToolUtils.js";
+export { toErrorResult, toProseResult, toTextResult } from "./planToolUtils.js";
 
 export async function withResolvedPlan<T>(
   inputPlanId: string | undefined,

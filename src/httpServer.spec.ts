@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startHttpServer } from "./httpTransport.js";
 import { setLoggerDestinationForTests } from "./logger.js";
+import { getPackageInfo } from "./packageInfo.js";
 import { createServer } from "./serverRuntime.js";
 import {
   approveAuthorizationConsent,
@@ -22,6 +23,7 @@ import {
 describe("startHttpServer", () => {
   const cleanups: Array<() => Promise<void>> = [];
   const originalEnv = process.env;
+  const packageInfo = getPackageInfo();
   const ynab = {
     apiToken: "test-token",
   } as const;
@@ -1709,8 +1711,8 @@ describe("startHttpServer", () => {
           },
         },
         serverInfo: {
-          name: "ynab-mcp-bridge",
-          version: "0.14.10",
+          name: packageInfo.name,
+          version: packageInfo.version,
         },
       },
     });
@@ -1846,7 +1848,7 @@ describe("startHttpServer", () => {
       result: {
         content: [{
           type: "text",
-          text: "{\"name\":\"ynab-mcp-bridge\",\"version\":\"0.14.10\"}",
+          text: JSON.stringify(packageInfo),
         }],
       },
     });

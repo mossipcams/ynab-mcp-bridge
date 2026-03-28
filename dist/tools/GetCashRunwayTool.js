@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { averageDailyOutflowMilliunits, formatAmount, liquidCashMilliunits, recentMonths, } from "./financialDiagnosticsUtils.js";
-import { getCachedAccounts, getCachedPlanMonths } from "./cachedYnabReads.js";
+import { averageDailyOutflowMilliunits, formatAmount, liquidCashMilliunits, recentMonths, scheduledNetNext30dMilliunits, } from "./financialDiagnosticsUtils.js";
+import { getCachedAccounts, getCachedPlanMonths, getCachedScheduledTransactions } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 export const name = "ynab_get_cash_runway";
@@ -14,13 +14,15 @@ export async function execute(input, api) {
     try {
         const monthsBack = input.monthsBack ?? 3;
         return await withResolvedPlan(input.planId, api, async (planId) => {
-            const [accountsResponse, monthsResponse] = await Promise.all([
+            const [accountsResponse, monthsResponse, scheduledResponse] = await Promise.all([
                 getCachedAccounts(api, planId),
                 getCachedPlanMonths(api, planId),
+                getCachedScheduledTransactions(api, planId),
             ]);
             const liquidCash = liquidCashMilliunits(accountsResponse.data.accounts);
             const months = recentMonths(monthsResponse.data.months, input.asOfMonth, monthsBack);
             const averageDailyOutflow = averageDailyOutflowMilliunits(months);
+            const scheduledNetNext30d = scheduledNetNext30dMilliunits(scheduledResponse.data.scheduled_transactions, input.asOfMonth);
             const noOutflows = averageDailyOutflow === 0;
             const runwayDays = noOutflows ? null : liquidCash / averageDailyOutflow;
             const status = noOutflows ? "no_outflows" : runwayDays >= 90 ? "stable" : runwayDays >= 30 ? "watch" : "urgent";
@@ -28,6 +30,7 @@ export async function execute(input, api) {
                 as_of_month: input.asOfMonth,
                 liquid_cash: formatAmount(liquidCash),
                 average_daily_outflow: formatAmount(averageDailyOutflow),
+                scheduled_net_next_30d: formatAmount(scheduledNetNext30d),
                 runway_days: runwayDays !== null ? runwayDays.toFixed(2) : undefined,
                 status,
                 months_considered: months.length,

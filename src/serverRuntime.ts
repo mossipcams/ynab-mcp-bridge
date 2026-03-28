@@ -420,6 +420,23 @@ export function getToolsListResult(): ToolsListResult {
   };
 }
 
+export type ToolCatalogMetrics = {
+  tool_count: number;
+  tools_list_bytes: number;
+  tools_list_chars: number;
+};
+
+export function getToolCatalogMetrics(): ToolCatalogMetrics {
+  const toolsListResult = getToolsListResult();
+  const serializedToolsList = JSON.stringify(toolsListResult);
+
+  return {
+    tool_count: toolsListResult.tools.length,
+    tools_list_bytes: Buffer.byteLength(serializedToolsList, "utf8"),
+    tools_list_chars: serializedToolsList.length,
+  };
+}
+
 export function getResourcesListResult(options: ServerRuntimeOptions = {}): ResourcesListResult {
   return {
     resources: getDiscoveryResourceSummaries(options).map((resource) => ({
