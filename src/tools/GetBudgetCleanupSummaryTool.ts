@@ -2,6 +2,7 @@ import { z } from "zod";
 import * as ynab from "ynab";
 
 import {
+  buildCleanupTransactionSummary,
   compactObject,
   formatMilliunits,
   isWithinMonthRange,
@@ -38,9 +39,11 @@ export async function execute(
       const transactions = transactionsResponse.data.transactions.filter(
         (transaction) => !transaction.deleted && isWithinMonthRange(transaction.date, month, month),
       );
-      const uncategorizedTransactions = transactions.filter((transaction) => !transaction.category_id);
-      const unapprovedTransactions = transactions.filter((transaction) => !transaction.approved);
-      const unclearedTransactions = transactions.filter((transaction) => transaction.cleared === "uncleared");
+      const {
+        uncategorizedTransactions,
+        unapprovedTransactions,
+        unclearedTransactions,
+      } = buildCleanupTransactionSummary(transactions);
       const overspentCategories = monthResponse.data.month.categories
         .filter((category) => !category.deleted && category.balance < 0)
         .sort((left, right) => left.balance - right.balance);
