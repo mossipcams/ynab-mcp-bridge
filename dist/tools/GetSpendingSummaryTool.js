@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { buildAssignedSpentSummary, formatMilliunits, isWithinMonthRange, normalizeMonthRange, toTopRollups, } from "./financeToolUtils.js";
 import { getCachedCategories, getCachedPlanMonths } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 export const name = "ynab_get_spending_summary";
 export const description = "Returns a compact spending summary with assigned versus spent totals and top spending rollups.";
 export const inputSchema = {

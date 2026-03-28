@@ -5,7 +5,7 @@ import {
   formatAmountMilliunits,
 } from "./collectionToolUtils.js";
 import { compactObject } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 import {
   buildTransactionCollectionResult,
   compareTransactions,

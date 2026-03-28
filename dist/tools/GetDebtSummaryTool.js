@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { getCachedAccounts } from "./cachedYnabReads.js";
 import { formatAmount, formatRatio, liquidCashMilliunits, totalDebtMilliunits, } from "./financialDiagnosticsUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 export const name = "ynab_get_debt_summary";
 export const description = "Summarizes debt balances, concentration, and cash pressure from debt accounts.";
 export const inputSchema = {

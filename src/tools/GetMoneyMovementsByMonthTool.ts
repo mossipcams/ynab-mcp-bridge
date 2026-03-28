@@ -1,7 +1,7 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 
 export const name = "ynab_get_money_movements_by_month";
 export const description = "Gets money movements for a single plan month.";

@@ -9,7 +9,7 @@ import {
   toSpentMilliunits,
 } from "./financeToolUtils.js";
 import { getCachedPlanMonths } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 
 export const name = "ynab_get_cash_flow_summary";
 export const description =

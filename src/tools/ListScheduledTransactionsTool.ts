@@ -9,7 +9,7 @@ import {
   projectRecord,
 } from "./collectionToolUtils.js";
 import { getCachedScheduledTransactions } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 
 export const name = "ynab_list_scheduled_transactions";
 export const description =

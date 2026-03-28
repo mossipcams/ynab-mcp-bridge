@@ -3,7 +3,7 @@ import * as ynab from "ynab";
 
 import { buildUpcomingWindowSummary, expandScheduledOccurrences, formatMilliunits } from "./financeToolUtils.js";
 import { getCachedScheduledTransactions } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 
 export const name = "ynab_get_upcoming_obligations";
 export const description =

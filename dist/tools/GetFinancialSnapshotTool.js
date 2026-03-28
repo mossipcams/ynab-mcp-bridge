@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { buildAssignedSpentSummary, compactObject, formatMilliunits, toSpentMilliunits, toTopRollups, } from "./financeToolUtils.js";
 import { getCachedAccounts, getCachedPlanMonth } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 export const name = "ynab_get_financial_snapshot";
 export const description = "Returns a compact personal finance snapshot with net worth, cash, debt, and assigned versus spent. `assigned_vs_spent` reflects budget timing and buffering, not a discipline score.";
 export const inputSchema = {

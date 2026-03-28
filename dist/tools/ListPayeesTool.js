@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 export const name = "ynab_list_payees";
 export const description = "Lists payees for a YNAB plan with optional compact projections and pagination.";
 const payeeFields = [

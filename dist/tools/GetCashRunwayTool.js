@@ -2,7 +2,7 @@ import { z } from "zod";
 import { averageDailyOutflowMilliunits, formatAmount, liquidCashMilliunits, recentMonths, } from "./financialDiagnosticsUtils.js";
 import { getCachedAccounts, getCachedPlanMonths } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 export const name = "ynab_get_cash_runway";
 export const description = "Estimates how many days your liquid cash can cover based on recent outflows.";
 export const inputSchema = {

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { previousMonths } from "./financialDiagnosticsUtils.js";
 import { buildBudgetHealthMonthSummary, formatMilliunits, isWithinMonthRange, normalizeMonthInput, toSpentMilliunits, toTopRollups, } from "./financeToolUtils.js";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 export const name = "ynab_get_monthly_review";
 export const description = "Returns a compact monthly review with income, cash flow, budget health, top spending, and notable spending changes, including assigned versus spent as a buffering and timing signal rather than a discipline score.";
 export const inputSchema = {

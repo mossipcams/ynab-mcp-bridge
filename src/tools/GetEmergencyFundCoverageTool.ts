@@ -9,7 +9,7 @@ import {
 } from "./financialDiagnosticsUtils.js";
 import { getCachedAccounts, getCachedPlanMonths } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 
 export const name = "ynab_get_emergency_fund_coverage";
 export const description =

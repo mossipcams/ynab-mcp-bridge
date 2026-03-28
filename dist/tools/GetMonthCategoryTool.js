@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { compactObject, formatMilliunits } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 export const name = "ynab_get_month_category";
 export const description = "Gets a single category for a specific month. Returns a compact projection by default, with an explicit full-view opt-in.";
 export const inputSchema = {

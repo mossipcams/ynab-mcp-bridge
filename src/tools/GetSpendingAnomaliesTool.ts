@@ -4,7 +4,7 @@ import * as ynab from "ynab";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { formatAmount, formatPercent, previousMonths } from "./financialDiagnosticsUtils.js";
 import { isCreditCardPaymentCategoryName, toSpentMilliunits } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 
 export const name = "ynab_get_spending_anomalies";
 export const description =

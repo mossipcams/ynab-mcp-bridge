@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { getCachedPlanMonth } from "./cachedYnabReads.js";
 import { buildBudgetHealthMonthSummary, compactObject, formatMilliunits } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 export const name = "ynab_get_budget_health_summary";
 export const description = "Returns a compact budget health summary with available funds, overspending, underfunding, and assigned versus spent. `assigned_vs_spent` reflects budget timing and buffering, not a discipline score.";
 export const inputSchema = {

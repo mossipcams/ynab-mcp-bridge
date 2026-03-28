@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 export const name = "ynab_get_transaction";
 export const description = "Gets a single transaction by ID.";
 export const inputSchema = {

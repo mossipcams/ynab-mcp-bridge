@@ -20,7 +20,7 @@ import {
   getCachedScheduledTransactions,
 } from "./cachedYnabReads.js";
 import { isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "./runtimePlanToolUtils.js";
 
 type Risk = {
   code: string;
