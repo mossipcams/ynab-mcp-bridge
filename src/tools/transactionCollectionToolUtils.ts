@@ -32,8 +32,7 @@ async function runTransactionCollectionTool<TInput extends TransactionProjection
       api,
       async (planId) => fetchTransactions(api, planId, normalizedInput),
     );
-    const sortedTransactions = transactions
-      .filter((transaction) => !transaction.deleted)
+    const sortedTransactions = Array.from(transactions)
       .sort((left, right) => compareTransactions(left, right, "date_desc"));
 
     return toTextResult({

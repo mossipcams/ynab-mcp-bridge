@@ -19,7 +19,13 @@ import {
   getCachedPlanMonths,
   getCachedScheduledTransactions,
 } from "./cachedYnabReads.js";
-import { compactObject, isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
+import {
+  buildCleanupTransactionSummary,
+  buildVisibleCategoryHealthSummary,
+  compactObject,
+  isWithinMonthRange,
+  normalizeMonthInput,
+} from "./financeToolUtils.js";
 import type { OutputFormat } from "../runtimePlanToolUtils.js";
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
@@ -84,15 +90,22 @@ export async function execute(
       const liquidCash = liquidCashMilliunits(accounts);
       const debt = totalDebtMilliunits(accounts);
       const netWorth = netWorthMilliunits(accounts);
-      const overspentCategories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden && category.balance < 0);
-      const underfundedCategories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden && (category.goal_under_funded ?? 0) > 0);
+      const {
+        overspentCategories,
+        underfundedCategories,
+      } = buildVisibleCategoryHealthSummary(monthDetail.categories);
       const transactions = transactionsResponse.data.transactions.filter(
         (transaction) => !transaction.deleted
           && (typeof transaction.date !== "string" || isWithinMonthRange(transaction.date, monthKey, monthKey)),
       );
-      const uncategorizedTransactionCount = transactions.filter((transaction) => !transaction.category_id).length;
-      const unapprovedTransactionCount = transactions.filter((transaction) => !transaction.approved).length;
-      const unclearedTransactionCount = transactions.filter((transaction) => transaction.cleared === "uncleared").length;
+      const {
+        uncategorizedTransactions,
+        unapprovedTransactions,
+        unclearedTransactions,
+      } = buildCleanupTransactionSummary(transactions);
+      const uncategorizedTransactionCount = uncategorizedTransactions.length;
+      const unapprovedTransactionCount = unapprovedTransactions.length;
+      const unclearedTransactionCount = unclearedTransactions.length;
       const recentIncomeMonths = recentMonths(monthsResponse.data.months, monthKey, 3);
       const incomeVolatility = spreadPercent(recentIncomeMonths.map((entry) => entry.income ?? 0));
       const upcoming30dNet = scheduledResponse.data.scheduled_transactions
@@ -140,8 +153,6 @@ export async function execute(
           amountMilliunits: category.goal_under_funded ?? 0,
         })),
       );
-      const uncategorizedTransactions = transactions.filter((transaction) => !transaction.category_id);
-
       const payload = {
         as_of_month: monthKey,
         status,
