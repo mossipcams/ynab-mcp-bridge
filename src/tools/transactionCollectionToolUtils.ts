@@ -73,11 +73,11 @@ export type MonthTransactionCollectionInput = TransactionProjectionInput & {
 };
 
 export const transactionCollectionInputSchema = {
-  planId: z.string().optional().describe("Plan ID (uses env default)"),
-  limit: z.number().int().min(1).max(500).optional().describe("Max results"),
-  offset: z.number().int().min(0).optional().describe("Skip N results"),
-  includeIds: z.boolean().optional().describe("Include IDs"),
-  fields: z.array(z.enum(transactionFields)).optional().describe("Fields to include"),
+  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
+  limit: z.number().int().min(1).max(500).optional().describe("Maximum number of transactions to return."),
+  offset: z.number().int().min(0).optional().describe("Number of transactions to skip before returning results."),
+  includeIds: z.boolean().optional().describe("When false, omits transaction ids from the output."),
+  fields: z.array(z.enum(transactionFields)).optional().describe("Optional transaction fields to include in each row."),
 };
 
 export function buildTransactionCollectionInputSchema<TExtra extends Record<string, unknown>>(extra: TExtra) {

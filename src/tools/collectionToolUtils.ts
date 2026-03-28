@@ -114,7 +114,9 @@ export function renderCollectionResult<
   const pagedEntries = paginateEntries(entries, input);
 
   return {
-    [collectionKey]: pagedEntries.entries.map((entry) => projectRecord(entry, allFields, input)),
+    [collectionKey]: hasProjectionControls(input)
+      ? pagedEntries.entries.map((entry) => projectRecord(entry, allFields, input))
+      : pagedEntries.entries,
     [countKey]: entries.length,
     ...pagedEntries.metadata,
   };
