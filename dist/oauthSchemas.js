@@ -94,7 +94,7 @@ function getResponseTypeError(responseTypes) {
 }
 function getTokenEndpointAuthMethodError(tokenEndpointAuthMethod) {
     const resolvedAuthMethod = tokenEndpointAuthMethod ?? "none";
-    if (resolvedAuthMethod !== "client_secret_post" && resolvedAuthMethod !== "none") {
+    if (resolvedAuthMethod !== "none") {
         return `Unsupported token endpoint auth method: ${resolvedAuthMethod}`;
     }
 }

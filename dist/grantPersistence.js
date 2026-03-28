@@ -13,15 +13,29 @@ function isApprovalRecord(value) {
     if (!isRecord(value)) {
         return false;
     }
-    return typeof value["clientId"] === "string" &&
+    const hasClientId = typeof value["clientId"] === "string";
+    const hasRedirectUri = typeof value["redirectUri"] === "string";
+    return (hasClientId || hasRedirectUri) &&
         typeof value["resource"] === "string" &&
         Array.isArray(value["scopes"]);
 }
 function normalizeApprovalRecord(record) {
     return {
-        ...record,
+        ...(typeof record.clientId === "string" ? { clientId: record.clientId } : {}),
+        ...(typeof record.redirectUri === "string" ? { redirectUri: record.redirectUri } : {}),
+        resource: record.resource,
         scopes: normalizeScopes(record.scopes),
     };
+}
+function approvalMatches(left, right) {
+    const sameScopes = left.scopes.join(" ") === right.scopes.join(" ");
+    if (!sameScopes || left.resource !== right.resource) {
+        return false;
+    }
+    if (left.redirectUri || right.redirectUri) {
+        return left.redirectUri === right.redirectUri;
+    }
+    return left.clientId === right.clientId;
 }
 function isOAuthClientInformationFull(value) {
     return isRecord(value) && typeof value["client_id"] === "string";
@@ -510,9 +524,7 @@ export function createOAuthStore(storePath) {
     return {
         approveClient(record) {
             const normalizedRecord = normalizeApprovalRecord(record);
-            if (!state.approvals.some((approval) => (approval.clientId === normalizedRecord.clientId &&
-                approval.resource === normalizedRecord.resource &&
-                approval.scopes.join(" ") === normalizedRecord.scopes.join(" ")))) {
+            if (!state.approvals.some((approval) => approvalMatches(approval, normalizedRecord))) {
                 state = {
                     ...state,
                     approvals: [...state.approvals, normalizedRecord],
@@ -592,10 +604,7 @@ export function createOAuthStore(storePath) {
             return findGrant((candidate) => candidate.refreshToken?.token === refreshToken);
         },
         isClientApproved(record) {
-            const normalizedScopes = normalizeScopes(record.scopes);
-            return state.approvals.some((approval) => (approval.clientId === record.clientId &&
-                approval.resource === record.resource &&
-                approval.scopes.join(" ") === normalizedScopes.join(" ")));
+            return state.approvals.some((approval) => approvalMatches(approval, normalizeApprovalRecord(record)));
         },
         saveAuthorizationCode(code, record) {
             state = {

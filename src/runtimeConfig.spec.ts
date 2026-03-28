@@ -114,6 +114,26 @@ describe("resolveRuntimeConfig", () => {
     });
   });
 
+  it("resolves skip-local-consent for oauth mode when explicitly enabled", () => {
+    expect(resolveRuntimeConfig([], {
+      MCP_AUTH_MODE: "oauth",
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      MCP_OAUTH_SKIP_LOCAL_CONSENT: "true",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+    }).auth).toMatchObject({
+      mode: "oauth",
+      skipLocalConsent: true,
+    });
+  });
+
   it("adds offline_access to oauth scopes when it is not explicitly configured", () => {
     expect(resolveRuntimeConfig([], {
       MCP_AUTH_MODE: "oauth",

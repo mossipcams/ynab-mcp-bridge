@@ -30,7 +30,7 @@ export type PendingConsent = PendingAuthorization & {
 };
 
 type OAuthCoreStore = {
-  approveClient: (record: { clientId: string; resource: string; scopes: string[] }) => void;
+  approveClient: (record: { clientId: string; redirectUri: string; resource: string; scopes: string[] }) => void;
   deleteGrant: (grantId: string) => void;
   getAuthorizationCodeGrant: (code: string) => OAuthGrant | undefined;
   getClient: (clientId: string) => OAuthClientInformationFull | undefined;
@@ -38,7 +38,7 @@ type OAuthCoreStore = {
   getPendingAuthorizationGrant: (stateId: string) => OAuthGrant | undefined;
   getPendingConsentGrant: (consentId: string) => OAuthGrant | undefined;
   getRefreshTokenGrant: (refreshToken: string) => OAuthGrant | undefined;
-  isClientApproved: (record: { clientId: string; resource: string; scopes: string[] }) => boolean;
+  isClientApproved: (record: { clientId: string; redirectUri: string; resource: string; scopes: string[] }) => boolean;
   saveClient: (client: OAuthClientInformationFull) => void;
   saveClientCompatibilityProfile: (clientId: string, profileId: ClientProfileId) => void;
   saveGrant: (grant: OAuthGrant) => void;
@@ -48,6 +48,7 @@ type OAuthCoreConfig = {
   callbackUrl: string;
   defaultResource: string;
   defaultScopes: string[];
+  skipLocalConsent?: boolean;
 };
 
 type OAuthCoreDependencies = {
@@ -202,7 +203,7 @@ function validateClientMetadata(client: Omit<OAuthClientInformationFull, "client
     throw new InvalidClientMetadataError("response_types must be exactly [\"code\"].");
   }
 
-  const allowedAuthMethods = new Set(["client_secret_post", "none"]);
+  const allowedAuthMethods = new Set(["none"]);
   const tokenEndpointAuthMethod = client.token_endpoint_auth_method ?? "none";
 
   if (!allowedAuthMethods.has(tokenEndpointAuthMethod)) {
@@ -264,8 +265,9 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
     const resource = params.resource?.href ?? config.defaultResource;
     const compatibilityProfileId = store.getClientCompatibilityProfile(client.client_id);
 
-    if (store.isClientApproved({
+    if (config.skipLocalConsent || store.isClientApproved({
       clientId: client.client_id,
+      redirectUri: params.redirectUri,
       resource,
       scopes,
     })) {
@@ -345,6 +347,7 @@ export function createOAuthCore({ config, dependencies, store }: OAuthCoreOption
 
     store.approveClient({
       clientId: grant.clientId,
+      redirectUri: grant.redirectUri,
       resource: grant.resource,
       scopes: grant.scopes,
     });
