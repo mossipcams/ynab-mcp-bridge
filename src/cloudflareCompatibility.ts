@@ -36,13 +36,6 @@ export function createCloudflareAccessCompatibilityMiddleware(config: OAuthAuthC
   });
 
   return async (req, _res, next) => {
-    const existingAuthorization = getFirstHeaderValue(req.headers.authorization);
-
-    if (existingAuthorization) {
-      next();
-      return;
-    }
-
     const assertion = getFirstHeaderValue(req.headers["cf-access-jwt-assertion"]);
 
     if (!assertion) {

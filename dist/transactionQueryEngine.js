@@ -74,9 +74,13 @@ export function compareTransactions(left, right, sort) {
         case "date_desc":
             return right.date.localeCompare(left.date) || left.id.localeCompare(right.id);
         case "amount_asc":
-            return left.amount - right.amount || right.date.localeCompare(left.date);
+            return left.amount - right.amount
+                || right.date.localeCompare(left.date)
+                || left.id.localeCompare(right.id);
         case "amount_desc":
-            return right.amount - left.amount || right.date.localeCompare(left.date);
+            return right.amount - left.amount
+                || right.date.localeCompare(left.date)
+                || left.id.localeCompare(right.id);
     }
 }
 export function matchesTransactionFilters(transaction, input) {
