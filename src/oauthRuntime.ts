@@ -493,7 +493,7 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
       authorization_servers: [oauthBroker.getIssuerUrl().href],
       resource: publicServerUrl.href,
       resource_name: "YNAB MCP Bridge",
-      scopes_supported: requiredAccessScopes.length > 0 ? requiredAccessScopes : undefined,
+      scopes_supported: scopesSupported.length > 0 ? scopesSupported : undefined,
     },
     router,
   };
@@ -524,10 +524,6 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
       return;
     }
 
-    res.status(200).json(mcpAuthModule.protectedResourceMetadata);
-  });
-
-  app.get(`/.well-known/oauth-protected-resource${path === "/" ? "" : path}`, (_req, res) => {
     res.status(200).json(mcpAuthModule.protectedResourceMetadata);
   });
 
