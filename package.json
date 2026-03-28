@@ -1,6 +1,6 @@
 {
   "name": "ynab-mcp-bridge",
-  "version": "0.15.0",
+  "version": "0.14.11",
   "description": "ynab-mcp-bridge MCP server",
   "author": "Matt",
   "repository": {
@@ -46,7 +46,8 @@
     "test:ci": "mkdir -p artifacts/test-results && vitest run --reporter=default --reporter=junit --outputFile.junit=./artifacts/test-results/vitest-junit.xml",
     "test:watch": "vitest watch",
     "test:coverage": "vitest run --coverage",
-    "preflight": "npm run test:ci && npm run test:coverage && npm run lint:deps && npm run lint && npm run typecheck && npm run lint:unused && npm run build"
+    "preflight": "npm run test:ci && npm run test:coverage && npm run lint:deps && npm run lint && npm run typecheck && npm run lint:unused && npm run build",
+    "test:mutation": "stryker run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
@@ -59,6 +60,8 @@
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@modelcontextprotocol/inspector": "^0.16.5",
+    "@stryker-mutator/core": "^9.6.0",
+    "@stryker-mutator/vitest-runner": "^9.6.0",
     "@types/express": "^5.0.5",
     "@types/node": "^20.11.24",
     "@typescript-eslint/eslint-plugin": "^8.57.1",
