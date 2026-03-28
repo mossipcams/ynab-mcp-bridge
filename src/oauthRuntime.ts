@@ -146,6 +146,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
   callbackPath: string;
   callbackUrl: string;
   getClientCompatibilityProfile: (clientId: string) => ReturnType<typeof core.getClientCompatibilityProfile>;
+  saveClientCompatibilityProfile: (clientId: string, profileId: ClientProfileId) => void;
   getIssuerUrl: () => URL;
   handleConsent: RequestHandler;
   provider: OAuthServerProvider;
@@ -425,6 +426,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
     callbackPath: config.callbackPath,
     callbackUrl,
     getClientCompatibilityProfile: core.getClientCompatibilityProfile,
+    saveClientCompatibilityProfile: core.saveClientCompatibilityProfile,
     getIssuerUrl: () => new URL(issuerUrl.href),
     handleConsent,
     provider,
@@ -485,6 +487,7 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
       verifier: oauthBroker.provider,
     }),
     getClientCompatibilityProfile: oauthBroker.getClientCompatibilityProfile,
+    saveClientCompatibilityProfile: oauthBroker.saveClientCompatibilityProfile,
     protectedResourceMetadata: {
       authorization_servers: [oauthBroker.getIssuerUrl().href],
       resource: publicServerUrl.href,
@@ -586,6 +589,17 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
     }
 
     const persistedProfileId = mcpAuthModule.getClientCompatibilityProfile(req.auth.clientId);
+    const resolvedProfile = getResolvedClientProfile(res.locals);
+
+    if (
+      resolvedProfile?.profileId &&
+      resolvedProfile.profileId !== "generic" &&
+      (!persistedProfileId || persistedProfileId === "generic")
+    ) {
+      mcpAuthModule.saveClientCompatibilityProfile(req.auth.clientId, resolvedProfile.profileId);
+      next();
+      return;
+    }
 
     if (!persistedProfileId) {
       next();
@@ -596,7 +610,6 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
       profileId: persistedProfileId,
       reason: getPersistedOAuthProfileReason(persistedProfileId),
     };
-    const resolvedProfile = getResolvedClientProfile(res.locals);
 
     if (
       resolvedProfile?.profileId !== persistedProfile.profileId ||
