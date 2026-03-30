@@ -95,19 +95,6 @@ describe("client profiles", () => {
     });
   });
 
-  it("detects Claude Desktop setup requests from the Claude user agent", () => {
-    expect(detectClientProfile({
-      headers: {
-        "user-agent": "Claude-User",
-      },
-      method: "POST",
-      path: "/mcp",
-    })).toEqual({
-      profileId: "claude",
-      reason: "user-agent:claude-user",
-    });
-  });
-
   it("detects ChatGPT setup requests from the root protected-resource probe path", () => {
     expect(detectClientProfile(createRequestContext({
       path: "/.well-known/oauth-protected-resource",
