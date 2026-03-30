@@ -7,10 +7,14 @@ import crypto from "node:crypto";
 
 import express, { type RequestHandler } from "express";
 import {
+  InsufficientScopeError,
   InvalidRequestError,
+  InvalidTokenError,
+  OAuthError,
+  ServerError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
-import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { createOAuthMetadata, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
@@ -142,42 +146,128 @@ function getBodyStringValue(body: unknown, key: string) {
   return getStringValue(body, key);
 }
 
-function addBearerRealm(wwwAuthenticate: string) {
-  if (!wwwAuthenticate.startsWith("Bearer ") || wwwAuthenticate.includes("realm=")) {
-    return wwwAuthenticate;
+export function buildMcpBearerChallenge(input: {
+  errorCode?: string;
+  errorDescription?: string;
+  requiredScopes?: string[];
+  resourceMetadataUrl: string;
+}) {
+  const {
+    errorCode,
+    errorDescription,
+    requiredScopes = [],
+    resourceMetadataUrl,
+  } = input;
+  let header = "Bearer realm=\"mcp\"";
+
+  if (errorCode && errorDescription) {
+    header += `, error="${errorCode}", error_description="${errorDescription}"`;
+
+    if (requiredScopes.length > 0) {
+      header += `, scope="${requiredScopes.join(" ")}"`;
+    }
   }
 
-  return wwwAuthenticate.replace("Bearer ", "Bearer realm=\"mcp\", ");
+  header += `, resource_metadata="${resourceMetadataUrl}"`;
+  return header;
 }
 
-function withBearerRealm(authMiddleware: RequestHandler): RequestHandler {
-  return (req, res, next) => {
-    const originalSetHeader = res.setHeader.bind(res);
+function createMcpBearerAuthMiddleware(input: {
+  requiredScopes: string[];
+  resourceMetadataUrl: string;
+  verifier: OAuthServerProvider;
+}): RequestHandler {
+  const { requiredScopes, resourceMetadataUrl, verifier } = input;
 
-    const setHeaderWithBearerRealm: typeof res.setHeader = (name, value) => {
-      if (name.toLowerCase() === "www-authenticate") {
-        if (typeof value === "string") {
-          return originalSetHeader(name, addBearerRealm(value));
+  return async (req, res, next) => {
+    try {
+      const authHeader = req.headers.authorization;
+
+      if (!authHeader) {
+        res.setHeader("WWW-Authenticate", buildMcpBearerChallenge({
+          resourceMetadataUrl,
+        }));
+        res.status(401).json(new InvalidTokenError("Missing Authorization header").toResponseObject());
+        return;
+      }
+
+      const [type = "", token] = authHeader.split(" ");
+
+      if (type.toLowerCase() !== "bearer" || !token) {
+        throw new InvalidTokenError("Invalid Authorization header format, expected 'Bearer TOKEN'");
+      }
+
+      let authInfo: AuthInfo;
+
+      try {
+        authInfo = await verifier.verifyAccessToken(token);
+      } catch (error) {
+        if (
+          error instanceof InsufficientScopeError ||
+          error instanceof InvalidTokenError ||
+          error instanceof OAuthError ||
+          error instanceof ServerError
+        ) {
+          throw error;
         }
 
-        if (Array.isArray(value)) {
-          return originalSetHeader(name, value.map((entry) => addBearerRealm(String(entry))));
+        throw new InvalidTokenError("Invalid access token");
+      }
+
+      if (requiredScopes.length > 0) {
+        const hasAllScopes = requiredScopes.every((scope) => authInfo.scopes.includes(scope));
+
+        if (!hasAllScopes) {
+          throw new InsufficientScopeError("Insufficient scope");
         }
       }
 
-      return originalSetHeader(name, value);
-    };
+      if (typeof authInfo.expiresAt !== "number" || Number.isNaN(authInfo.expiresAt)) {
+        throw new InvalidTokenError("Token has no expiration time");
+      }
 
-    res.setHeader = setHeaderWithBearerRealm;
+      if (authInfo.expiresAt < Date.now() / 1000) {
+        throw new InvalidTokenError("Token has expired");
+      }
 
-    const restoreSetHeader = () => {
-      res.setHeader = originalSetHeader;
-    };
+      req.auth = authInfo;
+      next();
+    } catch (error) {
+      if (error instanceof InvalidTokenError) {
+        res.setHeader("WWW-Authenticate", buildMcpBearerChallenge({
+          errorCode: error.errorCode,
+          errorDescription: error.message,
+          requiredScopes,
+          resourceMetadataUrl,
+        }));
+        res.status(401).json(error.toResponseObject());
+        return;
+      }
 
-    res.once("close", restoreSetHeader);
-    res.once("finish", restoreSetHeader);
+      if (error instanceof InsufficientScopeError) {
+        res.setHeader("WWW-Authenticate", buildMcpBearerChallenge({
+          errorCode: error.errorCode,
+          errorDescription: error.message,
+          requiredScopes,
+          resourceMetadataUrl,
+        }));
+        res.status(403).json(error.toResponseObject());
+        return;
+      }
 
-    authMiddleware(req, res, next);
+      if (error instanceof ServerError) {
+        res.status(500).json(error.toResponseObject());
+        return;
+      }
+
+      if (error instanceof OAuthError) {
+        res.status(400).json(error.toResponseObject());
+        return;
+      }
+
+      const serverError = new ServerError("Internal Server Error");
+      res.status(500).json(serverError.toResponseObject());
+    }
   };
 }
 
@@ -519,11 +609,11 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
   }));
 
   return {
-    authMiddleware: withBearerRealm(requireBearerAuth({
+    authMiddleware: createMcpBearerAuthMiddleware({
       requiredScopes: requiredAccessScopes,
       resourceMetadataUrl,
       verifier: oauthBroker.provider,
-    })),
+    }),
     getClientCompatibilityProfile: oauthBroker.getClientCompatibilityProfile,
     protectedResourceMetadata: {
       authorization_servers: [oauthBroker.getIssuerUrl().href],

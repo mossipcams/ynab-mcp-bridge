@@ -43,7 +43,7 @@ import {
   hasToolCallStarted,
   runWithRequestContext,
 } from "./requestContext.js";
-import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
+import { buildMcpBearerChallenge, createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
 import {
   createServer,
   createFastPathToolCallResults,
@@ -1276,7 +1276,9 @@ export async function startHttpServer(
           ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
           reason: "unauthorized",
         });
-        res.setHeader("WWW-Authenticate", `Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="${mcpAuthModule.resourceMetadataUrl}"`);
+        res.setHeader("WWW-Authenticate", buildMcpBearerChallenge({
+          resourceMetadataUrl: mcpAuthModule.resourceMetadataUrl,
+        }));
         writeJsonRpcError(res, 401, -32000, "Unauthorized.");
         return;
       }
