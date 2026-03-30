@@ -54,6 +54,108 @@ export function buildBudgetHealthMonthSummary(monthDetail) {
         underfunded_categories: underfundedCategories,
     };
 }
+export function buildVisibleCategoryHealthSummary(categories) {
+    const summary = {
+        overspentCategories: [],
+        underfundedCategories: [],
+        availableTotalMilliunits: 0,
+    };
+    for (const category of categories) {
+        if (category.deleted || category.hidden) {
+            continue;
+        }
+        if (category.balance > 0) {
+            summary.availableTotalMilliunits += category.balance;
+        }
+        if (category.balance < 0) {
+            summary.overspentCategories.push(category);
+        }
+        if ((category.goal_under_funded ?? 0) > 0) {
+            summary.underfundedCategories.push(category);
+        }
+    }
+    return summary;
+}
+export function buildCleanupTransactionSummary(transactions) {
+    const summary = {
+        uncategorizedTransactions: [],
+        unapprovedTransactions: [],
+        unclearedTransactions: [],
+    };
+    for (const transaction of transactions) {
+        if (!transaction.category_id) {
+            summary.uncategorizedTransactions.push(transaction);
+        }
+        if (!transaction.approved) {
+            summary.unapprovedTransactions.push(transaction);
+        }
+        if (transaction.cleared === "uncleared") {
+            summary.unclearedTransactions.push(transaction);
+        }
+    }
+    return summary;
+}
+export function buildAccountSnapshotSummary(accounts) {
+    const summary = {
+        activeAccounts: [],
+        positiveAccounts: [],
+        negativeAccounts: [],
+        netWorthMilliunits: 0,
+        liquidCashMilliunits: 0,
+        onBudgetAccountCount: 0,
+    };
+    for (const account of accounts) {
+        if (account.deleted || account.closed) {
+            continue;
+        }
+        summary.activeAccounts.push(account);
+        summary.netWorthMilliunits += account.balance;
+        if (account.on_budget) {
+            summary.onBudgetAccountCount += 1;
+            if (account.balance > 0) {
+                summary.liquidCashMilliunits += account.balance;
+            }
+        }
+        if (account.balance > 0) {
+            summary.positiveAccounts.push(account);
+        }
+        else if (account.balance < 0) {
+            summary.negativeAccounts.push(account);
+        }
+    }
+    return summary;
+}
+export function buildCategorySpentLookup(responses) {
+    return responses.map((response) => new Map(response.data.month.categories.map((category) => [category.id, toSpentMilliunits(category.activity)])));
+}
+export function buildSpendingAnomalies(options) {
+    const { baselineSpentLookups, categories, formatAmount, formatPercent, minimumDifference, thresholdMultiplier, topN, } = options;
+    return categories
+        .map((category) => {
+        const latestSpent = toSpentMilliunits(category.activity);
+        const baselineValues = baselineSpentLookups.map((lookup) => lookup.get(category.id) ?? 0);
+        const baselineAverage = baselineValues.length === 0
+            ? 0
+            : baselineValues.reduce((sum, value) => sum + value, 0) / baselineValues.length;
+        if (baselineAverage <= 0
+            || latestSpent < baselineAverage * thresholdMultiplier
+            || latestSpent - baselineAverage < minimumDifference) {
+            return undefined;
+        }
+        return {
+            category_id: category.id,
+            category_name: category.name,
+            latest_spent: formatAmount(latestSpent),
+            baseline_average: formatAmount(Math.round(baselineAverage)),
+            change_percent: formatPercent(((latestSpent - baselineAverage) / baselineAverage) * 100),
+            sort_difference: latestSpent - baselineAverage,
+        };
+    })
+        .filter((anomaly) => !!anomaly)
+        .sort((left, right) => right.sort_difference - left.sort_difference)
+        .slice(0, topN)
+        .map(({ sort_difference: _sortDifference, ...anomaly }) => anomaly);
+}
 export function isCreditCardPaymentCategoryName(categoryGroupName) {
     return typeof categoryGroupName === "string"
         && categoryGroupName.trim().toLowerCase() === "credit card payments";

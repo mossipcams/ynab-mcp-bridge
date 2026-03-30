@@ -157,6 +157,7 @@ Notes:
 | `MCP_OAUTH_STORE_PATH` | No | Defaults to `~/.ynab-mcp-bridge/oauth-store.json` |
 | `MCP_OAUTH_TOKEN_SIGNING_SECRET` | No | Defaults to a stable derived secret |
 | `MCP_OAUTH_CALLBACK_PATH` | No | Defaults to `/oauth/callback` |
+| `MCP_OAUTH_SKIP_LOCAL_CONSENT` | No | Set to `true` to bypass the bridge-hosted approval screen for every OAuth client |
 | `MCP_OAUTH_SCOPES` | No | Comma-separated scopes to advertise and require |
 
 ## How HTTP Mode Behaves
@@ -170,6 +171,7 @@ Notes:
   - `/token`
   - `/.well-known/oauth-protected-resource/mcp`
 - OAuth here protects access to a shared backend YNAB token. It does not do per-user YNAB OAuth delegation.
+- `MCP_OAUTH_SKIP_LOCAL_CONSENT=true` is intended for owner-operated deployments where you want the bridge to forward every authorization request upstream without showing the local approval page.
 
 ## Cloudflare Access
 

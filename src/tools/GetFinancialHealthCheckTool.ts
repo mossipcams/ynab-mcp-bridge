@@ -19,8 +19,16 @@ import {
   getCachedPlanMonths,
   getCachedScheduledTransactions,
 } from "./cachedYnabReads.js";
-import { isWithinMonthRange, normalizeMonthInput } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import {
+  buildCleanupTransactionSummary,
+  buildVisibleCategoryHealthSummary,
+  compactObject,
+  isWithinMonthRange,
+  normalizeMonthInput,
+} from "./financeToolUtils.js";
+import type { OutputFormat } from "../runtimePlanToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
+import { buildProse, proseRecordItem } from "./proseFormatUtils.js";
 
 type Risk = {
   code: string;
@@ -30,26 +38,42 @@ type Risk = {
 
 export const name = "ynab_get_financial_health_check";
 export const description =
-  "Builds a compact first-pass health check across cash, debt, budget stress, cleanup backlog, and near-term obligations.";
+  "Compact health check across cash, debt, budget stress, cleanup, and near-term obligations.";
 export const inputSchema = {
-  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
-  month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("Month to analyze."),
-  asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Optional obligation anchor date."),
-  topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of risks to include."),
+  planId: z.string().optional().describe("Plan ID (uses env default)"),
+  month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("Month (ISO or 'current')"),
+  asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Anchor date (ISO)"),
+  topN: z.number().int().min(1).max(10).default(5).describe("Top N results"),
+  format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
 };
 
 function risk(code: string, severity: "high" | "medium" | "low", penalty: number): Risk {
   return { code, severity, penalty };
 }
 
+function sortDescendingByAmount<T extends { amountMilliunits: number; name: string }>(entries: T[]) {
+  return entries
+    .slice()
+    .sort((left, right) => {
+      const difference = right.amountMilliunits - left.amountMilliunits;
+
+      if (difference !== 0) {
+        return difference;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
+}
+
 export async function execute(
-  input: { planId?: string; month?: string; asOfDate?: string; topN?: number },
+  input: { planId?: string; month?: string; asOfDate?: string; topN?: number; format?: OutputFormat },
   api: ynab.API,
 ) {
   try {
     const month = normalizeMonthInput(input.month);
     const asOfDate = input.asOfDate ?? getTodayIsoDate();
     const topN = input.topN ?? 5;
+    const format = input.format ?? "compact";
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const [accountsResponse, monthResponse, monthsResponse, transactionsResponse, scheduledResponse] = await Promise.all([
@@ -66,15 +90,22 @@ export async function execute(
       const liquidCash = liquidCashMilliunits(accounts);
       const debt = totalDebtMilliunits(accounts);
       const netWorth = netWorthMilliunits(accounts);
-      const overspentCategories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden && category.balance < 0);
-      const underfundedCategories = monthDetail.categories.filter((category) => !category.deleted && !category.hidden && (category.goal_under_funded ?? 0) > 0);
+      const {
+        overspentCategories,
+        underfundedCategories,
+      } = buildVisibleCategoryHealthSummary(monthDetail.categories);
       const transactions = transactionsResponse.data.transactions.filter(
         (transaction) => !transaction.deleted
           && (typeof transaction.date !== "string" || isWithinMonthRange(transaction.date, monthKey, monthKey)),
       );
-      const uncategorizedTransactionCount = transactions.filter((transaction) => !transaction.category_id).length;
-      const unapprovedTransactionCount = transactions.filter((transaction) => !transaction.approved).length;
-      const unclearedTransactionCount = transactions.filter((transaction) => transaction.cleared === "uncleared").length;
+      const {
+        uncategorizedTransactions,
+        unapprovedTransactions,
+        unclearedTransactions,
+      } = buildCleanupTransactionSummary(transactions);
+      const uncategorizedTransactionCount = uncategorizedTransactions.length;
+      const unapprovedTransactionCount = unapprovedTransactions.length;
+      const unclearedTransactionCount = unclearedTransactions.length;
       const recentIncomeMonths = recentMonths(monthsResponse.data.months, monthKey, 3);
       const incomeVolatility = spreadPercent(recentIncomeMonths.map((entry) => entry.income ?? 0));
       const upcoming30dNet = scheduledResponse.data.scheduled_transactions
@@ -110,8 +141,19 @@ export async function execute(
 
       const score = Math.max(0, 100 - risks.reduce((sum, entry) => sum + entry.penalty, 0));
       const status = score >= 80 ? "healthy" : score >= 50 ? "watch" : "needs_attention";
-
-      return toTextResult({
+      const topOverspent = sortDescendingByAmount(
+        overspentCategories.map((category) => ({
+          name: category.name,
+          amountMilliunits: Math.abs(category.balance),
+        })),
+      );
+      const topUnderfunded = sortDescendingByAmount(
+        underfundedCategories.map((category) => ({
+          name: category.name,
+          amountMilliunits: category.goal_under_funded ?? 0,
+        })),
+      );
+      const payload = {
         as_of_month: monthKey,
         status,
         score,
@@ -134,14 +176,43 @@ export async function execute(
           .sort((left, right) => right.penalty - left.penalty)
           .slice(0, topN)
           .map((entry) => compactRisk(entry.code, entry.severity)),
-        recommended_tools: [
-          "ynab_get_budget_health_summary",
-          "ynab_get_budget_cleanup_summary",
-          "ynab_search_transactions",
-          "ynab_get_upcoming_obligations",
-          "ynab_get_income_summary",
-        ],
-      });
+        top_overspent: topOverspent.slice(0, topN).map((category) => compactObject({
+          name: category.name,
+          amount: formatAmount(category.amountMilliunits),
+        })),
+        top_underfunded: topUnderfunded.slice(0, topN).map((category) => compactObject({
+          name: category.name,
+          amount: formatAmount(category.amountMilliunits),
+        })),
+        top_uncategorized: uncategorizedTransactions.slice(0, topN).map((transaction) => compactObject({
+          date: transaction.date,
+          payee_name: transaction.payee_name ?? undefined,
+          amount: formatAmount(Math.abs(transaction.amount)),
+        })),
+      };
+
+      if (format === "prose") {
+        return toProseResult(buildProse(
+          `Financial Health Check (${payload.as_of_month})`,
+          [
+            ["status", payload.status],
+            ["score", payload.score],
+            ["net_worth", payload.metrics.net_worth],
+            ["liquid_cash", payload.metrics.liquid_cash],
+            ["debt", payload.metrics.debt],
+            ["ready_to_assign", payload.metrics.ready_to_assign],
+            ["upcoming_30d_net", payload.metrics.upcoming_30d_net],
+          ],
+          [
+            { heading: "Top Risks", items: payload.top_risks.map((riskEntry) => proseRecordItem(riskEntry, "code", "severity")) },
+            { heading: "Overspent", items: payload.top_overspent.map((entry) => proseRecordItem(entry, "name", "amount")) },
+            { heading: "Underfunded", items: payload.top_underfunded.map((entry) => proseRecordItem(entry, "name", "amount")) },
+            { heading: "Uncategorized", items: payload.top_uncategorized.map((entry) => proseRecordItem(entry, "date", "payee_name", "amount")) },
+          ],
+        ));
+      }
+
+      return toTextResult(payload, format);
     });
   } catch (error) {
     return toErrorResult(error);

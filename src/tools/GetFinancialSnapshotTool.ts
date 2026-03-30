@@ -2,6 +2,7 @@ import { z } from "zod";
 import * as ynab from "ynab";
 
 import {
+  buildAccountSnapshotSummary,
   buildAssignedSpentSummary,
   compactObject,
   formatMilliunits,
@@ -9,7 +10,7 @@ import {
   toTopRollups,
 } from "./financeToolUtils.js";
 import { getCachedAccounts, getCachedPlanMonth } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_get_financial_snapshot";
 export const description =
@@ -21,10 +22,6 @@ export const inputSchema = {
   ),
 };
 
-function isActiveAccount(account: ynab.Account) {
-  return !account.deleted && !account.closed;
-}
-
 export async function execute(input: { planId?: string; month?: string }, api: ynab.API) {
   try {
     const month = input.month || "current";
@@ -34,21 +31,21 @@ export async function execute(input: { planId?: string; month?: string }, api: y
         getCachedPlanMonth(api, planId, month),
       ]);
 
-      const accounts = accountsResponse.data.accounts.filter(isActiveAccount);
+      const {
+        activeAccounts,
+        positiveAccounts,
+        negativeAccounts,
+        netWorthMilliunits,
+        liquidCashMilliunits,
+        onBudgetAccountCount,
+      } = buildAccountSnapshotSummary(accountsResponse.data.accounts);
       const monthDetail = monthResponse.data.month;
       const spentMilliunits = toSpentMilliunits(monthDetail.activity);
 
-      const positiveAccounts = accounts.filter((account) => account.balance > 0);
-      const negativeAccounts = accounts.filter((account) => account.balance < 0);
-
       return toTextResult(compactObject({
         month: monthDetail.month,
-        net_worth: formatMilliunits(accounts.reduce((sum, account) => sum + account.balance, 0)),
-        liquid_cash: formatMilliunits(
-          accounts
-            .filter((account) => account.balance > 0 && account.on_budget)
-            .reduce((sum, account) => sum + account.balance, 0),
-        ),
+        net_worth: formatMilliunits(netWorthMilliunits),
+        liquid_cash: formatMilliunits(liquidCashMilliunits),
         debt: formatMilliunits(
           negativeAccounts.reduce((sum, account) => sum + Math.abs(account.balance), 0),
         ),
@@ -56,8 +53,8 @@ export async function execute(input: { planId?: string; month?: string }, api: y
         income: formatMilliunits(monthDetail.income),
         ...buildAssignedSpentSummary(monthDetail.budgeted, spentMilliunits),
         age_of_money: monthDetail.age_of_money,
-        account_count: accounts.length,
-        on_budget_account_count: accounts.filter((account) => account.on_budget).length,
+        account_count: activeAccounts.length,
+        on_budget_account_count: onBudgetAccountCount,
         debt_account_count: negativeAccounts.length,
         top_asset_accounts: toTopRollups(
           positiveAccounts.map((account) => ({

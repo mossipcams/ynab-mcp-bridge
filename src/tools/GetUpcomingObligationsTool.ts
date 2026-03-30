@@ -3,15 +3,18 @@ import * as ynab from "ynab";
 
 import { buildUpcomingWindowSummary, expandScheduledOccurrences, formatMilliunits } from "./financeToolUtils.js";
 import { getCachedScheduledTransactions } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import type { OutputFormat } from "../runtimePlanToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
+import { buildProse, proseItem } from "./proseFormatUtils.js";
 
 export const name = "ynab_get_upcoming_obligations";
 export const description =
-  "Returns compact 7, 14, and 30 day windows for due outflows and expected inflows from scheduled transactions, excluding transfers.";
+  "Upcoming scheduled inflows and outflows across 7, 14, and 30 day windows.";
 export const inputSchema = {
-  planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
-  asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("The anchor date in ISO format."),
-  topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of due items to include."),
+  planId: z.string().optional().describe("Plan ID (uses env default)"),
+  asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Anchor date (ISO)"),
+  topN: z.number().int().min(1).max(10).default(5).describe("Top N results"),
+  format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
 };
 
 const WINDOW_DAYS = [7, 14, 30] as const;
@@ -21,12 +24,13 @@ function getTodayIsoDate() {
 }
 
 export async function execute(
-  input: { planId?: string; asOfDate?: string; topN?: number },
+  input: { planId?: string; asOfDate?: string; topN?: number; format?: OutputFormat },
   api: ynab.API,
 ) {
   try {
     const asOfDate = input.asOfDate ?? getTodayIsoDate();
     const topN = input.topN ?? 5;
+    const format = input.format ?? "compact";
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const response = await getCachedScheduledTransactions(api, planId);
@@ -67,7 +71,7 @@ export async function execute(
         }),
       );
 
-      return toTextResult({
+      const payload = {
         as_of_date: asOfDate,
         obligation_count: scheduledTransactions.filter((transaction) => transaction.amount < 0).length,
         expected_inflow_count: scheduledTransactions.filter((transaction) => transaction.amount > 0).length,
@@ -81,7 +85,24 @@ export async function execute(
           amount: formatMilliunits(Math.abs(transaction.amount)),
           type: transaction.amount >= 0 ? "inflow" : "outflow",
         })),
-      });
+      };
+
+      if (format === "prose") {
+        return toProseResult(buildProse(
+          `Upcoming Obligations (${payload.as_of_date})`,
+          [
+            ["obligations", payload.obligation_count],
+            ["expected_inflows", payload.expected_inflow_count],
+            ["net_30d", payload.windows["30d"]?.net_upcoming],
+          ],
+          [
+            { heading: "Windows", items: WINDOW_DAYS.map((windowDays) => proseItem(`${windowDays}d`, payload.windows[`${windowDays}d`]?.net_upcoming)) },
+            { heading: "Top Due", items: payload.top_due.map((entry) => proseItem(entry.date_next, entry.payee_name, entry.amount, entry.type)) },
+          ],
+        ));
+      }
+
+      return toTextResult(payload, format);
     });
   } catch (error) {
     return toErrorResult(error);

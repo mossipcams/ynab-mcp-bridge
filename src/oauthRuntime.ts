@@ -462,6 +462,7 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
   const publicServerUrl = new URL(auth.publicUrl);
   const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(publicServerUrl);
   const scopesSupported = getEffectiveOAuthScopes(auth.scopes);
+  const requiredAccessScopes = scopesSupported.filter((scope) => scope !== "offline_access");
   const router = express.Router();
 
   router.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
@@ -480,7 +481,7 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
 
   return {
     authMiddleware: requireBearerAuth({
-      requiredScopes: scopesSupported,
+      requiredScopes: requiredAccessScopes,
       resourceMetadataUrl,
       verifier: oauthBroker.provider,
     }),

@@ -1,4 +1,3 @@
-import { getYnabApiRuntimeContext } from "../ynabApi.js";
 import { getErrorMessage } from "./errorUtils.js";
 
 function _getPlanId(inputPlanId?: string, configuredPlanId?: string): string {
@@ -23,6 +22,7 @@ type PlanResolverApi = {
 const inFlightPlanResolutionSymbol = Symbol("ynabInFlightPlanResolution");
 
 type ResolvePlanIdOptions = {
+  configuredPlanId?: string;
   excludePlanIds?: string[];
   ignoreConfiguredPlanId?: boolean;
 };
@@ -31,11 +31,7 @@ type PlanResolverApiWithInFlightResolutions = PlanResolverApi & {
   [inFlightPlanResolutionSymbol]?: Map<string, Promise<string>>;
 };
 
-function getApiConfiguredPlanId(api: object) {
-  return getYnabApiRuntimeContext(api)?.config.planId?.trim();
-}
-
-function getConfiguredPlanId(inputPlanId: string | undefined, api: object, options: ResolvePlanIdOptions) {
+function getConfiguredPlanId(inputPlanId: string | undefined, options: ResolvePlanIdOptions) {
   const explicitPlanId = inputPlanId?.trim();
 
   if (explicitPlanId) {
@@ -43,7 +39,7 @@ function getConfiguredPlanId(inputPlanId: string | undefined, api: object, optio
   }
 
   if (!options.ignoreConfiguredPlanId) {
-    return getApiConfiguredPlanId(api) ?? "";
+    return options.configuredPlanId?.trim() ?? "";
   }
 
   return "";
@@ -102,7 +98,7 @@ async function resolvePlanId(
   options: ResolvePlanIdOptions = {},
 ): Promise<string> {
   const excludedPlanIds = new Set(options.excludePlanIds ?? []);
-  const configuredPlanId = getConfiguredPlanId(inputPlanId, api, options);
+  const configuredPlanId = getConfiguredPlanId(inputPlanId, options);
 
   if (configuredPlanId && !excludedPlanIds.has(configuredPlanId)) {
     return configuredPlanId;
@@ -142,8 +138,9 @@ export async function withResolvedPlan<T>(
   inputPlanId: string | undefined,
   api: PlanResolverApi,
   operation: (planId: string) => Promise<T>,
+  options: ResolvePlanIdOptions = {},
 ) {
-  const planId = await resolvePlanId(inputPlanId, api);
+  const planId = await resolvePlanId(inputPlanId, api, options);
 
   try {
     return await operation(planId);
@@ -153,6 +150,7 @@ export async function withResolvedPlan<T>(
     }
 
     const recoveredPlanId = await resolvePlanId(undefined, api, {
+      ...(options.configuredPlanId ? { configuredPlanId: options.configuredPlanId } : {}),
       excludePlanIds: [planId],
       ignoreConfiguredPlanId: true,
     });
@@ -161,9 +159,13 @@ export async function withResolvedPlan<T>(
   }
 }
 
-type OutputFormat = "compact" | "pretty";
+export type OutputFormat = "compact" | "pretty" | "prose";
 
 function serializePayload(payload: unknown, format: OutputFormat) {
+  if (format === "prose") {
+    return typeof payload === "string" ? payload : JSON.stringify(payload);
+  }
+
   return format === "pretty"
     ? JSON.stringify(payload, null, 2)
     : JSON.stringify(payload);
@@ -176,6 +178,10 @@ export function toTextResult(payload: unknown, format: OutputFormat = "compact")
       text: serializePayload(payload, format),
     }],
   };
+}
+
+export function toProseResult(text: string) {
+  return toTextResult(text, "prose");
 }
 
 export function toErrorResult(error: unknown, format: OutputFormat = "compact") {

@@ -6,10 +6,11 @@ import {
   formatAmount,
   liquidCashMilliunits,
   recentMonths,
+  scheduledNetNext30dMilliunits,
 } from "./financialDiagnosticsUtils.js";
-import { getCachedAccounts, getCachedPlanMonths } from "./cachedYnabReads.js";
+import { getCachedAccounts, getCachedPlanMonths, getCachedScheduledTransactions } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_get_emergency_fund_coverage";
 export const description =
@@ -47,14 +48,19 @@ export async function execute(
   try {
     const monthsBack = input.monthsBack ?? 3;
     return await withResolvedPlan(input.planId, api, async (planId) => {
-      const [accountsResponse, monthsResponse] = await Promise.all([
+      const [accountsResponse, monthsResponse, scheduledResponse] = await Promise.all([
         getCachedAccounts(api, planId),
         getCachedPlanMonths(api, planId),
+        getCachedScheduledTransactions(api, planId),
       ]);
 
       const liquidCash = liquidCashMilliunits(accountsResponse.data.accounts);
       const months = recentMonths(monthsResponse.data.months, input.asOfMonth, monthsBack);
       const averageMonthlySpending = averageMonthlySpendingMilliunits(months);
+      const scheduledNetNext30d = scheduledNetNext30dMilliunits(
+        scheduledResponse.data.scheduled_transactions,
+        input.asOfMonth,
+      );
       const noSpending = averageMonthlySpending === 0;
       const coverageMonths = noSpending ? null : liquidCash / averageMonthlySpending;
       const status = getCoverageStatus(coverageMonths);
@@ -63,6 +69,7 @@ export async function execute(
         as_of_month: input.asOfMonth,
         liquid_cash: formatAmount(liquidCash),
         average_monthly_spending: formatAmount(averageMonthlySpending),
+        scheduled_net_next_30d: formatAmount(scheduledNetNext30d),
         coverage_months: coverageMonths !== null ? coverageMonths.toFixed(2) : undefined,
         status,
         months_considered: months.length,

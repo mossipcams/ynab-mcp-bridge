@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.3...ynab-mcp-bridge-v0.15.4) (2026-03-28)
+
+
+### Bug Fixes
+
+* reuse persisted Claude profile on authorize ([896d94a](https://github.com/mossipcams/ynab-mcp-bridge/commit/896d94a227b2d524a4e01d3f051efe51cd08b665))
+
+## [0.15.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.2...ynab-mcp-bridge-v0.15.3) (2026-03-28)
+
+
+### Bug Fixes
+
+* exclude offline_access from MCP resource metadata ([d0c53da](https://github.com/mossipcams/ynab-mcp-bridge/commit/d0c53da3556cd479076e6d890a5642a548a35efe))
+
+## [0.15.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.1...ynab-mcp-bridge-v0.15.2) (2026-03-28)
+
+
+### Bug Fixes
+
+* improve Claude Desktop OAuth compatibility ([#195](https://github.com/mossipcams/ynab-mcp-bridge/issues/195)) ([45fdb63](https://github.com/mossipcams/ynab-mcp-bridge/commit/45fdb63b76af63f10202457308ea7f6fc0a8af8b))
+
+## [0.15.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.0...ynab-mcp-bridge-v0.15.1) (2026-03-28)
+
+
+### Bug Fixes
+
+* harden oauth token exchange and tool-call auth ([5dfb96e](https://github.com/mossipcams/ynab-mcp-bridge/commit/5dfb96e658114bdb68803178ca95b1024c4a6db2))
+* harden startup sequencing and summary hot paths ([796b2ee](https://github.com/mossipcams/ynab-mcp-bridge/commit/796b2eecb69936fe0e941a9daf6be54de667cd0b))
+* move runtime plan adapter out of tool catalog ([f9c9519](https://github.com/mossipcams/ynab-mcp-bridge/commit/f9c9519646524ddf184ca3ac705a93c65a16be48))
+* sync release metadata with published version ([205784d](https://github.com/mossipcams/ynab-mcp-bridge/commit/205784d65b89e1fc98b787a36b578eff2f53fac4))
+* tighten architecture guardrails ([f39f98a](https://github.com/mossipcams/ynab-mcp-bridge/commit/f39f98ae7fe82be756fe8480651fd0af1b49629e))
+* tighten architecture guardrails ([4763842](https://github.com/mossipcams/ynab-mcp-bridge/commit/47638429d31c07da13628cba694d92780f4a5bf0))
+
+## [0.15.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.11...ynab-mcp-bridge-v0.15.0) (2026-03-27)
+
+
+### Features
+
+* reduce latency for high-signal summary tools ([#187](https://github.com/mossipcams/ynab-mcp-bridge/issues/187)) ([9a82845](https://github.com/mossipcams/ynab-mcp-bridge/commit/9a828452e7b9964bf5c1b1795851f7f5adc791fc))
+
 ## [0.14.11](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.14.10...ynab-mcp-bridge-v0.14.11) (2026-03-27)
 
 

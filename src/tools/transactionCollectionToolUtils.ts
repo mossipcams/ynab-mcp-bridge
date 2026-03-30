@@ -9,7 +9,7 @@ import {
   type TransactionLike,
   type TransactionProjectionInput,
 } from "../transactionQueryEngine.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 type TransactionCollectionOptions<TInput extends TransactionProjectionInput> = {
   normalizeInput?: (input: TInput) => TInput;
@@ -32,7 +32,7 @@ async function runTransactionCollectionTool<TInput extends TransactionProjection
       api,
       async (planId) => fetchTransactions(api, planId, normalizedInput),
     );
-    const sortedTransactions = transactions
+    const sortedTransactions = Array.from(transactions)
       .filter((transaction) => !transaction.deleted)
       .sort((left, right) => compareTransactions(left, right, "date_desc"));
 

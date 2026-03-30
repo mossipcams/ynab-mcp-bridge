@@ -72,6 +72,19 @@ function readOptionalValue(value) {
     const trimmed = value?.trim();
     return trimmed ? trimmed : undefined;
 }
+function readBooleanValue(value, name) {
+    const normalized = readOptionalValue(value);
+    if (!normalized) {
+        return undefined;
+    }
+    if (normalized === "true") {
+        return true;
+    }
+    if (normalized === "false") {
+        return false;
+    }
+    throw new Error(`${name} must be 'true' or 'false'.`);
+}
 function readPathValue(value, name) {
     const normalized = readOptionalValue(value);
     if (!normalized) {
@@ -221,6 +234,7 @@ function resolveRuntimeAuthConfig(args, env) {
     const jwksUrl = readUrlLikeValue(readFlag(args, "--oauth-jwks-url") ?? env["MCP_OAUTH_JWKS_URL"], "MCP_OAUTH_JWKS_URL")
         ?? cloudflareAccessUrls?.jwksUrl;
     const audience = readOptionalValue(readFlag(args, "--oauth-audience") ?? env["MCP_OAUTH_AUDIENCE"]) ?? publicUrl;
+    const skipLocalConsent = readBooleanValue(readFlag(args, "--oauth-skip-local-consent") ?? env["MCP_OAUTH_SKIP_LOCAL_CONSENT"], "MCP_OAUTH_SKIP_LOCAL_CONSENT");
     const storePath = readFilePathValue(readFlag(args, "--oauth-store-path") ?? env["MCP_OAUTH_STORE_PATH"])
         ?? getDefaultOAuthStorePath();
     const tokenSigningSecret = readOptionalValue(readFlag(args, "--oauth-token-signing-secret") ?? env["MCP_OAUTH_TOKEN_SIGNING_SECRET"])
@@ -250,6 +264,7 @@ function resolveRuntimeAuthConfig(args, env) {
         jwksUrl,
         mode: "oauth",
         publicUrl,
+        ...(skipLocalConsent ? { skipLocalConsent } : {}),
         scopes,
         storePath,
         tokenSigningSecret,

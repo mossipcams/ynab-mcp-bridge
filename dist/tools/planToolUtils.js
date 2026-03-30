@@ -1,4 +1,3 @@
-import { getYnabApiRuntimeContext } from "../ynabApi.js";
 import { getErrorMessage } from "./errorUtils.js";
 function _getPlanId(inputPlanId, configuredPlanId) {
     const planId = inputPlanId?.trim() || configuredPlanId?.trim() || "";
@@ -8,16 +7,13 @@ function _getPlanId(inputPlanId, configuredPlanId) {
     return planId;
 }
 const inFlightPlanResolutionSymbol = Symbol("ynabInFlightPlanResolution");
-function getApiConfiguredPlanId(api) {
-    return getYnabApiRuntimeContext(api)?.config.planId?.trim();
-}
-function getConfiguredPlanId(inputPlanId, api, options) {
+function getConfiguredPlanId(inputPlanId, options) {
     const explicitPlanId = inputPlanId?.trim();
     if (explicitPlanId) {
         return explicitPlanId;
     }
     if (!options.ignoreConfiguredPlanId) {
-        return getApiConfiguredPlanId(api) ?? "";
+        return options.configuredPlanId?.trim() ?? "";
     }
     return "";
 }
@@ -57,7 +53,7 @@ function getPlanResolutionCacheKey(options) {
 }
 async function resolvePlanId(inputPlanId, api, options = {}) {
     const excludedPlanIds = new Set(options.excludePlanIds ?? []);
-    const configuredPlanId = getConfiguredPlanId(inputPlanId, api, options);
+    const configuredPlanId = getConfiguredPlanId(inputPlanId, options);
     if (configuredPlanId && !excludedPlanIds.has(configuredPlanId)) {
         return configuredPlanId;
     }
@@ -83,8 +79,8 @@ async function resolvePlanId(inputPlanId, api, options = {}) {
         inFlightStore.delete(cacheKey);
     }
 }
-export async function withResolvedPlan(inputPlanId, api, operation) {
-    const planId = await resolvePlanId(inputPlanId, api);
+export async function withResolvedPlan(inputPlanId, api, operation, options = {}) {
+    const planId = await resolvePlanId(inputPlanId, api, options);
     try {
         return await operation(planId);
     }
@@ -93,6 +89,7 @@ export async function withResolvedPlan(inputPlanId, api, operation) {
             throw error;
         }
         const recoveredPlanId = await resolvePlanId(undefined, api, {
+            ...(options.configuredPlanId ? { configuredPlanId: options.configuredPlanId } : {}),
             excludePlanIds: [planId],
             ignoreConfiguredPlanId: true,
         });
@@ -100,6 +97,9 @@ export async function withResolvedPlan(inputPlanId, api, operation) {
     }
 }
 function serializePayload(payload, format) {
+    if (format === "prose") {
+        return typeof payload === "string" ? payload : JSON.stringify(payload);
+    }
     return format === "pretty"
         ? JSON.stringify(payload, null, 2)
         : JSON.stringify(payload);
@@ -111,6 +111,9 @@ export function toTextResult(payload, format = "compact") {
                 text: serializePayload(payload, format),
             }],
     };
+}
+export function toProseResult(text) {
+    return toTextResult(text, "prose");
 }
 export function toErrorResult(error, format = "compact") {
     return {

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { formatAmountMilliunits, hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "./collectionToolUtils.js";
 import { getCachedAccounts } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 export const name = "ynab_list_accounts";
 export const description = "Lists accounts for a YNAB plan with optional compact projections and pagination.";
 const accountFields = [

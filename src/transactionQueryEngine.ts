@@ -83,16 +83,25 @@ export function assertTransactionMonth(month: string): string {
 export function toDisplayTransactions(transactions: readonly TransactionLike[]): DisplayTransaction[] {
   return transactions
     .filter((transaction) => !transaction.deleted)
-    .map((transaction) => ({
-      id: transaction.id,
-      date: transaction.date,
-      amount: formatAmountMilliunits(transaction.amount),
-      payee_name: transaction.payee_name,
-      category_name: transaction.category_name,
-      account_name: transaction.account_name,
-      approved: transaction.approved,
-      cleared: transaction.cleared,
-    }));
+    .map(toDisplayTransaction);
+}
+
+function toDisplayTransaction(transaction: TransactionLike): DisplayTransaction {
+  return {
+    id: transaction.id,
+    date: transaction.date,
+    amount: formatAmountMilliunits(transaction.amount),
+    payee_name: transaction.payee_name,
+    category_name: transaction.category_name,
+    account_name: transaction.account_name,
+    approved: transaction.approved,
+    cleared: transaction.cleared,
+  };
+}
+
+function toVisibleDisplayTransactions(transactions: readonly TransactionLike[]): DisplayTransaction[] {
+  return transactions
+    .map(toDisplayTransaction);
 }
 
 function applyTransactionProjection(
@@ -108,18 +117,19 @@ export function buildTransactionCollectionResult(
   totalKey: "match_count" | "transaction_count",
   extra: Record<string, unknown> = {},
 ) {
-  const totalCount = transactions.length;
+  const visibleTransactions = transactions.filter((transaction) => !transaction.deleted);
+  const totalCount = visibleTransactions.length;
 
   if (!hasPaginationControls(input) && !hasProjectionControls(input)) {
     return {
-      transactions: toDisplayTransactions(transactions),
+      transactions: toVisibleDisplayTransactions(visibleTransactions),
       [totalKey]: totalCount,
       ...extra,
     };
   }
 
   if (!hasPaginationControls(input)) {
-    const displayTransactions = toDisplayTransactions(transactions);
+    const displayTransactions = toVisibleDisplayTransactions(visibleTransactions);
 
     return {
       transactions: applyTransactionProjection(displayTransactions, input),
@@ -128,8 +138,8 @@ export function buildTransactionCollectionResult(
     };
   }
 
-  const pagedTransactions = paginateEntries([...transactions], input);
-  const displayTransactions = toDisplayTransactions(pagedTransactions.entries);
+  const pagedTransactions = paginateEntries(visibleTransactions, input);
+  const displayTransactions = toVisibleDisplayTransactions(pagedTransactions.entries);
 
   return {
     transactions: hasProjectionControls(input)
@@ -152,9 +162,13 @@ export function compareTransactions(
     case "date_desc":
       return right.date.localeCompare(left.date) || left.id.localeCompare(right.id);
     case "amount_asc":
-      return left.amount - right.amount || right.date.localeCompare(left.date);
+      return left.amount - right.amount
+        || right.date.localeCompare(left.date)
+        || left.id.localeCompare(right.id);
     case "amount_desc":
-      return right.amount - left.amount || right.date.localeCompare(left.date);
+      return right.amount - left.amount
+        || right.date.localeCompare(left.date)
+        || left.id.localeCompare(right.id);
   }
 }
 

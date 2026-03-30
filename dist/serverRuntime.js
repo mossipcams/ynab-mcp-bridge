@@ -287,6 +287,15 @@ export function getToolsListResult() {
         })),
     };
 }
+export function getToolCatalogMetrics() {
+    const toolsListResult = getToolsListResult();
+    const serializedToolsList = JSON.stringify(toolsListResult);
+    return {
+        tool_count: toolsListResult.tools.length,
+        tools_list_bytes: Buffer.byteLength(serializedToolsList, "utf8"),
+        tools_list_chars: serializedToolsList.length,
+    };
+}
 export function getResourcesListResult(options = {}) {
     return {
         resources: getDiscoveryResourceSummaries(options).map((resource) => ({

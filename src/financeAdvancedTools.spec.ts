@@ -10,6 +10,10 @@ function parseText(result: Awaited<ReturnType<typeof GetUpcomingObligationsTool.
   return JSON.parse(result.content[0].text);
 }
 
+function readText(result: { content: Array<{ text: string }> }) {
+  return result.content[0].text;
+}
+
 describe("advanced finance tools", () => {
   it("builds compact upcoming obligation windows from scheduled transactions", async () => {
     const api = {
@@ -131,6 +135,66 @@ describe("advanced finance tools", () => {
         },
       ],
     });
+  });
+
+  it("renders upcoming obligations as prose when requested", async () => {
+    const api = {
+      scheduledTransactions: {
+        getScheduledTransactions: vi.fn().mockResolvedValue({
+          data: {
+            scheduled_transactions: [
+              {
+                id: "sched-1",
+                date_next: "2026-03-18",
+                amount: -180000,
+                deleted: false,
+                payee_name: "Landlord",
+                category_name: "Rent",
+                account_name: "Checking",
+              },
+              {
+                id: "sched-2",
+                date_next: "2026-03-20",
+                amount: -45000,
+                deleted: false,
+                payee_name: "Electric Co",
+                category_name: "Utilities",
+                account_name: "Checking",
+              },
+              {
+                id: "sched-3",
+                date_next: "2026-03-25",
+                amount: 250000,
+                deleted: false,
+                payee_name: "Employer",
+                category_name: "Inflow: Ready to Assign",
+                account_name: "Checking",
+              },
+              {
+                id: "sched-4",
+                date_next: "2026-04-02",
+                amount: -12000,
+                deleted: false,
+                payee_name: "Streaming",
+                category_name: "Subscriptions",
+                account_name: "Credit Card",
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetUpcomingObligationsTool.execute(
+      { planId: "plan-1", asOfDate: "2026-03-16", topN: 3, format: "prose" } as any,
+      api as any,
+    );
+
+    expect(readText(result as any)).toBe([
+      "Upcoming Obligations (2026-03-16): obligations 3 | expected_inflows 1 | net_30d 13.00",
+      "Windows: 7d -225.00, 14d 25.00, 30d 13.00",
+      "Top Due: 2026-03-18 Landlord 180.00 outflow, 2026-03-20 Electric Co 45.00 outflow, 2026-03-25 Employer 250.00 inflow",
+    ].join("\n"));
   });
 
   it("builds a compact goal progress summary for a month", async () => {

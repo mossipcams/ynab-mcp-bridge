@@ -1,6 +1,8 @@
 type CompactObjectValue = unknown;
 
 type AccountBalanceLike = {
+  id?: string;
+  name?: string;
   balance: number;
   deleted?: boolean;
   closed?: boolean;
@@ -12,6 +14,12 @@ type AccountTransactionLike = {
   amount: number;
   date: string;
   deleted?: boolean;
+};
+
+type CleanupTransactionLike = {
+  approved?: boolean | null;
+  category_id?: string | null;
+  cleared?: string | null;
 };
 
 type RollupEntry = {
@@ -36,6 +44,54 @@ type BudgetHealthMonthLike = {
   activity: number;
   to_be_budgeted: number;
   categories: BudgetHealthMonthCategoryLike[];
+};
+
+type SpendingAnomalyCategoryLike = {
+  activity: number;
+  id: string;
+  name: string;
+};
+
+type CategorySpentLookupResponse = {
+  data: {
+    month: {
+      categories: Array<{
+        activity: number;
+        id: string;
+      }>;
+    };
+  };
+};
+
+type BuildSpendingAnomaliesOptions = {
+  baselineSpentLookups: Array<Map<string, number>>;
+  categories: SpendingAnomalyCategoryLike[];
+  formatAmount: (value: number) => string;
+  formatPercent: (value: number) => string;
+  minimumDifference: number;
+  thresholdMultiplier: number;
+  topN: number;
+};
+
+type VisibleCategoryHealthSummary<TCategory> = {
+  availableTotalMilliunits: number;
+  overspentCategories: TCategory[];
+  underfundedCategories: TCategory[];
+};
+
+type CleanupTransactionSummary<TTransaction> = {
+  uncategorizedTransactions: TTransaction[];
+  unapprovedTransactions: TTransaction[];
+  unclearedTransactions: TTransaction[];
+};
+
+type AccountSnapshotSummary<TAccount> = {
+  activeAccounts: TAccount[];
+  liquidCashMilliunits: number;
+  negativeAccounts: TAccount[];
+  netWorthMilliunits: number;
+  onBudgetAccountCount: number;
+  positiveAccounts: TAccount[];
 };
 
 type ScheduledFrequency =
@@ -137,6 +193,149 @@ export function buildBudgetHealthMonthSummary(monthDetail: BudgetHealthMonthLike
     overspent_categories: overspentCategories,
     underfunded_categories: underfundedCategories,
   };
+}
+
+export function buildVisibleCategoryHealthSummary<TCategory extends BudgetHealthMonthCategoryLike>(
+  categories: TCategory[],
+): VisibleCategoryHealthSummary<TCategory> {
+  const summary: VisibleCategoryHealthSummary<TCategory> = {
+    overspentCategories: [],
+    underfundedCategories: [],
+    availableTotalMilliunits: 0,
+  };
+
+  for (const category of categories) {
+    if (category.deleted || category.hidden) {
+      continue;
+    }
+
+    if (category.balance > 0) {
+      summary.availableTotalMilliunits += category.balance;
+    }
+
+    if (category.balance < 0) {
+      summary.overspentCategories.push(category);
+    }
+
+    if ((category.goal_under_funded ?? 0) > 0) {
+      summary.underfundedCategories.push(category);
+    }
+  }
+
+  return summary;
+}
+
+export function buildCleanupTransactionSummary<TTransaction extends CleanupTransactionLike>(
+  transactions: TTransaction[],
+): CleanupTransactionSummary<TTransaction> {
+  const summary: CleanupTransactionSummary<TTransaction> = {
+    uncategorizedTransactions: [],
+    unapprovedTransactions: [],
+    unclearedTransactions: [],
+  };
+
+  for (const transaction of transactions) {
+    if (!transaction.category_id) {
+      summary.uncategorizedTransactions.push(transaction);
+    }
+
+    if (!transaction.approved) {
+      summary.unapprovedTransactions.push(transaction);
+    }
+
+    if (transaction.cleared === "uncleared") {
+      summary.unclearedTransactions.push(transaction);
+    }
+  }
+
+  return summary;
+}
+
+export function buildAccountSnapshotSummary<TAccount extends AccountBalanceLike>(
+  accounts: TAccount[],
+): AccountSnapshotSummary<TAccount> {
+  const summary: AccountSnapshotSummary<TAccount> = {
+    activeAccounts: [],
+    positiveAccounts: [],
+    negativeAccounts: [],
+    netWorthMilliunits: 0,
+    liquidCashMilliunits: 0,
+    onBudgetAccountCount: 0,
+  };
+
+  for (const account of accounts) {
+    if (account.deleted || account.closed) {
+      continue;
+    }
+
+    summary.activeAccounts.push(account);
+    summary.netWorthMilliunits += account.balance;
+
+    if (account.on_budget) {
+      summary.onBudgetAccountCount += 1;
+      if (account.balance > 0) {
+        summary.liquidCashMilliunits += account.balance;
+      }
+    }
+
+    if (account.balance > 0) {
+      summary.positiveAccounts.push(account);
+    } else if (account.balance < 0) {
+      summary.negativeAccounts.push(account);
+    }
+  }
+
+  return summary;
+}
+
+export function buildCategorySpentLookup(
+  responses: CategorySpentLookupResponse[],
+) {
+  return responses.map((response) => new Map(
+    response.data.month.categories.map((category) => [category.id, toSpentMilliunits(category.activity)] as const),
+  ));
+}
+
+export function buildSpendingAnomalies(options: BuildSpendingAnomaliesOptions) {
+  const {
+    baselineSpentLookups,
+    categories,
+    formatAmount,
+    formatPercent,
+    minimumDifference,
+    thresholdMultiplier,
+    topN,
+  } = options;
+
+  return categories
+    .map((category) => {
+      const latestSpent = toSpentMilliunits(category.activity);
+      const baselineValues = baselineSpentLookups.map((lookup) => lookup.get(category.id) ?? 0);
+      const baselineAverage = baselineValues.length === 0
+        ? 0
+        : baselineValues.reduce((sum, value) => sum + value, 0) / baselineValues.length;
+
+      if (
+        baselineAverage <= 0
+        || latestSpent < baselineAverage * thresholdMultiplier
+        || latestSpent - baselineAverage < minimumDifference
+      ) {
+        return undefined;
+      }
+
+      return {
+        category_id: category.id,
+        category_name: category.name,
+        latest_spent: formatAmount(latestSpent),
+        baseline_average: formatAmount(Math.round(baselineAverage)),
+        change_percent: formatPercent(((latestSpent - baselineAverage) / baselineAverage) * 100),
+        sort_difference: latestSpent - baselineAverage,
+      };
+    })
+    .filter((anomaly): anomaly is NonNullable<typeof anomaly> => !!anomaly)
+    .sort((left, right) => right.sort_difference - left.sort_difference)
+    .slice(0, topN)
+    .map(({ sort_difference: _sortDifference, ...anomaly }) => anomaly);
 }
 
 export function isCreditCardPaymentCategoryName(categoryGroupName?: string) {

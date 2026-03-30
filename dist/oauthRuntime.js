@@ -134,6 +134,7 @@ export function createOAuthBroker(config) {
             callbackUrl,
             defaultResource: config.publicUrl,
             defaultScopes: effectiveScopes,
+            ...(config.skipLocalConsent !== undefined ? { skipLocalConsent: config.skipLocalConsent } : {}),
         },
         dependencies: {
             createId: () => crypto.randomBytes(24).toString("base64url"),
@@ -382,6 +383,7 @@ export function createMcpAuthModule(auth) {
     const publicServerUrl = new URL(auth.publicUrl);
     const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(publicServerUrl);
     const scopesSupported = getEffectiveOAuthScopes(auth.scopes);
+    const requiredAccessScopes = scopesSupported.filter((scope) => scope !== "offline_access");
     const router = express.Router();
     router.use(oauthBroker.callbackPath, oauthBroker.handleCallback);
     router.post("/authorize/consent", express.urlencoded({ extended: false }), oauthBroker.handleConsent);
@@ -398,7 +400,7 @@ export function createMcpAuthModule(auth) {
     }));
     return {
         authMiddleware: requireBearerAuth({
-            requiredScopes: scopesSupported,
+            requiredScopes: requiredAccessScopes,
             resourceMetadataUrl,
             verifier: oauthBroker.provider,
         }),
@@ -409,6 +411,7 @@ export function createMcpAuthModule(auth) {
             resource_name: "YNAB MCP Bridge",
             scopes_supported: scopesSupported.length > 0 ? scopesSupported : undefined,
         },
+        resourceMetadataUrl,
         router,
     };
 }

@@ -4,7 +4,7 @@ import * as ynab from "ynab";
 import { getCachedCategories } from "./cachedYnabReads.js";
 import { compactObject } from "./financeToolUtils.js";
 import { hasPaginationControls, hasProjectionControls, paginateEntries } from "./collectionToolUtils.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_list_categories";
 export const description =

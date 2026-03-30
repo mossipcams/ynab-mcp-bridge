@@ -8,7 +8,7 @@ import {
   projectRecord,
 } from "./collectionToolUtils.js";
 import { getCachedPlanMonths } from "./cachedYnabReads.js";
-import { toErrorResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
+import { toErrorResult, toTextResult, withResolvedPlan } from "../runtimePlanToolUtils.js";
 
 export const name = "ynab_list_plan_months";
 export const description =
