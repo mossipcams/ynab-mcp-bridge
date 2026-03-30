@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.5](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.4...ynab-mcp-bridge-v0.15.5) (2026-03-30)
+
+
+### Bug Fixes
+
+* return 401 for unauthenticated GET /mcp in OAuth mode ([7261b44](https://github.com/mossipcams/ynab-mcp-bridge/commit/7261b44f43c3ea7a546d3b7ba3255623d1c813a3))
+* return 401 for unauthenticated GET /mcp in OAuth mode ([ec26e41](https://github.com/mossipcams/ynab-mcp-bridge/commit/ec26e41e6adecd7111e1b4cc42b5343cb1ed8274))
+
 ## [0.15.4](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.3...ynab-mcp-bridge-v0.15.4) (2026-03-28)
 
 
