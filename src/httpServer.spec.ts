@@ -1710,7 +1710,7 @@ describe("startHttpServer", () => {
         },
         serverInfo: {
           name: "ynab-mcp-bridge",
-          version: "0.14.10",
+          version: "0.14.11",
         },
       },
     });
@@ -1846,7 +1846,7 @@ describe("startHttpServer", () => {
       result: {
         content: [{
           type: "text",
-          text: "{\"name\":\"ynab-mcp-bridge\",\"version\":\"0.14.10\"}",
+          text: "{\"name\":\"ynab-mcp-bridge\",\"version\":\"0.14.11\"}",
         }],
       },
     });
@@ -2726,6 +2726,32 @@ describe("startHttpServer", () => {
     expect(response.headers.get("www-authenticate")).toContain("resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"");
   });
 
+  it("returns a bearer challenge for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        jwksUrl,
+        scopes: ["openid"],
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      headers: {
+        Accept: "text/event-stream",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"");
+  });
+
   it("exposes OAuth authorization server metadata when oauth mode is enabled", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
@@ -2872,6 +2898,40 @@ describe("startHttpServer", () => {
     });
   });
 
+  it("rejects client registrations that ask for client_secret_post auth", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+      },
+      body: JSON.stringify({
+        client_name: "Secret Client",
+        grant_types: ["authorization_code", "refresh_token"],
+        redirect_uris: ["https://claude.ai/oauth/callback"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "client_secret_post",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_client_metadata",
+      error_description: "Unsupported token endpoint auth method: client_secret_post",
+    });
+  });
+
   it("rejects overbroad client registration metadata", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
@@ -2982,6 +3042,132 @@ describe("startHttpServer", () => {
     expect(redirectUrl.searchParams.get("response_type")).toBe("code");
     expect(redirectUrl.searchParams.get("scope")).toBe("offline_access openid profile");
     expect(redirectUrl.searchParams.get("state")).toBeTruthy();
+  });
+
+  it("skips repeated consent after the same app re-registers with the same redirect URI", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const firstRegistration = await registerOAuthClient(httpServer.url);
+    const firstAuthorizeResponse = await startAuthorization(httpServer.url, firstRegistration.client_id);
+
+    expect(firstAuthorizeResponse.status).toBe(200);
+
+    const firstConsentResponse = await approveAuthorizationConsent(httpServer.url, await firstAuthorizeResponse.text());
+
+    expect(firstConsentResponse.status).toBe(302);
+
+    const secondRegistration = await registerOAuthClient(httpServer.url);
+    const secondAuthorizeResponse = await startAuthorization(httpServer.url, secondRegistration.client_id);
+
+    expect(secondAuthorizeResponse.status).toBe(302);
+    expect(secondAuthorizeResponse.headers.get("location")).toContain("/authorize");
+  });
+
+  it("does not reuse local approval across different redirect URIs on the same client", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registrationResponse = await fetch(new URL("/register", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+      },
+      body: JSON.stringify({
+        client_name: "Claude Web",
+        grant_types: ["authorization_code", "refresh_token"],
+        redirect_uris: [
+          "https://claude.ai/oauth/callback",
+          "https://claude.ai/alt-oauth/callback",
+        ],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    });
+
+    expect(registrationResponse.status).toBe(201);
+    const registration = await registrationResponse.json() as { client_id: string };
+
+    const firstAuthorizeResponse = await fetch(new URL(
+      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://claude.ai/oauth/callback")}&response_type=code&code_challenge=test-challenge&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(firstAuthorizeResponse.status).toBe(200);
+    const firstConsentResponse = await approveAuthorizationConsent(httpServer.url, await firstAuthorizeResponse.text());
+    expect(firstConsentResponse.status).toBe(302);
+
+    const secondAuthorizeResponse = await fetch(new URL(
+      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://claude.ai/alt-oauth/callback")}&response_type=code&code_challenge=test-challenge&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
+      httpServer.url,
+    ), {
+      redirect: "manual",
+      headers: {
+        Origin: "https://claude.ai",
+      },
+    });
+
+    expect(secondAuthorizeResponse.status).toBe(200);
+    await expect(secondAuthorizeResponse.text()).resolves.toContain("Approve MCP client access");
+  });
+
+  it("skips the local approval screen entirely when skip-local-consent is enabled", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: {
+        ...createCloudflareOAuthAuth({
+          authorizationUrl: upstream.authorizationUrl,
+          issuer: upstream.issuer,
+          jwksUrl: upstream.jwksUrl,
+          tokenUrl: upstream.tokenUrl,
+        }),
+        skipLocalConsent: true,
+      },
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const registration = await registerOAuthClient(httpServer.url);
+    const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
+
+    expect(authorizeResponse.status).toBe(302);
+    expect(authorizeResponse.headers.get("location")).toContain("/authorize");
   });
 
   it("escapes client metadata and sends hardened headers on the consent page", async () => {

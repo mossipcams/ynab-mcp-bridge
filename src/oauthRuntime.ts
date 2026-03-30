@@ -194,6 +194,7 @@ export function createOAuthBroker(config: OAuthAuthConfig): {
       callbackUrl,
       defaultResource: config.publicUrl,
       defaultScopes: effectiveScopes,
+      ...(config.skipLocalConsent !== undefined ? { skipLocalConsent: config.skipLocalConsent } : {}),
     },
     dependencies: {
       createId: () => crypto.randomBytes(24).toString("base64url"),
@@ -490,6 +491,7 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
       resource_name: "YNAB MCP Bridge",
       scopes_supported: scopesSupported.length > 0 ? scopesSupported : undefined,
     },
+    resourceMetadataUrl,
     router,
   };
 }
