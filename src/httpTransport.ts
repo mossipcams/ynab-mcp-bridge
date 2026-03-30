@@ -1088,8 +1088,8 @@ export async function startHttpServer(
       }
     | undefined;
   let runtimePool: ManagedRequestRuntimePool | undefined;
-  let resolveStartupReady: (() => void) | undefined;
-  let rejectStartupReady: ((error: unknown) => void) | undefined;
+  let resolveStartupReady!: () => void;
+  let rejectStartupReady!: (error: unknown) => void;
   const startupReady = new Promise<void>((resolve, reject) => {
     resolveStartupReady = resolve;
     rejectStartupReady = reject;
@@ -1397,7 +1397,7 @@ export async function startHttpServer(
       dependencies.createServer ?? createServer,
     );
 
-    resolveStartupReady?.();
+    resolveStartupReady();
 
     return {
       host,
@@ -1415,7 +1415,7 @@ export async function startHttpServer(
       },
     };
   } catch (error) {
-    rejectStartupReady?.(error);
+    rejectStartupReady(error);
     await closeNodeServer(server);
     throw error;
   }
