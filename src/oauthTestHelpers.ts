@@ -11,7 +11,7 @@ type OAuthAuthConfig = Extract<RuntimeAuthConfig, { mode: "oauth" }>;
 type Cleanup = () => Promise<void>;
 
 const DEFAULT_REMOTE_ORIGIN = "https://claude.ai";
-const DEFAULT_REDIRECT_URI = `${DEFAULT_REMOTE_ORIGIN}/oauth/callback`;
+const DEFAULT_REDIRECT_URI = `${DEFAULT_REMOTE_ORIGIN}/api/mcp/auth_callback`;
 const DEFAULT_RESOURCE = "https://mcp.example.com/mcp";
 const DEFAULT_SCOPE = "openid profile";
 
@@ -139,7 +139,7 @@ export async function registerOAuthClient(
       Origin: overrides.origin ?? DEFAULT_REMOTE_ORIGIN,
     },
     body: JSON.stringify({
-      client_name: "Claude Web",
+      client_name: "Claude",
       grant_types: ["authorization_code", "refresh_token"],
       redirect_uris: [DEFAULT_REDIRECT_URI],
       response_types: ["code"],

@@ -325,7 +325,7 @@ describe("oauth broker persistence", () => {
         code: localAuthorizationCode!,
         code_verifier: codeVerifier,
         grant_type: "authorization_code",
-        redirect_uri: "https://claude.ai/oauth/callback",
+        redirect_uri: "https://claude.ai/api/mcp/auth_callback",
         resource: "https://mcp.example.com/mcp",
       }),
     });

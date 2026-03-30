@@ -2726,7 +2726,9 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toContain("resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"");
+    expect(response.headers.get("www-authenticate")).toBe(
+      "Bearer realm=\"mcp\", error=\"invalid_token\", error_description=\"Missing Authorization header\", scope=\"openid\", resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
+    );
   });
 
   it("returns a bearer challenge for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
@@ -2861,9 +2863,9 @@ describe("startHttpServer", () => {
 
     expect(registration.client_id).toEqual(expect.any(String));
     expect(registration.client_id_issued_at).toEqual(expect.any(Number));
-    expect(registration.client_name).toBe("Claude Web");
+    expect(registration.client_name).toBe("Claude");
     expect(registration.grant_types).toEqual(["authorization_code", "refresh_token"]);
-    expect(registration.redirect_uris).toEqual(["https://claude.ai/oauth/callback"]);
+    expect(registration.redirect_uris).toEqual(["https://claude.ai/api/mcp/auth_callback"]);
     expect(registration.response_types).toEqual(["code"]);
     expect(registration.token_endpoint_auth_method).toBe("none");
   });
@@ -2922,7 +2924,7 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         client_name: "Secret Client",
         grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://claude.ai/oauth/callback"],
+        redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
         response_types: ["code"],
         token_endpoint_auth_method: "client_secret_post",
       }),
@@ -2958,7 +2960,7 @@ describe("startHttpServer", () => {
         contacts: ["owner@example.com"],
         grant_types: ["authorization_code", "client_credentials"],
         jwks_uri: "https://client.example.com/jwks.json",
-        redirect_uris: ["https://claude.ai/oauth/callback"],
+        redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
         response_types: ["code", "token"],
         token_endpoint_auth_method: "private_key_jwt",
       }),
@@ -3199,7 +3201,7 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         client_name: "<img src=x onerror=alert('boom')>",
         grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://claude.ai/oauth/callback"],
+        redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
         response_types: ["code"],
         token_endpoint_auth_method: "none",
       }),
@@ -3264,7 +3266,7 @@ describe("startHttpServer", () => {
 
     const clientRedirectUrl = new URL(location!);
     expect(clientRedirectUrl.origin).toBe("https://claude.ai");
-    expect(clientRedirectUrl.pathname).toBe("/oauth/callback");
+    expect(clientRedirectUrl.pathname).toBe("/api/mcp/auth_callback");
     expect(clientRedirectUrl.searchParams.get("code")).toBeTruthy();
     expect(clientRedirectUrl.searchParams.get("state")).toBe("client-state-123");
 
@@ -3384,7 +3386,7 @@ describe("startHttpServer", () => {
         code: localAuthorizationCode!,
         code_verifier: codeVerifier,
         grant_type: "authorization_code",
-        redirect_uri: "https://claude.ai/oauth/callback",
+        redirect_uri: "https://claude.ai/api/mcp/auth_callback",
         resource: "https://mcp.example.com/mcp",
       }),
     });
@@ -3538,7 +3540,7 @@ describe("startHttpServer", () => {
         code: localAuthorizationCode!,
         code_verifier: codeVerifier,
         grant_type: "authorization_code",
-        redirect_uri: "https://claude.ai/oauth/callback",
+        redirect_uri: "https://claude.ai/api/mcp/auth_callback",
         resource: "https://mcp.example.com/mcp",
       }).toString(),
     });
@@ -3605,7 +3607,7 @@ describe("startHttpServer", () => {
         code: localAuthorizationCode!,
         code_verifier: codeVerifier,
         grant_type: "authorization_code",
-        redirect_uri: "https://claude.ai/oauth/callback",
+        redirect_uri: "https://claude.ai/api/mcp/auth_callback",
         resource: "https://mcp.example.com/mcp",
       }),
     });
@@ -3743,7 +3745,7 @@ describe("startHttpServer", () => {
         code: localAuthorizationCode!,
         code_verifier: codeVerifier,
         grant_type: "authorization_code",
-        redirect_uri: "https://claude.ai/oauth/callback",
+        redirect_uri: "https://claude.ai/api/mcp/auth_callback",
         resource: "https://mcp.example.com/mcp",
       }),
     });
@@ -3989,7 +3991,7 @@ describe("startHttpServer", () => {
         code: localAuthorizationCode!,
         code_verifier: codeVerifier,
         grant_type: "authorization_code",
-        redirect_uri: "https://claude.ai/oauth/callback",
+        redirect_uri: "https://claude.ai/api/mcp/auth_callback",
         resource: "https://mcp.example.com/mcp",
       }),
     });

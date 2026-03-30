@@ -142,6 +142,43 @@ function getBodyStringValue(body: unknown, key: string) {
   return getStringValue(body, key);
 }
 
+function addBearerRealm(wwwAuthenticate: string) {
+  if (!wwwAuthenticate.startsWith("Bearer ") || wwwAuthenticate.includes("realm=")) {
+    return wwwAuthenticate;
+  }
+
+  return wwwAuthenticate.replace("Bearer ", "Bearer realm=\"mcp\", ");
+}
+
+function withBearerRealm(authMiddleware: RequestHandler): RequestHandler {
+  return (req, res, next) => {
+    const originalSetHeader = res.setHeader.bind(res);
+
+    res.setHeader = ((name, value) => {
+      if (name.toLowerCase() === "www-authenticate") {
+        if (typeof value === "string") {
+          return originalSetHeader(name, addBearerRealm(value));
+        }
+
+        if (Array.isArray(value)) {
+          return originalSetHeader(name, value.map((entry) => addBearerRealm(String(entry))));
+        }
+      }
+
+      return originalSetHeader(name, value);
+    }) as typeof res.setHeader;
+
+    const restoreSetHeader = () => {
+      res.setHeader = originalSetHeader;
+    };
+
+    res.once("close", restoreSetHeader);
+    res.once("finish", restoreSetHeader);
+
+    authMiddleware(req, res, next);
+  };
+}
+
 export function createOAuthBroker(config: OAuthAuthConfig): {
   callbackPath: string;
   callbackUrl: string;
@@ -480,11 +517,11 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
   }));
 
   return {
-    authMiddleware: requireBearerAuth({
+    authMiddleware: withBearerRealm(requireBearerAuth({
       requiredScopes: requiredAccessScopes,
       resourceMetadataUrl,
       verifier: oauthBroker.provider,
-    }),
+    })),
     getClientCompatibilityProfile: oauthBroker.getClientCompatibilityProfile,
     protectedResourceMetadata: {
       authorization_servers: [oauthBroker.getIssuerUrl().href],
