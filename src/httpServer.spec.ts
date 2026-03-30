@@ -2695,7 +2695,7 @@ describe("startHttpServer", () => {
     );
   });
 
-  it("returns a bare bearer challenge with resource metadata when oauth mode is enabled", async () => {
+  it("returns a bare bearer challenge with a shared unauthorized body when oauth mode is enabled", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2729,9 +2729,13 @@ describe("startHttpServer", () => {
     expect(response.headers.get("www-authenticate")).toBe(
       "Bearer realm=\"mcp\", resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
     );
+    await expect(response.json()).resolves.toEqual({
+      error: "unauthorized",
+      error_description: "Authorization required",
+    });
   });
 
-  it("returns a bearer challenge for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
+  it("returns the same unauthorized challenge body for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2757,6 +2761,10 @@ describe("startHttpServer", () => {
     expect(response.headers.get("www-authenticate")).toBe(
       "Bearer realm=\"mcp\", resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
     );
+    await expect(response.json()).resolves.toEqual({
+      error: "unauthorized",
+      error_description: "Authorization required",
+    });
   });
 
   it("keeps invalid_token challenges for malformed bearer credentials", async () => {
@@ -2831,6 +2839,36 @@ describe("startHttpServer", () => {
     expect(response.headers.get("www-authenticate")).toBe(
       "Bearer realm=\"mcp\", resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
     );
+    await expect(response.json()).resolves.toEqual({
+      error: "unauthorized",
+      error_description: "Authorization required",
+    });
+  });
+
+  it("exposes root OAuth protected resource metadata for Claude-compatible fallback discovery", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({ jwksUrl }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(new URL("/.well-known/oauth-protected-resource", httpServer.url), {
+      headers: {
+        "User-Agent": "Claude-User",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      authorization_servers: ["https://mcp.example.com/"],
+      resource: "https://mcp.example.com/mcp",
+      scopes_supported: ["openid", "profile", "offline_access"],
+    });
   });
 
   it("exposes OAuth authorization server metadata when oauth mode is enabled", async () => {
