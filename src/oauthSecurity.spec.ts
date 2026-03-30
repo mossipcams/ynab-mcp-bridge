@@ -118,7 +118,7 @@ describe("oauth security regressions", () => {
       body: JSON.stringify({
         client_name: "<script>alert('boom')</script>",
         grant_types: ["authorization_code", "refresh_token"],
-        redirect_uris: ["https://claude.ai/oauth/callback"],
+        redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
         response_types: ["code"],
         token_endpoint_auth_method: "none",
       }),
