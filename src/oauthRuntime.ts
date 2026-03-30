@@ -492,6 +492,7 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
       resource_name: "YNAB MCP Bridge",
       scopes_supported: scopesSupported.length > 0 ? scopesSupported : undefined,
     },
+    resourceMetadataUrl,
     router,
   };
 }

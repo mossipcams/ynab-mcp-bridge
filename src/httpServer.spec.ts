@@ -2729,6 +2729,32 @@ describe("startHttpServer", () => {
     expect(response.headers.get("www-authenticate")).toContain("resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"");
   });
 
+  it("returns a bearer challenge for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        jwksUrl,
+        scopes: ["openid"],
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      headers: {
+        Accept: "text/event-stream",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"");
+  });
+
   it("exposes OAuth authorization server metadata when oauth mode is enabled", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
