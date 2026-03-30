@@ -2729,7 +2729,7 @@ describe("startHttpServer", () => {
     expect(response.headers.get("www-authenticate")).toContain("resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"");
   });
 
-  it("returns a bearer challenge for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
+  it("rejects unauthenticated GET requests to the MCP endpoint with method not allowed in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2751,8 +2751,16 @@ describe("startHttpServer", () => {
       },
     });
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toContain("resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"");
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("POST");
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: -32000,
+        message: "Method not allowed.",
+      },
+      id: null,
+      jsonrpc: "2.0",
+    });
   });
 
   it("exposes OAuth authorization server metadata when oauth mode is enabled", async () => {

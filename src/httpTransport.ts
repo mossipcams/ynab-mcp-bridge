@@ -1269,22 +1269,6 @@ export async function startHttpServer(
     }
   });
 
-  if (auth.mode === "oauth" && mcpAuthModule) {
-    app.use((req, res, next) => {
-      if (getRequestPath(req) === path && req.method === "GET" && !getBearerToken(getFirstHeaderValue(req.headers.authorization))) {
-        logHttpDebug("request.rejected", {
-          ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-          reason: "unauthorized",
-        });
-        res.setHeader("WWW-Authenticate", `Bearer error="invalid_token", error_description="Missing Authorization header", resource_metadata="${mcpAuthModule.resourceMetadataUrl}"`);
-        writeJsonRpcError(res, 401, -32000, "Unauthorized.");
-        return;
-      }
-
-      next();
-    });
-  }
-
   installMcpPostRoute({
     app,
     createManagedRequest: () => {
