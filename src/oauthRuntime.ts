@@ -172,6 +172,19 @@ export function buildMcpBearerChallenge(input: {
   return header;
 }
 
+export function writeMcpUnauthorizedChallenge(
+  res: express.Response,
+  resourceMetadataUrl: string,
+) {
+  res.setHeader("WWW-Authenticate", buildMcpBearerChallenge({
+    resourceMetadataUrl,
+  }));
+  res.status(401).json({
+    error: "unauthorized",
+    error_description: "Authorization required",
+  });
+}
+
 function createMcpBearerAuthMiddleware(input: {
   requiredScopes: string[];
   resourceMetadataUrl: string;
@@ -184,10 +197,7 @@ function createMcpBearerAuthMiddleware(input: {
       const authHeader = req.headers.authorization;
 
       if (!authHeader) {
-        res.setHeader("WWW-Authenticate", buildMcpBearerChallenge({
-          resourceMetadataUrl,
-        }));
-        res.status(401).json(new InvalidTokenError("Missing Authorization header").toResponseObject());
+        writeMcpUnauthorizedChallenge(res, resourceMetadataUrl);
         return;
       }
 
@@ -643,14 +653,7 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
     path,
   } = options;
 
-  app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
-    const resolvedProfile = getResolvedClientProfile(res.locals);
-
-    if (resolvedProfile?.profileId !== "chatgpt") {
-      next();
-      return;
-    }
-
+  app.get("/.well-known/oauth-protected-resource", (_req, res) => {
     res.status(200).json(mcpAuthModule.protectedResourceMetadata);
   });
 

@@ -43,7 +43,11 @@ import {
   hasToolCallStarted,
   runWithRequestContext,
 } from "./requestContext.js";
-import { buildMcpBearerChallenge, createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
+import {
+  createMcpAuthModule,
+  installOAuthRoutes,
+  writeMcpUnauthorizedChallenge,
+} from "./oauthRuntime.js";
 import {
   createServer,
   createFastPathToolCallResults,
@@ -1276,10 +1280,7 @@ export async function startHttpServer(
           ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
           reason: "unauthorized",
         });
-        res.setHeader("WWW-Authenticate", buildMcpBearerChallenge({
-          resourceMetadataUrl: mcpAuthModule.resourceMetadataUrl,
-        }));
-        writeJsonRpcError(res, 401, -32000, "Unauthorized.");
+        writeMcpUnauthorizedChallenge(res, mcpAuthModule.resourceMetadataUrl);
         return;
       }
 
