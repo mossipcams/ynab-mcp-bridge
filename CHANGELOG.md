@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.8](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.7...ynab-mcp-bridge-v0.15.8) (2026-03-30)
+
+
+### Bug Fixes
+
+* unify mcp oauth auth challenges ([efc8acb](https://github.com/mossipcams/ynab-mcp-bridge/commit/efc8acb8735f64e85c1f175929d6cb8cb3eecf7e))
+
 ## [0.15.7](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.6...ynab-mcp-bridge-v0.15.7) (2026-03-30)
 
 
