@@ -23,6 +23,7 @@ import { logAppEvent } from "./logger.js";
 import { createOAuthCore, type PendingConsent } from "./grantLifecycle.js";
 import { createOAuthStore } from "./grantPersistence.js";
 import { getRequestLogFields } from "./requestContext.js";
+import { getFirstHeaderValue } from "./headerUtils.js";
 import { getStringValue, isRecord } from "./typeUtils.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 
@@ -140,6 +141,12 @@ function getBodyStringValue(body: unknown, key: string) {
   }
 
   return getStringValue(body, key);
+}
+
+function isUnauthenticatedBootstrapMethod(body: unknown) {
+  const method = getBodyStringValue(body, "method");
+
+  return method === "initialize" || method === "tools/list";
 }
 
 function addBearerRealm(wwwAuthenticate: string) {
@@ -598,6 +605,16 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
 
   app.use((req, res, next) => {
     if (getRequestPath(req) !== path || req.method !== "POST") {
+      next();
+      return;
+    }
+
+    if (
+      !req.auth &&
+      !getFirstHeaderValue(req.headers.authorization) &&
+      !getFirstHeaderValue(req.headers["cf-access-jwt-assertion"]) &&
+      isUnauthenticatedBootstrapMethod(req.body)
+    ) {
       next();
       return;
     }
