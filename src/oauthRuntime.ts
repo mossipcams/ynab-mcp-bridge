@@ -14,6 +14,7 @@ import {
   ServerError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { createOAuthMetadata, getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
@@ -190,13 +191,13 @@ function createMcpBearerAuthMiddleware(input: {
         return;
       }
 
-      const [type, token] = authHeader.split(" ");
+      const [type = "", token] = authHeader.split(" ");
 
       if (type.toLowerCase() !== "bearer" || !token) {
         throw new InvalidTokenError("Invalid Authorization header format, expected 'Bearer TOKEN'");
       }
 
-      let authInfo;
+      let authInfo: AuthInfo;
 
       try {
         authInfo = await verifier.verifyAccessToken(token);
