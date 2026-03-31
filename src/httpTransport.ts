@@ -181,6 +181,10 @@ function getRequestPath(req: Pick<Request, "path" | "url">) {
   return new URL(req.url, "http://127.0.0.1").pathname;
 }
 
+function getMcpResourceDocumentsPathPrefix(path: string) {
+  return `${path.replace(/\/$/, "")}/resources/`;
+}
+
 function toClientProfileHeaders(
   headers: Pick<Request, "headers">["headers"],
 ): ClientProfileRequestContext["headers"] {
@@ -1098,7 +1102,11 @@ export async function startHttpServer(
   function getRequestAuthDebugOptions(
     req: Pick<Request, "path" | "url">,
   ): { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean } {
-    const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
+    const requestPath = getRequestPath(req);
+    const isProtectedMcpRequest = auth.mode === "oauth" && (
+      requestPath === path ||
+      requestPath.startsWith(getMcpResourceDocumentsPathPrefix(path))
+    );
 
     return {
       authMode: auth.mode,

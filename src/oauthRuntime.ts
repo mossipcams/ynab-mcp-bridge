@@ -15,6 +15,7 @@ import { createOAuthMetadata, getOAuthProtectedResourceMetadataUrl, mcpAuthRoute
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { getEffectiveOAuthScopes, type RuntimeAuthConfig } from "./config.js";
+import { decideAuthAdmission } from "./authAdmissionPolicy.js";
 import type { ClientProfileId, DetectedClientProfile } from "./clientProfiles/types.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
@@ -48,6 +49,10 @@ type InstallOAuthRoutesOptions = {
   mcpAuthModule: ReturnType<typeof createMcpAuthModule>;
   path: string;
 };
+
+function getMcpResourceDocumentsPathPrefix(path: string) {
+  return `${path.replace(/\/$/, "")}/resources/`;
+}
 
 function getConsentPageHeaders(authorizationUrl: string) {
   const authorizationOrigin = new URL(authorizationUrl).origin;
@@ -141,19 +146,6 @@ function getBodyStringValue(body: unknown, key: string) {
   }
 
   return getStringValue(body, key);
-}
-
-function isClaudeUserAgent(userAgent: string | undefined) {
-  return userAgent?.toLowerCase().includes("claude") ?? false;
-}
-
-function isUnauthenticatedBootstrapMethod(body: unknown, userAgent: string | undefined) {
-  const method = getBodyStringValue(body, "method");
-
-  return method === "initialize" ||
-    method === "notifications/initialized" ||
-    (!isClaudeUserAgent(userAgent) &&
-      (method === "tools/list" || method === "resources/list"));
 }
 
 function addBearerRealm(wwwAuthenticate: string) {
@@ -566,6 +558,7 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
     mcpAuthModule,
     path,
   } = options;
+  const mcpResourceDocumentsPathPrefix = getMcpResourceDocumentsPathPrefix(path);
 
   app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
     const resolvedProfile = getResolvedClientProfile(res.locals);
@@ -611,22 +604,35 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
   });
 
   app.use((req, res, next) => {
-    if (getRequestPath(req) !== path || req.method !== "POST") {
+    const requestPath = getRequestPath(req);
+    const isMcpPostRequest = requestPath === path && req.method === "POST";
+    const isMcpResourceDocumentRequest = requestPath.startsWith(mcpResourceDocumentsPathPrefix);
+
+    if (!isMcpPostRequest && !isMcpResourceDocumentRequest) {
       next();
       return;
     }
 
-    if (
-      !req.auth &&
-      !getFirstHeaderValue(req.headers.authorization) &&
-      !getFirstHeaderValue(req.headers["cf-access-jwt-assertion"]) &&
-      isUnauthenticatedBootstrapMethod(req.body, getFirstHeaderValue(req.headers["user-agent"]))
-    ) {
-      next();
-      return;
-    }
+    const isDirectBearer = isDirectUpstreamBearerToken(req, auth);
+    const admission = isMcpPostRequest
+      ? decideAuthAdmission({
+          hasAuthorizationHeader: Boolean(getFirstHeaderValue(req.headers.authorization)),
+          hasCfAccessJwtAssertion: Boolean(getFirstHeaderValue(req.headers["cf-access-jwt-assertion"])),
+          isDirectUpstreamBearerToken: isDirectBearer,
+          method: req.method,
+          mcpPath: path,
+          path: requestPath,
+        })
+      : {
+          action: isDirectBearer
+            ? "reject_direct_upstream_bearer"
+            : "require_bridge_bearer",
+          reason: isDirectBearer
+            ? "direct-upstream-bearer"
+            : "protected-mcp-request",
+        };
 
-    if (isDirectUpstreamBearerToken(req, auth)) {
+    if (admission.action === "reject_direct_upstream_bearer") {
       delete req.headers.authorization;
     }
 
@@ -637,7 +643,7 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
 
       logHttpDebug("request.rejected", {
         ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-        reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope",
+        reason: res.statusCode === 403 ? "forbidden-scope" : admission.reason,
       });
     });
 
