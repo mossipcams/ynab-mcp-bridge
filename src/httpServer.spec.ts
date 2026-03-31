@@ -2763,7 +2763,7 @@ describe("startHttpServer", () => {
     );
   });
 
-  it("challenges unauthenticated initialize requests on the MCP endpoint in oauth mode", async () => {
+  it("allows unauthenticated initialize requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2800,13 +2800,17 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toContain(
-      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+      },
+    });
   });
 
-  it("challenges unauthenticated tools/list requests on the MCP endpoint in oauth mode", async () => {
+  it("allows unauthenticated tools/list requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2836,13 +2840,21 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toContain(
-      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_get_mcp_version",
+          }),
+        ]),
+      },
+    });
   });
 
-  it("challenges unauthenticated resources/list requests on the MCP endpoint in oauth mode", async () => {
+  it("allows unauthenticated resources/list requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2872,13 +2884,21 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toContain(
-      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_get_mcp_version",
+          }),
+        ]),
+      },
+    });
   });
 
-  it("challenges the generic oauth bootstrap sequence before authentication", async () => {
+  it("allows the generic oauth bootstrap sequence before authentication and still challenges tool calls", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2915,10 +2935,7 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(initializeResponse.status).toBe(401);
-    expect(initializeResponse.headers.get("www-authenticate")).toContain(
-      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(initializeResponse.status).toBe(200);
 
     const initializedResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -2934,10 +2951,7 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(initializedResponse.status).toBe(401);
-    expect(initializedResponse.headers.get("www-authenticate")).toContain(
-      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(initializedResponse.status).toBe(202);
 
     const resourcesListResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -2955,10 +2969,7 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(resourcesListResponse.status).toBe(401);
-    expect(resourcesListResponse.headers.get("www-authenticate")).toContain(
-      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(resourcesListResponse.status).toBe(200);
 
     const challengeResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -3006,7 +3017,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("requires Cloudflare-backed auth for Claude discovery requests", async () => {
+  it("allows unauthenticated Claude discovery requests but still records protected tool-call challenges", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
@@ -3043,10 +3054,7 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(toolsListResponse.status).toBe(401);
-    expect(toolsListResponse.headers.get("www-authenticate")).toContain(
-      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(toolsListResponse.status).toBe(200);
 
     const resourcesListResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -3059,14 +3067,102 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(resourcesListResponse.status).toBe(401);
+    expect(resourcesListResponse.status).toBe(200);
+
+    const challengeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(challengeResponse.status).toBe(401);
     expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
+      details.reason === "protected-mcp-request" &&
       details.path === "/mcp" &&
       details.authMode === "oauth" &&
       details.authRequired === true &&
       details.userAgent === "Claude-User" &&
       details.hasAuthorizationHeader === false
     ))).toBeTruthy();
+  });
+
+  it("serves sessionless oauth bootstrap requests without acquiring a managed runtime", async () => {
+    const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
+      createServer(...args)
+    ));
+    const { jwksUrl } = await startJwksServer();
+    let managedRequestCount = 0;
+
+    const httpServer = await (startHttpServer as any)({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        jwksUrl,
+        scopes: ["openid"],
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    }, {
+      createServer: createServerSpy,
+      onManagedRequestCreated: () => {
+        managedRequestCount += 1;
+      },
+    });
+    cleanups.push(() => httpServer.close());
+
+    const initializeResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: "fast-path-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    expect(initializeResponse.status).toBe(200);
+
+    const toolsListResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(toolsListResponse.status).toBe(200);
+    expect(managedRequestCount).toBe(0);
+    expect(createServerSpy).not.toHaveBeenCalled();
   });
 
   it("returns a bearer challenge for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
