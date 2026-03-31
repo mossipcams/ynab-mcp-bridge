@@ -143,17 +143,13 @@ function getBodyStringValue(body: unknown, key: string) {
   return getStringValue(body, key);
 }
 
-function isClaudeUserAgent(userAgent: string | undefined) {
-  return userAgent?.toLowerCase().includes("claude") ?? false;
-}
-
-function isUnauthenticatedBootstrapMethod(body: unknown, userAgent: string | undefined) {
+function isUnauthenticatedBootstrapMethod(body: unknown) {
   const method = getBodyStringValue(body, "method");
 
   return method === "initialize" ||
     method === "notifications/initialized" ||
-    (!isClaudeUserAgent(userAgent) &&
-      (method === "tools/list" || method === "resources/list"));
+    method === "tools/list" ||
+    method === "resources/list";
 }
 
 function addBearerRealm(wwwAuthenticate: string) {
@@ -620,7 +616,7 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
       !req.auth &&
       !getFirstHeaderValue(req.headers.authorization) &&
       !getFirstHeaderValue(req.headers["cf-access-jwt-assertion"]) &&
-      isUnauthenticatedBootstrapMethod(req.body, getFirstHeaderValue(req.headers["user-agent"]))
+      isUnauthenticatedBootstrapMethod(req.body)
     ) {
       next();
       return;

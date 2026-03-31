@@ -3001,7 +3001,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("requires Cloudflare-backed auth for Claude discovery requests after bootstrap", async () => {
+  it("keeps Claude discovery bootstrap unauthenticated and challenges the first protected request", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
@@ -3069,10 +3069,14 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(toolsListResponse.status).toBe(401);
-    expect(toolsListResponse.headers.get("www-authenticate")).toContain(
-      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(toolsListResponse.status).toBe(200);
+    await expect(toolsListResponse.json()).resolves.toMatchObject({
+      id: 1,
+      jsonrpc: "2.0",
+      result: {
+        tools: expect.any(Array),
+      },
+    });
 
     const resourcesListResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -3085,7 +3089,33 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(resourcesListResponse.status).toBe(401);
+    expect(resourcesListResponse.status).toBe(200);
+    await expect(resourcesListResponse.json()).resolves.toMatchObject({
+      id: 2,
+      jsonrpc: "2.0",
+      result: {
+        resources: expect.any(Array),
+      },
+    });
+
+    const toolCallResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(toolCallResponse.status).toBe(401);
+    expect(toolCallResponse.headers.get("www-authenticate")).toContain(
+      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
+    );
     expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
       details.path === "/mcp" &&
       details.authMode === "oauth" &&
