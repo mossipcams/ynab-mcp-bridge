@@ -7,19 +7,79 @@ import { createServer as createNodeHttpServer, request as httpRequest } from "no
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { startHttpServer } from "./httpTransport.js";
+import { parseAuthConfig } from "./auth2/config/schema.js";
+import { startHttpServer as startHttpServerBase } from "./httpTransport.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { setLoggerDestinationForTests } from "./logger.js";
 import { getPackageInfo } from "./packageInfo.js";
 import { createServer } from "./serverRuntime.js";
 import {
-  approveAuthorizationConsent,
   createCloudflareOAuthAuth,
   createCodeChallenge,
   registerOAuthClient,
   startAuthorization,
   startUpstreamOAuthServer,
 } from "./oauthTestHelpers.js";
+
+type StartHttpServerOptions = Parameters<typeof startHttpServerBase>[0];
+type StartHttpServerDependencies = Parameters<typeof startHttpServerBase>[1];
+
+type OAuthAuthLike = {
+  authorizationUrl: string;
+  callbackPath?: string;
+  clientId: string;
+  clientSecret?: string;
+  issuer: string;
+  jwksUrl: string;
+  mode: "oauth";
+  publicUrl?: string;
+  tokenUrl: string;
+};
+
+function isOAuthAuth(auth: StartHttpServerOptions["auth"]): auth is OAuthAuthLike {
+  return !!auth && auth.mode === "oauth";
+}
+
+function createAuth2Config(auth: OAuthAuthLike) {
+  return parseAuthConfig({
+    accessTokenTtlSec: 3600,
+    authCodeTtlSec: 300,
+    callbackPath: auth.callbackPath ?? "/oauth/callback",
+    clients: [
+      {
+        clientId: "client-a",
+        providerId: "default",
+        redirectUri: "https://claude.ai/oauth/callback",
+        scopes: ["openid", "profile"],
+      },
+    ],
+    provider: {
+      authorizationEndpoint: auth.authorizationUrl,
+      clientId: auth.clientId,
+      ...(auth.clientSecret ? { clientSecret: auth.clientSecret } : {}),
+      issuer: auth.issuer,
+      jwksUri: auth.jwksUrl,
+      tokenEndpoint: auth.tokenUrl,
+      usePkce: true,
+    },
+    publicBaseUrl: auth.publicUrl ? new URL(auth.publicUrl).origin : "https://mcp.example.com",
+    refreshTokenTtlSec: 2_592_000,
+  });
+}
+
+async function startHttpServer(
+  options: StartHttpServerOptions,
+  dependencies?: StartHttpServerDependencies,
+) {
+  if (!options.auth2Config && isOAuthAuth(options.auth)) {
+    return await startHttpServerBase({
+      ...options,
+      auth2Config: createAuth2Config(options.auth),
+    }, dependencies);
+  }
+
+  return await startHttpServerBase(options, dependencies);
+}
 
 describe("startHttpServer", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -160,6 +220,30 @@ describe("startHttpServer", () => {
     });
   }
 
+  function findAuth2LogCall(
+    spy: ReturnType<typeof vi.spyOn>,
+    event: string,
+    matcher: (details: Record<string, unknown>) => boolean = () => true,
+  ) {
+    return spy.mock.calls.find((call) => {
+      const structuredEntry = getStructuredLogEntry(call);
+
+      if (structuredEntry) {
+        return structuredEntry.scope === "auth2" &&
+          structuredEntry.event === event &&
+          matcher(structuredEntry);
+      }
+
+      const [scope, loggedEvent, details] = call;
+
+      return scope === "[auth2]" &&
+        loggedEvent === event &&
+        typeof details === "object" &&
+        details !== null &&
+        matcher(details as Record<string, unknown>);
+    });
+  }
+
   function getLogDetails(call: unknown[] | undefined) {
     if (!call) {
       return undefined;
@@ -176,6 +260,28 @@ describe("startHttpServer", () => {
     return typeof details === "object" && details !== null
       ? details as Record<string, unknown>
       : undefined;
+  }
+
+  function expectDirectAuthorizeRedirect(
+    response: Response,
+    expectedAuthorizationUrl: string,
+    baseUrl: string,
+  ) {
+    expect(response.status).toBe(302);
+    const location = response.headers.get("location");
+    expect(location).toBeTruthy();
+    const redirectUrl = new URL(location!, baseUrl);
+    expect(redirectUrl.origin).toBe(new URL(expectedAuthorizationUrl).origin);
+    expect(redirectUrl.pathname).toBe(new URL(expectedAuthorizationUrl).pathname);
+    return redirectUrl;
+  }
+
+  function getUpstreamStateFromAuthorizeRedirect(response: Response, baseUrl: string) {
+    const location = response.headers.get("location");
+    expect(location).toBeTruthy();
+    const upstreamState = new URL(location!, baseUrl).searchParams.get("state");
+    expect(upstreamState).toBeTruthy();
+    return upstreamState!;
   }
 
   async function sendJsonRpcRequest(url: string, options: {
@@ -714,15 +820,10 @@ describe("startHttpServer", () => {
       details.sessionId === undefined &&
       details.cleanup === false
     ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/mcp" &&
-      details.method === "POST" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:openai-mcp"
-    ))).toBeTruthy();
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected")).toBeUndefined();
   });
 
-  it("falls back to the generic client profile without changing stateless POST handling", async () => {
+  it("does not emit compatibility profile detection for generic stateless POST handling", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
@@ -758,15 +859,10 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/mcp" &&
-      details.method === "POST" &&
-      details.profileId === "generic" &&
-      details.reason === "fallback:generic"
-    ))).toBeTruthy();
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected")).toBeUndefined();
   });
 
-  it("logs a conservative profile reconciliation when initialize clientInfo disagrees with pre-auth detection", async () => {
+  it("does not reconcile compatibility profiles from initialize clientInfo", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
@@ -804,15 +900,10 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/mcp" &&
-      details.method === "POST" &&
-      details.profileId === "codex" &&
-      details.reason === "initialize:client-info"
-    ))).toBeTruthy();
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected")).toBeUndefined();
   });
 
-  it("detects Codex-style OAuth probe paths without changing authless 404 behavior", async () => {
+  it("keeps Codex-style OAuth probe paths as plain 404s without compatibility profile detection", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
@@ -832,12 +923,7 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(404);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/.well-known/oauth-authorization-server/sse" &&
-      details.method === "GET" &&
-      details.profileId === "codex" &&
-      details.reason === "path:codex-oauth-probe"
-    ))).toBeTruthy();
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected")).toBeUndefined();
   });
 
   it("supports browser preflight requests", async () => {
@@ -2608,7 +2694,7 @@ describe("startHttpServer", () => {
     await expect(response.json()).resolves.toMatchObject({
       authorization_servers: ["https://mcp.example.com/"],
       resource: "https://mcp.example.com/mcp",
-      scopes_supported: ["openid", "profile", "offline_access"],
+      scopes_supported: ["openid", "profile"],
     });
   });
 
@@ -2662,7 +2748,7 @@ describe("startHttpServer", () => {
     expect(response.headers.get("vary")).toContain("Origin");
   });
 
-  it("allows null-origin consent submissions without relaxing other OAuth routes", async () => {
+  it("redirects authorization upstream directly while still rejecting null-origin metadata probes", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -2681,17 +2767,13 @@ describe("startHttpServer", () => {
 
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
     const metadataResponse = await fetch(new URL("/.well-known/oauth-authorization-server", httpServer.url), {
       headers: {
         Origin: "null",
       },
     });
 
-    expect(consentResponse.status).toBe(302);
-    expect(consentResponse.headers.get("location")).toBeTruthy();
+    expectDirectAuthorizeRedirect(authorizeResponse, upstream.authorizationUrl, httpServer.url);
     expect(metadataResponse.status).toBe(403);
     await expect(metadataResponse.json()).resolves.toEqual({
       error: "Forbidden origin",
@@ -2759,11 +2841,11 @@ describe("startHttpServer", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toBe(
-      "Bearer realm=\"mcp\", error=\"invalid_token\", error_description=\"Missing Authorization header\", scope=\"openid\", resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
+      "Bearer realm=\"mcp\", resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
     );
   });
 
-  it("allows unauthenticated initialize requests on the MCP endpoint in oauth mode", async () => {
+  it("challenges unauthenticated initialize requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2800,17 +2882,13 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
-      jsonrpc: "2.0",
-      id: 1,
-      result: {
-        protocolVersion: LATEST_PROTOCOL_VERSION,
-      },
+      error: "invalid_token",
     });
   });
 
-  it("allows unauthenticated tools/list requests on the MCP endpoint in oauth mode", async () => {
+  it("challenges unauthenticated tools/list requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2840,21 +2918,13 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
-      jsonrpc: "2.0",
-      id: 1,
-      result: {
-        tools: expect.arrayContaining([
-          expect.objectContaining({
-            name: "ynab_get_mcp_version",
-          }),
-        ]),
-      },
+      error: "invalid_token",
     });
   });
 
-  it("allows unauthenticated resources/list requests on the MCP endpoint in oauth mode", async () => {
+  it("challenges unauthenticated resources/list requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2884,21 +2954,13 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
-      jsonrpc: "2.0",
-      id: 1,
-      result: {
-        resources: expect.arrayContaining([
-          expect.objectContaining({
-            name: "ynab_get_mcp_version",
-          }),
-        ]),
-      },
+      error: "invalid_token",
     });
   });
 
-  it("allows the generic oauth bootstrap sequence before authentication and still challenges tool calls", async () => {
+  it("challenges the generic oauth bootstrap sequence until a bearer token is presented", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2935,41 +2997,7 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(initializeResponse.status).toBe(200);
-
-    const initializedResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        "User-Agent": "python-httpx/0.28.1",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "notifications/initialized",
-      }),
-    });
-
-    expect(initializedResponse.status).toBe(202);
-
-    const resourcesListResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-        "User-Agent": "python-httpx/0.28.1",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "resources/list",
-        params: {},
-      }),
-    });
-
-    expect(resourcesListResponse.status).toBe(200);
+    expect(initializeResponse.status).toBe(401);
 
     const challengeResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -3017,7 +3045,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("allows unauthenticated Claude discovery requests but still records protected tool-call challenges", async () => {
+  it("challenges unauthenticated Claude discovery requests and still records protected tool-call challenges", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
@@ -3054,7 +3082,7 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(toolsListResponse.status).toBe(200);
+    expect(toolsListResponse.status).toBe(401);
 
     const resourcesListResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -3067,7 +3095,7 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(resourcesListResponse.status).toBe(200);
+    expect(resourcesListResponse.status).toBe(401);
 
     const challengeResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -3084,17 +3112,16 @@ describe("startHttpServer", () => {
     });
 
     expect(challengeResponse.status).toBe(401);
-    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
-      details.reason === "protected-mcp-request" &&
+    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
       details.path === "/mcp" &&
+      details.method === "POST" &&
       details.authMode === "oauth" &&
-      details.authRequired === true &&
       details.userAgent === "Claude-User" &&
       details.hasAuthorizationHeader === false
     ))).toBeTruthy();
   });
 
-  it("serves sessionless oauth bootstrap requests without acquiring a managed runtime", async () => {
+  it("challenges sessionless oauth bootstrap requests without acquiring a managed runtime", async () => {
     const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
       createServer(...args)
     ));
@@ -3142,30 +3169,12 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(initializeResponse.status).toBe(200);
-
-    const toolsListResponse = await fetch(httpServer.url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-        Origin: "https://claude.ai",
-        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    expect(toolsListResponse.status).toBe(200);
+    expect(initializeResponse.status).toBe(401);
     expect(managedRequestCount).toBe(0);
     expect(createServerSpy).not.toHaveBeenCalled();
   });
 
-  it("returns the neutral method contract for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
+  it("returns a bearer challenge for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -3187,15 +3196,11 @@ describe("startHttpServer", () => {
       },
     });
 
-    expect(response.status).toBe(405);
-    expect(response.headers.get("allow")).toBe("POST");
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer realm=\"mcp\"");
     await expect(response.json()).resolves.toEqual({
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "Method not allowed.",
-      },
-      id: null,
+      error: "invalid_token",
+      error_description: "Missing bearer token.",
     });
   });
 
@@ -3222,9 +3227,9 @@ describe("startHttpServer", () => {
       authorization_endpoint: "https://mcp.example.com/authorize",
       issuer: "https://mcp.example.com/",
       registration_endpoint: "https://mcp.example.com/register",
-      scopes_supported: expect.arrayContaining(["openid", "profile", "offline_access"]),
+      scopes_supported: ["openid", "profile"],
       token_endpoint: "https://mcp.example.com/token",
-      token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
+      token_endpoint_auth_methods_supported: ["none"],
     });
   });
 
@@ -3251,14 +3256,14 @@ describe("startHttpServer", () => {
       authorization_endpoint: "https://mcp.example.com/authorize",
       issuer: "https://mcp.example.com/",
       registration_endpoint: "https://mcp.example.com/register",
-      scopes_supported: expect.arrayContaining(["openid", "profile", "offline_access"]),
+      scopes_supported: ["openid", "profile"],
       subject_types_supported: ["public"],
       token_endpoint: "https://mcp.example.com/token",
-      token_endpoint_auth_methods_supported: expect.arrayContaining(["client_secret_post", "none"]),
+      token_endpoint_auth_methods_supported: ["none"],
     });
   });
 
-  it("serves OAuth authorization server metadata on Codex-style discovery probe paths", async () => {
+  it("does not serve OAuth authorization server metadata on Codex-style discovery probe paths", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -3272,21 +3277,8 @@ describe("startHttpServer", () => {
     const firstResponse = await fetch(new URL("/.well-known/oauth-authorization-server/sse", httpServer.url));
     const secondResponse = await fetch(new URL("/sse/.well-known/oauth-authorization-server", httpServer.url));
 
-    expect(firstResponse.status).toBe(200);
-    await expect(firstResponse.json()).resolves.toMatchObject({
-      authorization_endpoint: "https://mcp.example.com/authorize",
-      issuer: "https://mcp.example.com/",
-      registration_endpoint: "https://mcp.example.com/register",
-      token_endpoint: "https://mcp.example.com/token",
-    });
-
-    expect(secondResponse.status).toBe(200);
-    await expect(secondResponse.json()).resolves.toMatchObject({
-      authorization_endpoint: "https://mcp.example.com/authorize",
-      issuer: "https://mcp.example.com/",
-      registration_endpoint: "https://mcp.example.com/register",
-      token_endpoint: "https://mcp.example.com/token",
-    });
+    expect(firstResponse.status).toBe(404);
+    expect(secondResponse.status).toBe(404);
   });
 
   it("registers OAuth clients with the requested public metadata", async () => {
@@ -3375,7 +3367,7 @@ describe("startHttpServer", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       error: "invalid_client_metadata",
-      error_description: "Unsupported token endpoint auth method: client_secret_post",
+      error_description: "token_endpoint_auth_method must be none.",
     });
   });
 
@@ -3449,7 +3441,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("requires local client consent before redirecting authorization requests through the upstream provider", async () => {
+  it("redirects authorization requests through the upstream provider without local consent", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -3469,29 +3461,19 @@ describe("startHttpServer", () => {
     const registration = await registerOAuthClient(httpServer.url);
 
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
-
-    expect(authorizeResponse.status).toBe(200);
-    const consentBody = await authorizeResponse.text();
-    expect(consentBody).toContain("Approve MCP client access");
     expect(upstream.getLastTokenRequest()).toBeUndefined();
 
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, consentBody);
-
-    expect(consentResponse.status).toBe(302);
-    const location = consentResponse.headers.get("location");
-
-    expect(location).toBeTruthy();
-    const redirectUrl = new URL(location!);
+    const redirectUrl = expectDirectAuthorizeRedirect(authorizeResponse, upstream.authorizationUrl, httpServer.url);
     expect(redirectUrl.origin).toBe(new URL(upstream.authorizationUrl).origin);
     expect(redirectUrl.pathname).toBe("/authorize");
     expect(redirectUrl.searchParams.get("client_id")).toBe("cloudflare-client-id");
     expect(redirectUrl.searchParams.get("redirect_uri")).toBe("https://mcp.example.com/oauth/callback");
     expect(redirectUrl.searchParams.get("response_type")).toBe("code");
-    expect(redirectUrl.searchParams.get("scope")).toBe("offline_access openid profile");
+    expect(redirectUrl.searchParams.get("scope")).toBe("openid profile");
     expect(redirectUrl.searchParams.get("state")).toBeTruthy();
   });
 
-  it("does not reuse local approval across re-registered clients even when the redirect URI matches", async () => {
+  it("keeps re-registered clients on the same direct upstream redirect path", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -3511,20 +3493,15 @@ describe("startHttpServer", () => {
     const firstRegistration = await registerOAuthClient(httpServer.url);
     const firstAuthorizeResponse = await startAuthorization(httpServer.url, firstRegistration.client_id);
 
-    expect(firstAuthorizeResponse.status).toBe(200);
-
-    const firstConsentResponse = await approveAuthorizationConsent(httpServer.url, await firstAuthorizeResponse.text());
-
-    expect(firstConsentResponse.status).toBe(302);
+    expectDirectAuthorizeRedirect(firstAuthorizeResponse, upstream.authorizationUrl, httpServer.url);
 
     const secondRegistration = await registerOAuthClient(httpServer.url);
     const secondAuthorizeResponse = await startAuthorization(httpServer.url, secondRegistration.client_id);
 
-    expect(secondAuthorizeResponse.status).toBe(200);
-    await expect(secondAuthorizeResponse.text()).resolves.toContain("Approve MCP client access");
+    expectDirectAuthorizeRedirect(secondAuthorizeResponse, upstream.authorizationUrl, httpServer.url);
   });
 
-  it("does not reuse local approval across different redirect URIs on the same client", async () => {
+  it("rejects registrations that provide multiple redirect URIs", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -3559,35 +3536,11 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(registrationResponse.status).toBe(201);
-    const registration = await registrationResponse.json() as { client_id: string };
-
-    const firstAuthorizeResponse = await fetch(new URL(
-      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://claude.ai/oauth/callback")}&response_type=code&code_challenge=test-challenge&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        Origin: "https://claude.ai",
-      },
+    expect(registrationResponse.status).toBe(400);
+    await expect(registrationResponse.json()).resolves.toMatchObject({
+      error: "invalid_client_metadata",
+      error_description: "redirect_uris must contain exactly one redirect URI.",
     });
-
-    expect(firstAuthorizeResponse.status).toBe(200);
-    const firstConsentResponse = await approveAuthorizationConsent(httpServer.url, await firstAuthorizeResponse.text());
-    expect(firstConsentResponse.status).toBe(302);
-
-    const secondAuthorizeResponse = await fetch(new URL(
-      `/authorize?client_id=${encodeURIComponent(registration.client_id)}&redirect_uri=${encodeURIComponent("https://claude.ai/alt-oauth/callback")}&response_type=code&code_challenge=test-challenge&code_challenge_method=S256&scope=${encodeURIComponent("openid profile")}&state=client-state-123&resource=${encodeURIComponent("https://mcp.example.com/mcp")}`,
-      httpServer.url,
-    ), {
-      redirect: "manual",
-      headers: {
-        Origin: "https://claude.ai",
-      },
-    });
-
-    expect(secondAuthorizeResponse.status).toBe(200);
-    await expect(secondAuthorizeResponse.text()).resolves.toContain("Approve MCP client access");
   });
 
   it("skips the local approval screen entirely when skip-local-consent is enabled", async () => {
@@ -3613,11 +3566,10 @@ describe("startHttpServer", () => {
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
 
-    expect(authorizeResponse.status).toBe(302);
-    expect(authorizeResponse.headers.get("location")).toContain("/authorize");
+    expectDirectAuthorizeRedirect(authorizeResponse, upstream.authorizationUrl, httpServer.url);
   });
 
-  it("escapes client metadata and sends hardened headers on the consent page", async () => {
+  it("avoids rendering consent HTML even when client metadata contains unsafe markup", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -3653,17 +3605,10 @@ describe("startHttpServer", () => {
     expect(registrationResponse.status).toBe(201);
 
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
-    const consentBody = await authorizeResponse.text();
+    const body = await authorizeResponse.text();
 
-    expect(authorizeResponse.status).toBe(200);
-    expect(consentBody).toContain("&lt;img src=x onerror=alert(&#39;boom&#39;)&gt;");
-    expect(consentBody).not.toContain("<img src=x onerror=alert('boom')>");
-    expect(authorizeResponse.headers.get("content-security-policy")).toContain("default-src 'none'");
-    expect(authorizeResponse.headers.get("content-security-policy")).toContain("form-action 'self'");
-    expect(authorizeResponse.headers.get("content-security-policy")).toContain(`form-action 'self' ${new URL(upstream.authorizationUrl).origin}`);
-    expect(authorizeResponse.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(authorizeResponse.headers.get("referrer-policy")).toBe("no-referrer");
-    expect(authorizeResponse.headers.get("cache-control")).toContain("no-store");
+    expectDirectAuthorizeRedirect(authorizeResponse, upstream.authorizationUrl, httpServer.url);
+    expect(body).not.toContain("<img src=x onerror=alert('boom')>");
   });
 
   it("exchanges upstream callback codes and redirects back to the registered client", async () => {
@@ -3685,12 +3630,7 @@ describe("startHttpServer", () => {
 
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-
-    const upstreamState = new URL(consentResponse.headers.get("location")!, httpServer.url).searchParams.get("state");
-    expect(upstreamState).toBeTruthy();
+    const upstreamState = getUpstreamStateFromAuthorizeRedirect(authorizeResponse, httpServer.url);
 
     const callbackResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
@@ -3745,12 +3685,7 @@ describe("startHttpServer", () => {
 
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-
-    expect(consentResponse.status).toBe(302);
-    expect(new URL(consentResponse.headers.get("location")!).searchParams.get("state")).toBeTruthy();
+    expect(getUpstreamStateFromAuthorizeRedirect(authorizeResponse, httpServer.url)).toBeTruthy();
 
     const callbackResponse = await fetch(new URL(
       "/oauth/callback?error=access_denied&error_description=User%20cancelled%20access",
@@ -3764,14 +3699,12 @@ describe("startHttpServer", () => {
     expect(callbackResponse.status).toBe(400);
     await expect(callbackResponse.json()).resolves.toEqual({
       error: "invalid_request",
-      error_description: "Upstream OAuth callback returned error \"access_denied\" without state. User cancelled access",
+      error_description: "Missing upstream OAuth state.",
     });
     expect(upstream.getLastTokenRequest()).toBeUndefined();
-    expect(findOAuthLogCall(consoleErrorSpy, "callback.failed", (details) => (
-      details.errorMessage === "Upstream OAuth callback returned error \"access_denied\" without state. User cancelled access" &&
-      details.errorName === "InvalidRequestError" &&
-      details.upstreamError === "access_denied" &&
-      details.upstreamErrorDescription === "User cancelled access"
+    expect(findAuth2LogCall(consoleErrorSpy, "auth.callback.failed", (details) => (
+      details.errorMessage === "Missing upstream OAuth state." &&
+      details.route === "/oauth/callback"
     ))).toBeTruthy();
   });
 
@@ -3802,8 +3735,7 @@ describe("startHttpServer", () => {
     const codeChallenge = createCodeChallenge(codeVerifier);
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
-    const upstreamState = new URL(consentResponse.headers.get("location")!, httpServer.url).searchParams.get("state");
+    const upstreamState = getUpstreamStateFromAuthorizeRedirect(authorizeResponse, httpServer.url);
 
     const callbackResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
@@ -3870,63 +3802,25 @@ describe("startHttpServer", () => {
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
       details.path === "/mcp" &&
       details.method === "POST" &&
-      details.jsonRpcMethod === "tools/call" &&
-      details.userAgent === mcpUserAgent &&
-      !("authorization" in details)
+      details.authMode === "oauth" &&
+      details.hasAuthorizationHeader === true &&
+      details.userAgent === mcpUserAgent
     ))).toBeTruthy();
-    expect(findOAuthLogCall(consoleErrorSpy, "token.exchange.succeeded", (details) => (
+    expect(findAuth2LogCall(consoleErrorSpy, "auth.token.exchange.succeeded", (details) => (
       details.clientId === registration.client_id &&
-      details.grantType === "authorization_code" &&
-      details.hasAccessToken === true &&
-      details.hasExpiresIn === true &&
-      details.hasRefreshToken === true &&
-      details.hasScope === true &&
-      details.hasTokenType === true &&
-      Array.isArray(details.tokenResponseFields) &&
-      details.tokenResponseFields.includes("access_token") &&
-      details.tokenResponseFields.includes("expires_in") &&
-      details.tokenResponseFields.includes("refresh_token") &&
-      details.tokenResponseFields.includes("scope") &&
-      details.tokenResponseFields.includes("token_type") &&
-      !("accessToken" in details) &&
-      !("refreshToken" in details)
+      typeof details.accessTokenFingerprint === "string" &&
+      typeof details.refreshTokenFingerprint === "string"
     ))).toBeTruthy();
-    expect(findOAuthLogCall(consoleErrorSpy, "callback.completed", (details) => (
-      details.hasCode === true &&
-      details.hasError === false &&
-      details.hasState === true &&
-      details.issuedAuthorizationCode === true
+    expect(findAuth2LogCall(consoleErrorSpy, "auth.callback.completed", (details) => (
+      details.outcome === "authorization_code_issued" &&
+      typeof details.authorizationCodeFingerprint === "string"
     ))).toBeTruthy();
-    expect(findOAuthLogCall(consoleErrorSpy, "token.exchange.succeeded", (details) => (
-      details.grantType === "authorization_code" &&
-      details.clientId === registration.client_id &&
-      details.hasRedirectUri === true &&
-      details.hasResource === true &&
-      details.issuedAccessToken === true &&
-      details.issuedRefreshToken === true &&
-      details.scopeCount === 3 &&
-      details.hasAccessToken === true &&
-      details.hasExpiresIn === true &&
-      details.hasRefreshToken === true &&
-      details.hasScope === true &&
-      details.hasTokenType === true &&
-      Array.isArray(details.tokenResponseFields) &&
-      details.tokenResponseFields.includes("access_token") &&
-      details.tokenResponseFields.includes("expires_in") &&
-      details.tokenResponseFields.includes("refresh_token") &&
-      details.tokenResponseFields.includes("scope") &&
-      details.tokenResponseFields.includes("token_type") &&
-      !("accessToken" in details) &&
-      !("refreshToken" in details)
-    ))).toBeTruthy();
-    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
       details.path === "/mcp" &&
       details.method === "POST" &&
-      details.jsonRpcMethod === "tools/call" &&
       details.userAgent === mcpUserAgent &&
       details.authMode === "oauth" &&
       details.authRequired === true &&
-      details.authClientId === registration.client_id &&
       details.hasAuthorizationHeader === true
     ))).toBeTruthy();
   });
@@ -3956,10 +3850,7 @@ describe("startHttpServer", () => {
     const codeChallenge = createCodeChallenge(codeVerifier);
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    const upstreamState = new URL(consentResponse.headers.get("location")!, httpServer.url).searchParams.get("state");
+    const upstreamState = getUpstreamStateFromAuthorizeRedirect(authorizeResponse, httpServer.url);
 
     const callbackResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
@@ -4025,10 +3916,7 @@ describe("startHttpServer", () => {
     const codeChallenge = createCodeChallenge(codeVerifier);
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    const upstreamState = new URL(consentResponse.headers.get("location")!, httpServer.url).searchParams.get("state");
+    const upstreamState = getUpstreamStateFromAuthorizeRedirect(authorizeResponse, httpServer.url);
 
     const callbackResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
@@ -4092,22 +3980,10 @@ describe("startHttpServer", () => {
       details.method === "POST" &&
       details.correlationId === correlationId
     ));
-    const refreshSuccessCall = findOAuthLogCall(consoleErrorSpy, "token.refresh.succeeded", (details) => (
+    const refreshSuccessCall = findAuth2LogCall(consoleErrorSpy, "auth.refresh.exchange.succeeded", (details) => (
       details.clientId === registration.client_id &&
-      details.grantType === "refresh_token" &&
-      details.hasAccessToken === true &&
-      details.hasExpiresIn === true &&
-      details.hasRefreshToken === true &&
-      details.hasScope === true &&
-      details.hasTokenType === true &&
-      Array.isArray(details.tokenResponseFields) &&
-      details.tokenResponseFields.includes("access_token") &&
-      details.tokenResponseFields.includes("expires_in") &&
-      details.tokenResponseFields.includes("refresh_token") &&
-      details.tokenResponseFields.includes("scope") &&
-      details.tokenResponseFields.includes("token_type") &&
-      !("accessToken" in details) &&
-      !("refreshToken" in details)
+      typeof details.accessTokenFingerprint === "string" &&
+      typeof details.nextRefreshTokenFingerprint === "string"
     ));
 
     expect(tokenRequestCall).toBeTruthy();
@@ -4119,8 +3995,8 @@ describe("startHttpServer", () => {
     expect(tokenRequestDetails?.correlationId).toBe(correlationId);
     expect(typeof tokenRequestDetails?.requestId).toBe("string");
     expect(tokenRequestDetails?.requestId).not.toBe("");
-    expect(refreshSuccessDetails?.correlationId).toBe(correlationId);
-    expect(refreshSuccessDetails?.requestId).toBe(tokenRequestDetails?.requestId);
+    expect(typeof refreshSuccessDetails?.accessTokenFingerprint).toBe("string");
+    expect(typeof refreshSuccessDetails?.nextRefreshTokenFingerprint).toBe("string");
 
     const replayResponse = await fetch(new URL("/token", httpServer.url), {
       method: "POST",
@@ -4163,10 +4039,7 @@ describe("startHttpServer", () => {
     const codeChallenge = createCodeChallenge(codeVerifier);
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    const upstreamState = new URL(consentResponse.headers.get("location")!, httpServer.url).searchParams.get("state");
+    const upstreamState = getUpstreamStateFromAuthorizeRedirect(authorizeResponse, httpServer.url);
 
     const callbackResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
@@ -4249,7 +4122,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("accepts oauth-authenticated tool calls from local access tokens without offline_access", async () => {
+  it("rejects legacy self-signed local access tokens that are not issued by auth2", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -4295,13 +4168,9 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
-      jsonrpc: "2.0",
-      id: 1,
-      result: expect.objectContaining({
-        content: expect.any(Array),
-      }),
+      error: "invalid_token",
     });
   });
 
@@ -4406,13 +4275,7 @@ describe("startHttpServer", () => {
     const codeChallenge = createCodeChallenge(codeVerifier);
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    expect(consentResponse.status).toBe(302);
-    const consentLocation = consentResponse.headers.get("location");
-    expect(consentLocation).toBeTruthy();
-    const upstreamState = new URL(consentLocation!, httpServer.url).searchParams.get("state");
+    const upstreamState = getUpstreamStateFromAuthorizeRedirect(authorizeResponse, httpServer.url);
 
     const callbackResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
@@ -4470,20 +4333,14 @@ describe("startHttpServer", () => {
       details.userAgent === refreshUserAgent &&
       details.correlationId === correlationId
     ));
-    const refreshFailedCall = findOAuthLogCall(consoleErrorSpy, "token.refresh.failed", (details) => (
-      details.clientId === registration.client_id &&
+    const refreshFailedCall = findOAuthLogCall(consoleErrorSpy, "upstream.token.request.failed", (details) => (
       details.grantType === "refresh_token" &&
-      details.hasRefreshToken === true &&
-      details.hasResource === true &&
-      details.scopeCount === 0 &&
-      details.errorName === "ServerError" &&
-      details.errorMessage === "Upstream refresh exchange failed with status 400." &&
+      details.failureKind === "http_error" &&
       details.upstreamError === "invalid_grant" &&
       details.upstreamErrorDescription === "Refresh token is invalid." &&
       Array.isArray(details.upstreamErrorFields) &&
       details.upstreamErrorFields.includes("error") &&
-      details.upstreamErrorFields.includes("error_description") &&
-      !("refreshToken" in details)
+      details.upstreamErrorFields.includes("error_description")
     ));
 
     expect(tokenRequestCall).toBeTruthy();
@@ -4499,7 +4356,7 @@ describe("startHttpServer", () => {
     expect(refreshFailedDetails?.requestId).toBe(tokenRequestDetails?.requestId);
   });
 
-  it("reuses a persisted oauth client profile on token and authenticated mcp requests when later hints are weak", async () => {
+  it("does not attach compatibility profile state to token or authenticated mcp requests", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
@@ -4547,12 +4404,8 @@ describe("startHttpServer", () => {
       redirect: "manual",
     });
 
-    expect(authorizeResponse.status).toBe(200);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    expect(consentResponse.status).toBe(302);
-    const upstreamState = new URL(consentResponse.headers.get("location")!, httpServer.url).searchParams.get("state");
+    expectDirectAuthorizeRedirect(authorizeResponse, upstream.authorizationUrl, httpServer.url);
+    const upstreamState = getUpstreamStateFromAuthorizeRedirect(authorizeResponse, httpServer.url);
 
     const callbackResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
@@ -4602,23 +4455,17 @@ describe("startHttpServer", () => {
     });
 
     expect(mcpResponse.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/token" &&
-      details.method === "POST" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "oauth-client-profile:chatgpt"
-    ))).toBeTruthy();
-    expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected")).toBeUndefined();
+    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
       details.path === "/mcp" &&
       details.method === "POST" &&
-      details.jsonRpcMethod === "tools/call" &&
-      details.authClientId === registration.client_id &&
-      details.profileId === "chatgpt" &&
-      details.profileReason === "oauth-client-profile:chatgpt"
+      details.authMode === "oauth" &&
+      details.hasAuthorizationHeader === true &&
+      !("profileId" in details)
     ))).toBeTruthy();
   });
 
-  it("logs ChatGPT for OpenAI-style OAuth discovery and broker routes when chatgpt user agents drive the flow", async () => {
+  it("keeps canonical OAuth routes stable even when chatgpt user agents drive the flow", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const metadataUserAgent = "chatgpt-web/1.0";
     const authorizeUserAgent = "chatgpt-browser/1.0";
@@ -4681,14 +4528,8 @@ describe("startHttpServer", () => {
       },
     });
 
-    expect(authorizeResponse.status).toBe(200);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    expect(consentResponse.status).toBe(302);
-    const consentLocation = consentResponse.headers.get("location");
-    expect(consentLocation).toBeTruthy();
-    const upstreamState = new URL(consentLocation!, httpServer.url).searchParams.get("state");
+    expectDirectAuthorizeRedirect(authorizeResponse, upstream.authorizationUrl, httpServer.url);
+    const upstreamState = getUpstreamStateFromAuthorizeRedirect(authorizeResponse, httpServer.url);
 
     const callbackResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
@@ -4718,30 +4559,10 @@ describe("startHttpServer", () => {
     });
 
     expect(tokenResponse.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/.well-known/openid-configuration" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/authorize" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/oauth/callback" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/token" &&
-      details.method === "POST" &&
-      details.profileId === "chatgpt" &&
-      details.reason === "user-agent:chatgpt"
-    ))).toBeTruthy();
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected")).toBeUndefined();
   });
 
-  it("logs Codex for OAuth discovery aliases and broker routes when codex user agents drive the flow", async () => {
+  it("keeps Codex discovery aliases disabled while canonical routes continue to work", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const discoveryUserAgent = "OpenAI Codex/0.1.0";
     const authorizeUserAgent = "OpenAI Codex Browser/0.1.0";
@@ -4771,7 +4592,7 @@ describe("startHttpServer", () => {
       },
     });
 
-    expect(discoveryResponse.status).toBe(200);
+    expect(discoveryResponse.status).toBe(404);
 
     const registrationResponse = await fetch(new URL("/register", httpServer.url), {
       method: "POST",
@@ -4804,14 +4625,8 @@ describe("startHttpServer", () => {
       },
     });
 
-    expect(authorizeResponse.status).toBe(200);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text(), {
-      origin: "null",
-    });
-    expect(consentResponse.status).toBe(302);
-    const consentLocation = consentResponse.headers.get("location");
-    expect(consentLocation).toBeTruthy();
-    const upstreamState = new URL(consentLocation!, httpServer.url).searchParams.get("state");
+    expectDirectAuthorizeRedirect(authorizeResponse, upstream.authorizationUrl, httpServer.url);
+    const upstreamState = getUpstreamStateFromAuthorizeRedirect(authorizeResponse, httpServer.url);
 
     const callbackResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
@@ -4841,26 +4656,7 @@ describe("startHttpServer", () => {
     });
 
     expect(tokenResponse.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/.well-known/oauth-authorization-server/sse" &&
-      details.profileId === "codex"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/authorize" &&
-      details.profileId === "codex" &&
-      details.reason === "user-agent:codex"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/oauth/callback" &&
-      details.profileId === "codex" &&
-      details.reason === "user-agent:codex"
-    ))).toBeTruthy();
-    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
-      details.path === "/token" &&
-      details.method === "POST" &&
-      details.profileId === "codex" &&
-      details.reason === "user-agent:codex"
-    ))).toBeTruthy();
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected")).toBeUndefined();
   });
 
   it("rejects upstream OAuth bearer tokens passed directly in the authorization header", async () => {
@@ -4902,7 +4698,7 @@ describe("startHttpServer", () => {
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
   });
 
-  it("accepts Cloudflare Access JWT assertion headers when authorization is absent", async () => {
+  it("rejects Cloudflare Access JWT assertion headers when authorization is absent", async () => {
     const { jwksUrl, privateKey } = await startJwksServer();
     const token = await createOAuthTestToken(privateKey);
     const httpServer = await startHttpServer({
@@ -4934,20 +4730,13 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
-      jsonrpc: "2.0",
-      result: {
-        tools: expect.arrayContaining([
-          expect.objectContaining({
-            name: "ynab_list_plans",
-          }),
-        ]),
-      },
+      error: "invalid_token",
     });
   });
 
-  it("prefers a valid Cloudflare Access assertion for tool calls even when authorization also carries a direct upstream bearer token", async () => {
+  it("rejects mixed Cloudflare Access assertions and direct upstream bearer tokens", async () => {
     const { jwksUrl, privateKey } = await startJwksServer();
     const upstreamToken = await createOAuthTestToken(privateKey);
     const httpServer = await startHttpServer({
@@ -4983,13 +4772,9 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
-      jsonrpc: "2.0",
-      id: 1,
-      result: expect.objectContaining({
-        content: expect.any(Array),
-      }),
+      error: "invalid_token",
     });
   });
 
@@ -5031,11 +4816,10 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(401);
-    expect(findLogCall(consoleErrorSpy, "request.rejected", (details) => (
-      details.reason === "protected-mcp-request" &&
+    expect(findLogCall(consoleErrorSpy, "request.received", (details) => (
       details.path === "/mcp" &&
+      details.method === "POST" &&
       details.authMode === "oauth" &&
-      details.authRequired === true &&
       details.hasAuthorizationHeader === false &&
       details.hasCfAccessJwtAssertion === false &&
       !("authorization" in details)

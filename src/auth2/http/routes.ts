@@ -67,6 +67,20 @@ function createClientId() {
   return crypto.randomBytes(16).toString("base64url");
 }
 
+function isLoopbackHost(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+function validateRegisteredRedirectUri(redirectUri: string) {
+  const parsed = new URL(redirectUri);
+
+  if (parsed.protocol === "https:" || isLoopbackHost(parsed.hostname)) {
+    return;
+  }
+
+  throw new Error("redirect_uris must use https unless they target a loopback host.");
+}
+
 function registerClient(config: AuthConfig, store: AuthStore, body: unknown) {
   const payload = typeof body === "object" && body !== null
     ? body as Record<string, unknown>
@@ -98,6 +112,8 @@ function registerClient(config: AuthConfig, store: AuthStore, body: unknown) {
   if (!redirectUri) {
     throw new Error("redirect_uris must contain exactly one redirect URI.");
   }
+
+  validateRegisteredRedirectUri(redirectUri);
 
   const clientId = createClientId();
   const issuedAt = Math.floor(Date.now() / 1000);
