@@ -717,8 +717,8 @@ describe("startHttpServer", () => {
     expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
       details.path === "/mcp" &&
       details.method === "POST" &&
-      details.profileId === "generic" &&
-      details.reason === "fallback:generic"
+      details.profileId === "chatgpt" &&
+      details.reason === "user-agent:openai-mcp"
     ))).toBeTruthy();
   });
 
@@ -804,12 +804,11 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(findProfileLogCall(consoleErrorSpy, "profile.reconciled", (details) => (
+    expect(findProfileLogCall(consoleErrorSpy, "profile.detected", (details) => (
       details.path === "/mcp" &&
-      details.provisionalProfileId === "claude" &&
-      details.confirmedProfileId === "codex" &&
-      details.profileId === "generic" &&
-      details.reason === "reconciled:generic"
+      details.method === "POST" &&
+      details.profileId === "codex" &&
+      details.reason === "initialize:client-info"
     ))).toBeTruthy();
   });
 
