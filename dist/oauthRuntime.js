@@ -113,7 +113,7 @@ function addBearerRealm(wwwAuthenticate) {
 function withBearerRealm(authMiddleware) {
     return (req, res, next) => {
         const originalSetHeader = res.setHeader.bind(res);
-        res.setHeader = ((name, value) => {
+        const setHeaderWithBearerRealm = (name, value) => {
             if (name.toLowerCase() === "www-authenticate") {
                 if (typeof value === "string") {
                     return originalSetHeader(name, addBearerRealm(value));
@@ -123,7 +123,8 @@ function withBearerRealm(authMiddleware) {
                 }
             }
             return originalSetHeader(name, value);
-        });
+        };
+        res.setHeader = setHeaderWithBearerRealm;
         const restoreSetHeader = () => {
             res.setHeader = originalSetHeader;
         };

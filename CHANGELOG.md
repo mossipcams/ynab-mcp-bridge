@@ -5,6 +5,92 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.16](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.15...ynab-mcp-bridge-v0.15.16) (2026-03-31)
+
+
+### Bug Fixes
+
+* remove duplicated bootstrap import ([b10e247](https://github.com/mossipcams/ynab-mcp-bridge/commit/b10e2470cfb440a8a8a641e8e4760ac52a85cc00))
+* restore oauth bootstrap probe compatibility ([34e735a](https://github.com/mossipcams/ynab-mcp-bridge/commit/34e735a54c66c7c81d3e9fabf40c939d64ab3a23))
+* return 405 for unauthenticated mcp probes ([6fdcafc](https://github.com/mossipcams/ynab-mcp-bridge/commit/6fdcafccf91758b69a83ea9dcd7f87d07d2aa918))
+
+## [0.15.15](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.14...ynab-mcp-bridge-v0.15.15) (2026-03-31)
+
+
+### Bug Fixes
+
+* restore oauth bootstrap compatibility ([#225](https://github.com/mossipcams/ynab-mcp-bridge/issues/225)) ([6c37bea](https://github.com/mossipcams/ynab-mcp-bridge/commit/6c37beab473ce03b18ee0ce3c13b55f965d18207))
+
+## [0.15.14](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.13...ynab-mcp-bridge-v0.15.14) (2026-03-31)
+
+
+### Bug Fixes
+
+* require oauth for the full mcp surface ([#223](https://github.com/mossipcams/ynab-mcp-bridge/issues/223)) ([d80e8df](https://github.com/mossipcams/ynab-mcp-bridge/commit/d80e8dfc5153f358f0085a0ffcdf21bb1dcc13b4))
+
+## [0.15.13](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.12...ynab-mcp-bridge-v0.15.13) (2026-03-31)
+
+
+### Bug Fixes
+
+* require auth for Claude discovery bootstrap ([#220](https://github.com/mossipcams/ynab-mcp-bridge/issues/220)) ([5fe8049](https://github.com/mossipcams/ynab-mcp-bridge/commit/5fe8049a7061806958dbdd4a919a4b0878a3647b))
+
+## [0.15.12](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.11...ynab-mcp-bridge-v0.15.12) (2026-03-31)
+
+
+### Bug Fixes
+
+* allow oauth initialized bootstrap notification ([7840594](https://github.com/mossipcams/ynab-mcp-bridge/commit/7840594dfd351ddf8e46c5e52c4434fa553ab1b3))
+
+## [0.15.11](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.10...ynab-mcp-bridge-v0.15.11) (2026-03-31)
+
+
+### Bug Fixes
+
+* add upstream oauth exchange logging ([#216](https://github.com/mossipcams/ynab-mcp-bridge/issues/216)) ([7fd9e0f](https://github.com/mossipcams/ynab-mcp-bridge/commit/7fd9e0ff422499eecd78a6a31ebb12da54b84f79))
+
+## [0.15.10](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.9...ynab-mcp-bridge-v0.15.10) (2026-03-31)
+
+
+### Bug Fixes
+
+* keep oauth bootstrap generic before client detection ([bb3aa47](https://github.com/mossipcams/ynab-mcp-bridge/commit/bb3aa478670ca92d233b0694c2affcdae50fb7ca))
+
+## [0.15.9](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.8...ynab-mcp-bridge-v0.15.9) (2026-03-31)
+
+
+### Bug Fixes
+
+* allow oauth bootstrap mcp methods without auth ([#213](https://github.com/mossipcams/ynab-mcp-bridge/issues/213)) ([dcb0095](https://github.com/mossipcams/ynab-mcp-bridge/commit/dcb0095da7ce89215fdbf50caec0719795311295))
+
+
+### Reverts
+
+* roll back Claude OAuth compatibility fixes ([#211](https://github.com/mossipcams/ynab-mcp-bridge/issues/211)) ([3512f72](https://github.com/mossipcams/ynab-mcp-bridge/commit/3512f729b2c6cd622ca8ef6cd980659ea0e4d924))
+
+## [0.15.8](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.7...ynab-mcp-bridge-v0.15.8) (2026-03-30)
+
+
+### Bug Fixes
+
+* unify mcp oauth auth challenges ([efc8acb](https://github.com/mossipcams/ynab-mcp-bridge/commit/efc8acb8735f64e85c1f175929d6cb8cb3eecf7e))
+
+## [0.15.7](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.6...ynab-mcp-bridge-v0.15.7) (2026-03-30)
+
+
+### Bug Fixes
+
+* restore oauth request auth typing ([eacc1c0](https://github.com/mossipcams/ynab-mcp-bridge/commit/eacc1c041278e270e142d826dcb828a9ebb8a069))
+* send Claude-friendly oauth challenge ([d1eb478](https://github.com/mossipcams/ynab-mcp-bridge/commit/d1eb47821971d70676de35f24dbe7403f48eac77))
+
+## [0.15.6](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.5...ynab-mcp-bridge-v0.15.6) (2026-03-30)
+
+
+### Bug Fixes
+
+* improve Claude OAuth challenge compatibility ([5a99b3e](https://github.com/mossipcams/ynab-mcp-bridge/commit/5a99b3e288f5960b536af77580ccf39eb2c116fb))
+* satisfy oauth runtime lint rules ([4a17a85](https://github.com/mossipcams/ynab-mcp-bridge/commit/4a17a85caaafd33e2699c4d1c6a559775367bd18))
+
 ## [0.15.5](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.4...ynab-mcp-bridge-v0.15.5) (2026-03-30)
 
 

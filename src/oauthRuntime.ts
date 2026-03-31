@@ -160,7 +160,7 @@ function withBearerRealm(authMiddleware: RequestHandler): RequestHandler {
   return (req, res, next) => {
     const originalSetHeader = res.setHeader.bind(res);
 
-    res.setHeader = ((name, value) => {
+    const setHeaderWithBearerRealm: typeof res.setHeader = (name, value) => {
       if (name.toLowerCase() === "www-authenticate") {
         if (typeof value === "string") {
           return originalSetHeader(name, addBearerRealm(value));
@@ -172,7 +172,9 @@ function withBearerRealm(authMiddleware: RequestHandler): RequestHandler {
       }
 
       return originalSetHeader(name, value);
-    }) as typeof res.setHeader;
+    };
+
+    res.setHeader = setHeaderWithBearerRealm;
 
     const restoreSetHeader = () => {
       res.setHeader = originalSetHeader;
@@ -611,23 +613,31 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
       return;
     }
 
+    const isDirectBearer = isDirectUpstreamBearerToken(req, auth);
+    const jsonRpcMethod = getBodyStringValue(req.body, "method");
     const admission = isMcpPostRequest
       ? decideAuthAdmission({
           hasAuthorizationHeader: Boolean(getFirstHeaderValue(req.headers.authorization)),
           hasCfAccessJwtAssertion: Boolean(getFirstHeaderValue(req.headers["cf-access-jwt-assertion"])),
-          isDirectUpstreamBearerToken: isDirectUpstreamBearerToken(req, auth),
+          isDirectUpstreamBearerToken: isDirectBearer,
+          ...(jsonRpcMethod ? { jsonRpcMethod } : {}),
           method: req.method,
           mcpPath: path,
           path: requestPath,
         })
       : {
-          action: isDirectUpstreamBearerToken(req, auth)
+          action: isDirectBearer
             ? "reject_direct_upstream_bearer"
             : "require_bridge_bearer",
-          reason: isDirectUpstreamBearerToken(req, auth)
+          reason: isDirectBearer
             ? "direct-upstream-bearer"
             : "protected-mcp-request",
         };
+
+    if (admission.action === "allow_public") {
+      next();
+      return;
+    }
 
     if (admission.action === "reject_direct_upstream_bearer") {
       delete req.headers.authorization;
@@ -643,6 +653,11 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
         reason: res.statusCode === 403 ? "forbidden-scope" : admission.reason,
       });
     });
+
+    if (admission.action === "allow_public") {
+      next();
+      return;
+    }
 
     mcpAuthModule.authMiddleware(req, res, next);
   });
