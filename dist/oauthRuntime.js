@@ -16,6 +16,7 @@ import { logAppEvent } from "./logger.js";
 import { createOAuthCore } from "./grantLifecycle.js";
 import { createOAuthStore } from "./grantPersistence.js";
 import { getRequestLogFields } from "./requestContext.js";
+import { getFirstHeaderValue } from "./headerUtils.js";
 import { getStringValue, isRecord } from "./typeUtils.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 function getConsentPageHeaders(authorizationUrl) {
@@ -98,6 +99,39 @@ function getBodyStringValue(body, key) {
         return undefined;
     }
     return getStringValue(body, key);
+}
+function isUnauthenticatedBootstrapMethod(body) {
+    const method = getBodyStringValue(body, "method");
+    return method === "initialize" || method === "tools/list";
+}
+function addBearerRealm(wwwAuthenticate) {
+    if (!wwwAuthenticate.startsWith("Bearer ") || wwwAuthenticate.includes("realm=")) {
+        return wwwAuthenticate;
+    }
+    return wwwAuthenticate.replace("Bearer ", "Bearer realm=\"mcp\", ");
+}
+function withBearerRealm(authMiddleware) {
+    return (req, res, next) => {
+        const originalSetHeader = res.setHeader.bind(res);
+        const setHeaderWithBearerRealm = (name, value) => {
+            if (name.toLowerCase() === "www-authenticate") {
+                if (typeof value === "string") {
+                    return originalSetHeader(name, addBearerRealm(value));
+                }
+                if (Array.isArray(value)) {
+                    return originalSetHeader(name, value.map((entry) => addBearerRealm(String(entry))));
+                }
+            }
+            return originalSetHeader(name, value);
+        };
+        res.setHeader = setHeaderWithBearerRealm;
+        const restoreSetHeader = () => {
+            res.setHeader = originalSetHeader;
+        };
+        res.once("close", restoreSetHeader);
+        res.once("finish", restoreSetHeader);
+        authMiddleware(req, res, next);
+    };
 }
 export function createOAuthBroker(config) {
     const store = createOAuthStore(config.storePath);
@@ -399,11 +433,11 @@ export function createMcpAuthModule(auth) {
         scopesSupported,
     }));
     return {
-        authMiddleware: requireBearerAuth({
+        authMiddleware: withBearerRealm(requireBearerAuth({
             requiredScopes: requiredAccessScopes,
             resourceMetadataUrl,
             verifier: oauthBroker.provider,
-        }),
+        })),
         getClientCompatibilityProfile: oauthBroker.getClientCompatibilityProfile,
         protectedResourceMetadata: {
             authorization_servers: [oauthBroker.getIssuerUrl().href],
@@ -449,6 +483,13 @@ export function installOAuthRoutes(options) {
     });
     app.use((req, res, next) => {
         if (getRequestPath(req) !== path || req.method !== "POST") {
+            next();
+            return;
+        }
+        if (!req.auth &&
+            !getFirstHeaderValue(req.headers.authorization) &&
+            !getFirstHeaderValue(req.headers["cf-access-jwt-assertion"]) &&
+            isUnauthenticatedBootstrapMethod(req.body)) {
             next();
             return;
         }

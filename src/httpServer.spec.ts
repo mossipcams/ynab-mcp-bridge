@@ -1066,8 +1066,11 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/list",
-        params: {},
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
       }),
     });
 
@@ -2695,7 +2698,105 @@ describe("startHttpServer", () => {
     );
   });
 
-  it("returns a bearer challenge with resource metadata when oauth mode is enabled", async () => {
+  it("returns a bearer challenge with resource metadata for unauthenticated tools/call requests in oauth mode", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        jwksUrl,
+        scopes: ["openid"],
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(
+      "Bearer realm=\"mcp\", error=\"invalid_token\", error_description=\"Missing Authorization header\", scope=\"openid\", resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
+    );
+  });
+
+  it("serves unauthenticated initialize requests on the MCP endpoint in oauth mode", async () => {
+    const { jwksUrl } = await startJwksServer();
+    const httpServer = await startHttpServer({
+      ynab,
+      auth: createCloudflareOAuthAuth({
+        jwksUrl,
+        scopes: ["openid"],
+      }),
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: {
+            name: "Claude",
+            version: "1.0.0",
+          },
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      id: 1,
+      jsonrpc: "2.0",
+      result: {
+        capabilities: {
+          resources: {
+            listChanged: true,
+          },
+          tools: {
+            listChanged: true,
+          },
+        },
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+        serverInfo: {
+          name: packageInfo.name,
+          version: packageInfo.version,
+        },
+      },
+    });
+  });
+
+  it("serves unauthenticated tools/list requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2725,10 +2826,14 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toBe(
-      "Bearer realm=\"mcp\", error=\"invalid_token\", error_description=\"Missing Authorization header\", scope=\"openid\", resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      id: 1,
+      jsonrpc: "2.0",
+      result: {
+        tools: expect.any(Array),
+      },
+    });
   });
 
   it("returns a bearer challenge for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
@@ -3410,8 +3515,11 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/list",
-        params: {},
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
       }),
     });
 
@@ -3425,7 +3533,7 @@ describe("startHttpServer", () => {
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
       details.path === "/mcp" &&
       details.method === "POST" &&
-      details.jsonRpcMethod === "tools/list" &&
+      details.jsonRpcMethod === "tools/call" &&
       details.userAgent === mcpUserAgent &&
       !("authorization" in details)
     ))).toBeTruthy();
@@ -3477,7 +3585,7 @@ describe("startHttpServer", () => {
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
       details.path === "/mcp" &&
       details.method === "POST" &&
-      details.jsonRpcMethod === "tools/list" &&
+      details.jsonRpcMethod === "tools/call" &&
       details.userAgent === mcpUserAgent &&
       details.authMode === "oauth" &&
       details.authRequired === true &&
@@ -4148,8 +4256,11 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/list",
-        params: {},
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
       }),
     });
 
@@ -4163,7 +4274,7 @@ describe("startHttpServer", () => {
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
       details.path === "/mcp" &&
       details.method === "POST" &&
-      details.jsonRpcMethod === "tools/list" &&
+      details.jsonRpcMethod === "tools/call" &&
       details.authClientId === registration.client_id &&
       details.profileId === "chatgpt" &&
       details.profileReason === "oauth-client-profile:chatgpt"
@@ -4442,8 +4553,11 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/list",
-        params: {},
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
       }),
     });
 
@@ -4571,8 +4685,11 @@ describe("startHttpServer", () => {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "tools/list",
-        params: {},
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
       }),
     });
 
