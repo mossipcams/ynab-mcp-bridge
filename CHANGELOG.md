@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.16](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.15...ynab-mcp-bridge-v0.15.16) (2026-03-31)
+
+
+### Bug Fixes
+
+* remove duplicated bootstrap import ([b10e247](https://github.com/mossipcams/ynab-mcp-bridge/commit/b10e2470cfb440a8a8a641e8e4760ac52a85cc00))
+* restore oauth bootstrap probe compatibility ([34e735a](https://github.com/mossipcams/ynab-mcp-bridge/commit/34e735a54c66c7c81d3e9fabf40c939d64ab3a23))
+* return 405 for unauthenticated mcp probes ([6fdcafc](https://github.com/mossipcams/ynab-mcp-bridge/commit/6fdcafccf91758b69a83ea9dcd7f87d07d2aa918))
+
 ## [0.15.15](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.14...ynab-mcp-bridge-v0.15.15) (2026-03-31)
 
 
