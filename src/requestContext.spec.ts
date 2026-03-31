@@ -29,6 +29,8 @@ describe("request context", () => {
   it("provides request ids and correlation ids to the active async context", () => {
     const value = runWithRequestContext({
       correlationId: "trace-123",
+      method: "GET",
+      path: "/oauth/callback",
       requestId: "request-456",
     }, () => ({
       fields: getRequestLogFields(),
@@ -38,10 +40,14 @@ describe("request context", () => {
     expect(value).toEqual({
       fields: {
         correlationId: "trace-123",
+        method: "GET",
+        path: "/oauth/callback",
         requestId: "request-456",
       },
       stored: {
         correlationId: "trace-123",
+        method: "GET",
+        path: "/oauth/callback",
         requestId: "request-456",
         toolCallStarted: false,
       },

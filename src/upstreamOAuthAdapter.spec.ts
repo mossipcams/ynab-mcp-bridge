@@ -1,19 +1,46 @@
 import { createServer as createNodeHttpServer } from "node:http";
+import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { setLoggerDestinationForTests } from "./logger.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 
 describe("createUpstreamOAuthAdapter", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
+    setLoggerDestinationForTests();
+
     while (cleanups.length > 0) {
       await cleanups.pop()?.();
     }
   });
 
+  function createBufferedDestination() {
+    const destination = new PassThrough();
+    const chunks: string[] = [];
+
+    destination.on("data", (chunk) => {
+      chunks.push(chunk.toString("utf8"));
+    });
+
+    return {
+      destination,
+      readEntries() {
+        return chunks
+          .join("")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+      },
+    };
+  }
+
   it("builds upstream authorization URLs and exchanges authorization and refresh tokens", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     let lastRequestBody: URLSearchParams | undefined;
     const server = createNodeHttpServer((req, res) => {
       const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -107,9 +134,70 @@ describe("createUpstreamOAuthAdapter", () => {
     expect(lastRequestBody?.get("refresh_token")).toBe("upstream-refresh-token");
     expect(lastRequestBody?.get("client_id")).toBe("cloudflare-client-id");
     expect(lastRequestBody?.get("client_secret")).toBe("cloudflare-client-secret");
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: "upstream.token.request.started",
+        grantType: "authorization_code",
+        hasClientSecretInput: true,
+        hasCode: true,
+        hasRedirectUri: true,
+        msg: "upstream.token.request.started",
+        scope: "oauth",
+        upstreamPath: "/token",
+      }),
+      expect.objectContaining({
+        event: "upstream.token.request.succeeded",
+        grantType: "authorization_code",
+        hasAccessToken: true,
+        hasExpiresIn: true,
+        hasRefreshToken: true,
+        hasScope: true,
+        hasTokenType: true,
+        msg: "upstream.token.request.succeeded",
+        scope: "oauth",
+        upstreamStatus: 200,
+      }),
+      expect.objectContaining({
+        event: "upstream.token.request.started",
+        grantType: "refresh_token",
+        hasClientSecretInput: true,
+        hasRefreshToken: true,
+        msg: "upstream.token.request.started",
+        scope: "oauth",
+        upstreamPath: "/token",
+      }),
+      expect.objectContaining({
+        event: "upstream.token.request.succeeded",
+        grantType: "refresh_token",
+        hasAccessToken: true,
+        hasExpiresIn: true,
+        hasRefreshToken: true,
+        hasScope: true,
+        hasTokenType: true,
+        msg: "upstream.token.request.succeeded",
+        scope: "oauth",
+        upstreamStatus: 200,
+      }),
+    ]));
+    expect(sink.readEntries()).toEqual(expect.not.arrayContaining([
+      expect.objectContaining({
+        code: "upstream-code-123",
+      }),
+      expect.objectContaining({
+        clientSecret: "cloudflare-client-secret",
+      }),
+      expect.objectContaining({
+        refreshToken: "upstream-refresh-token",
+      }),
+      expect.objectContaining({
+        accessToken: "upstream-access-token",
+      }),
+    ]));
   });
 
   it("surfaces safe upstream token error details on refresh failures", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const server = createNodeHttpServer((req, res) => {
       const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
 
@@ -171,9 +259,39 @@ describe("createUpstreamOAuthAdapter", () => {
       upstreamErrorDescription: "Refresh token is invalid.",
       upstreamErrorFields: ["error", "error_description"],
     });
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: "upstream.token.request.started",
+        grantType: "refresh_token",
+        hasRefreshToken: true,
+        msg: "upstream.token.request.started",
+        scope: "oauth",
+      }),
+      expect.objectContaining({
+        event: "upstream.token.request.failed",
+        failureKind: "http_error",
+        grantType: "refresh_token",
+        hasRefreshToken: true,
+        msg: "upstream.token.request.failed",
+        scope: "oauth",
+        upstreamError: "invalid_grant",
+        upstreamErrorDescription: "Refresh token is invalid.",
+        upstreamStatus: 400,
+      }),
+    ]));
+    expect(sink.readEntries()).toEqual(expect.not.arrayContaining([
+      expect.objectContaining({
+        refreshToken: "upstream-refresh-token",
+      }),
+      expect.objectContaining({
+        clientSecret: "cloudflare-client-secret",
+      }),
+    ]));
   });
 
   it("surfaces a safe server error when a successful token exchange returns invalid JSON", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const server = createNodeHttpServer((req, res) => {
       const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
 
@@ -228,9 +346,22 @@ describe("createUpstreamOAuthAdapter", () => {
       message: "Upstream token exchange returned an invalid JSON response.",
       name: "ServerError",
     });
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: "upstream.token.request.failed",
+        failureKind: "invalid_json",
+        grantType: "authorization_code",
+        hasCode: true,
+        msg: "upstream.token.request.failed",
+        scope: "oauth",
+        upstreamStatus: 200,
+      }),
+    ]));
   });
 
   it("surfaces a safe server error when the upstream token endpoint cannot be reached", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
     const server = createNodeHttpServer((_req, res) => {
       res.statusCode = 204;
       res.end();
@@ -274,5 +405,15 @@ describe("createUpstreamOAuthAdapter", () => {
       message: "Upstream refresh exchange failed due to a network error.",
       name: "ServerError",
     });
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: "upstream.token.request.failed",
+        failureKind: "network_error",
+        grantType: "refresh_token",
+        hasRefreshToken: true,
+        msg: "upstream.token.request.failed",
+        scope: "oauth",
+      }),
+    ]));
   });
 });

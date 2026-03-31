@@ -6,11 +6,14 @@ import { getFirstHeaderValue } from "./headerUtils.js";
 
 type RequestContext = {
   correlationId: string;
+  method?: string;
+  path?: string;
   requestId: string;
   toolCallStarted: boolean;
 };
 
-type RequestContextInput = Pick<RequestContext, "correlationId" | "requestId"> & Partial<Pick<RequestContext, "toolCallStarted">>;
+type RequestContextInput = Pick<RequestContext, "correlationId" | "requestId"> &
+  Partial<Pick<RequestContext, "method" | "path" | "toolCallStarted">>;
 
 const requestContextStorage = new AsyncLocalStorage<RequestContext>();
 const CORRELATION_HEADER = "x-correlation-id";
@@ -85,6 +88,8 @@ export function getRequestLogFields() {
 
   return {
     correlationId: context.correlationId,
+    ...(typeof context.method === "string" ? { method: context.method } : {}),
+    ...(typeof context.path === "string" ? { path: context.path } : {}),
     requestId: context.requestId,
   };
 }

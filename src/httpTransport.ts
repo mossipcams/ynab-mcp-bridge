@@ -1112,7 +1112,11 @@ export async function startHttpServer(
   app.use((req, res, next) => {
     const requestContext = createRequestContext(req.headers);
 
-    runWithRequestContext(requestContext, () => {
+    runWithRequestContext({
+      ...requestContext,
+      method: req.method,
+      path: getRequestPath(req),
+    }, () => {
       res.setHeader(getCorrelationHeaderName(), requestContext.correlationId);
       next();
     });
