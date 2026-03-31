@@ -103,7 +103,7 @@ export function createAuthCore(options: CreateAuthCoreOptions) {
       throw new Error("code_challenge_method must be S256.");
     }
 
-    const client = findClientConfig(options.config, request.clientId);
+    const client = findClientConfig(options.config, options.store, request.clientId);
     assertExactRedirectUri(client, request.redirectUri);
 
     const transactionId = options.createId();
@@ -245,7 +245,7 @@ export function createAuthCore(options: CreateAuthCoreOptions) {
     codeVerifier: string;
     redirectUri: string;
   }) {
-    findClientConfig(options.config, input.clientId);
+    findClientConfig(options.config, options.store, input.clientId);
     logAuthEvent("auth.token.exchange.started", {
       authorizationCodeFingerprint: fingerprintAuthValue(input.code),
       clientId: input.clientId,
@@ -322,7 +322,7 @@ export function createAuthCore(options: CreateAuthCoreOptions) {
     refreshToken: string;
     scopes?: string[];
   }) {
-    findClientConfig(options.config, input.clientId);
+    findClientConfig(options.config, options.store, input.clientId);
     logAuthEvent("auth.refresh.exchange.started", {
       clientId: input.clientId,
       refreshTokenFingerprint: fingerprintAuthValue(input.refreshToken),

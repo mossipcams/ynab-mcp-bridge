@@ -1,8 +1,27 @@
 import type { AuthConfig } from "../config/schema.js";
+import type { AuthStore } from "../store/authStore.js";
 
-type AuthClientConfig = AuthConfig["clients"][number];
+type AuthClientConfig = AuthConfig["clients"][number] | {
+  clientId: string;
+  displayName?: string;
+  providerId: string;
+  redirectUri: string;
+  scopes: string[];
+};
 
-export function findClientConfig(config: AuthConfig, clientId: string): AuthClientConfig {
+export function findClientConfig(config: AuthConfig, store: AuthStore, clientId: string): AuthClientConfig {
+  const registeredClient = store.getRegisteredClient(clientId);
+
+  if (registeredClient) {
+    return {
+      clientId: registeredClient.clientId,
+      ...(registeredClient.clientName ? { displayName: registeredClient.clientName } : {}),
+      providerId: registeredClient.providerId,
+      redirectUri: registeredClient.redirectUri,
+      scopes: registeredClient.scopes,
+    };
+  }
+
   const client = config.clients.find((candidate) => candidate.clientId === clientId);
 
   if (!client) {

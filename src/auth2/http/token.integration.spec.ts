@@ -176,4 +176,70 @@ describe("auth2 token route", () => {
       error_description: "PKCE code_verifier is invalid.",
     });
   });
+
+  it("rejects token endpoint client authentication for public clients", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const server = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      auth2Config: parseAuthConfig({
+        accessTokenTtlSec: 3600,
+        authCodeTtlSec: 300,
+        callbackPath: "/oauth/callback",
+        clients: [
+          {
+            clientId: "client-a",
+            providerId: "default",
+            redirectUri: "https://claude.ai/oauth/callback",
+            scopes: ["openid", "profile"],
+          },
+        ],
+        provider: {
+          authorizationEndpoint: upstream.authorizationUrl,
+          clientId: "cloudflare-client-id",
+          clientSecret: "cloudflare-client-secret",
+          issuer: upstream.issuer,
+          jwksUri: upstream.jwksUrl,
+          tokenEndpoint: upstream.tokenUrl,
+          usePkce: true,
+        },
+        publicBaseUrl: "http://127.0.0.1",
+        refreshTokenTtlSec: 2_592_000,
+      }),
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+      ynab,
+    });
+    cleanups.push(() => server.close());
+
+    const issued = await issueAuthorizationCode(server.url);
+
+    const response = await fetch(new URL("/token", server.url), {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from("client-a:secret").toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        client_id: "client-a",
+        code: issued.code!,
+        code_verifier: issued.verifier,
+        grant_type: "authorization_code",
+        redirect_uri: "https://claude.ai/oauth/callback",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_client",
+      error_description: "Public clients must not use token endpoint authentication.",
+    });
+  });
 });

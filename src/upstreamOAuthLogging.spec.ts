@@ -2,10 +2,10 @@ import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { parseAuthConfig } from "./auth2/config/schema.js";
 import { startHttpServer } from "./httpTransport.js";
 import { setLoggerDestinationForTests } from "./logger.js";
 import {
-  approveAuthorizationConsent,
   createCloudflareOAuthAuth,
   createCodeChallenge,
   registerOAuthClient,
@@ -18,6 +18,38 @@ describe("upstream oauth logging", () => {
   const ynab = {
     apiToken: "test-token",
   } as const;
+
+  function createAuth2Config(upstream: {
+    authorizationUrl: string;
+    issuer: string;
+    jwksUrl: string;
+    tokenUrl: string;
+  }) {
+    return parseAuthConfig({
+      accessTokenTtlSec: 3600,
+      authCodeTtlSec: 300,
+      callbackPath: "/oauth/callback",
+      clients: [
+        {
+          clientId: "client-a",
+          providerId: "default",
+          redirectUri: "https://claude.ai/oauth/callback",
+          scopes: ["openid", "profile"],
+        },
+      ],
+      provider: {
+        authorizationEndpoint: upstream.authorizationUrl,
+        clientId: "cloudflare-client-id",
+        clientSecret: "cloudflare-client-secret",
+        issuer: upstream.issuer,
+        jwksUri: upstream.jwksUrl,
+        tokenEndpoint: upstream.tokenUrl,
+        usePkce: true,
+      },
+      publicBaseUrl: "http://127.0.0.1",
+      refreshTokenTtlSec: 2_592_000,
+    });
+  }
 
   afterEach(async () => {
     setLoggerDestinationForTests();
@@ -61,6 +93,7 @@ describe("upstream oauth logging", () => {
         jwksUrl: upstream.jwksUrl,
         tokenUrl: upstream.tokenUrl,
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -72,8 +105,7 @@ describe("upstream oauth logging", () => {
     const codeChallenge = createCodeChallenge(codeVerifier);
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
-    const upstreamState = new URL(consentResponse.headers.get("location")!, httpServer.url).searchParams.get("state");
+    const upstreamState = new URL(authorizeResponse.headers.get("location")!, httpServer.url).searchParams.get("state");
 
     const callbackResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,

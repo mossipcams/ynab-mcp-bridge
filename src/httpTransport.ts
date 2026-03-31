@@ -1,13 +1,12 @@
 /**
  * Owns: Express app assembly for MCP HTTP transport, request parsing, request/session validation, JSON-RPC response writers, CORS/origin enforcement, MCP POST handoff, and top-level HTTP error handling.
- * Inputs/dependencies: auth config, YNAB config, serverRuntime, header helpers, request-context helpers, origin-policy helpers, clientProfiles/, and oauthRuntime.
+ * Inputs/dependencies: auth config, YNAB config, serverRuntime, header helpers, request-context helpers, origin-policy helpers, and oauthRuntime.
  * Outputs/contracts: startHttpServer(...) plus explicit helper interfaces consumed by route-local wiring.
  */
 import type { Server as NodeHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
-import { decodeJwt } from "jose";
 import type { API } from "ynab";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -27,16 +26,6 @@ import type { AuthConfig } from "./auth2/config/schema.js";
 import { installAuthV2Routes } from "./auth2/http/routes.js";
 import { isPublicMcpBootstrapMethod } from "./authAdmissionPolicy.js";
 import { logAppEvent } from "./logger.js";
-import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
-import {
-  detectInitializeClientProfile,
-  detectClientProfile,
-  reconcileClientProfile,
-} from "./clientProfiles/detectClient.js";
-import { getClientProfile } from "./clientProfiles/index.js";
-import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
-import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
-import type { ClientProfileId, RequestContext as ClientProfileRequestContext } from "./clientProfiles/types.js";
 import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import {
@@ -46,7 +35,6 @@ import {
   hasToolCallStarted,
   runWithRequestContext,
 } from "./requestContext.js";
-import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
 import {
   createServer,
   createFastPathToolCallResults,
@@ -114,11 +102,6 @@ type RequestResolution =
 
 type HttpDebugDetails = Record<string, unknown>;
 
-type InitializeParamsLike = {
-  capabilities?: unknown;
-  clientInfo?: unknown;
-};
-
 type InstallMcpPostRouteOptions = {
   app: express.Express;
   createManagedRequest: () => Promise<ManagedRequest>;
@@ -128,7 +111,6 @@ type InstallMcpPostRouteOptions = {
     toolCallResults: Map<string, CallToolResult>;
     toolsListResult: ReturnType<typeof getToolsListResult>;
   } | undefined;
-  getInitializeParams: (parsedBody: unknown) => { capabilities?: unknown; clientInfo?: unknown } | undefined;
   getJsonRpcDebugDetails: (parsedBody: unknown) => Record<string, unknown>;
   getRequestAuthDebugOptions: (req: Pick<Request, "path" | "url">) => { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean };
   getRequestDebugDetails: (req: Request, options?: { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean }) => Record<string, unknown>;
@@ -140,8 +122,6 @@ type InstallMcpPostRouteOptions = {
   writeMethodNotAllowed: (res: Response, allowedMethods: readonly string[]) => void;
   writeRequestResolution: (res: Response, resolution: Exclude<RequestResolution, { cleanup?: () => Promise<void>; managedRequest: ManagedRequest; status: "ready" }>) => void;
 };
-
-const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 
 class StreamableTransportAdapter implements Transport {
   public onclose: NonNullable<Transport["onclose"]> = () => {};
@@ -187,76 +167,6 @@ function getRequestPath(req: Pick<Request, "path" | "url">) {
 
 function getMcpResourceDocumentsPathPrefix(path: string) {
   return `${path.replace(/\/$/, "")}/resources/`;
-}
-
-function toClientProfileHeaders(
-  headers: Pick<Request, "headers">["headers"],
-): ClientProfileRequestContext["headers"] {
-  const normalizedHeaders: Record<string, string | string[] | undefined> = {};
-
-  for (const [name, value] of Object.entries(headers)) {
-    if (typeof value === "string" || Array.isArray(value)) {
-      normalizedHeaders[name] = value;
-      continue;
-    }
-
-    normalizedHeaders[name] = undefined;
-  }
-
-  return normalizedHeaders;
-}
-
-function toClientProfileRequestContext(req: Pick<Request, "headers" | "method" | "path" | "url">): ClientProfileRequestContext {
-  return {
-    headers: toClientProfileHeaders(req.headers),
-    method: req.method ?? "GET",
-    path: getRequestPath(req),
-  };
-}
-
-function getCanonicalOAuthDiscoveryPath(pathname: string, profileId: ClientProfileId) {
-  if (profileId === "chatgpt") {
-    return undefined;
-  }
-
-  const profile = getClientProfile(profileId);
-  const canonicalPath = "/.well-known/oauth-authorization-server";
-
-  if (!profile.oauth.tolerateExtraDiscoveryProbes || pathname === canonicalPath) {
-    return undefined;
-  }
-
-  return profile.oauth.discoveryPathVariants.includes(pathname)
-    ? canonicalPath
-    : undefined;
-}
-
-function getBearerToken(authorizationHeader: string | undefined) {
-  if (!authorizationHeader?.startsWith("Bearer ")) {
-    return undefined;
-  }
-
-  return authorizationHeader.slice("Bearer ".length).trim();
-}
-
-function isDirectUpstreamBearerToken(req: Pick<Request, "headers">, auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
-  const authorizationSource = getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]);
-
-  if (authorizationSource === "cf-access-jwt-assertion") {
-    return false;
-  }
-
-  const token = getBearerToken(getFirstHeaderValue(req.headers.authorization));
-
-  if (!token) {
-    return false;
-  }
-
-  try {
-    return decodeJwt(token).iss === auth.issuer;
-  } catch {
-    return false;
-  }
 }
 
 function writeJson(res: Response, statusCode: number, body: unknown) {
@@ -396,27 +306,6 @@ function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
   }
 
   return details;
-}
-
-function getInitializeParams(parsedBody: unknown) {
-  if (!isRecord(parsedBody)) {
-    return undefined;
-  }
-
-  if (getStringValue(parsedBody, "method") !== "initialize") {
-    return undefined;
-  }
-
-  const params = getRecordValueIfObject(parsedBody, "params");
-
-  if (!params) {
-    return undefined;
-  }
-
-  return {
-    capabilities: params["capabilities"],
-    clientInfo: params["clientInfo"],
-  } satisfies InitializeParamsLike;
 }
 
 function getToolCallName(parsedBody: unknown) {
@@ -655,10 +544,6 @@ function getBodyStringValue(body: unknown, key: string) {
   return getStringValue(body, key);
 }
 
-function getPersistedOAuthProfileReason(profileId: ClientProfileId) {
-  return `oauth-client-profile:${profileId}`;
-}
-
 function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">) {
   const sessionId = req.headers["mcp-session-id"];
 
@@ -829,7 +714,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
     app,
     createManagedRequest,
     fastPathResponses,
-    getInitializeParams,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
     getRequestDebugDetails,
@@ -872,38 +756,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
     let cleanup = async () => {};
 
     try {
-      const provisionalProfile = getResolvedClientProfile(res.locals);
-      const initializeParams = getInitializeParams(parsedBody);
-
-      if (provisionalProfile && initializeParams) {
-        const confirmedProfile = detectInitializeClientProfile({
-          capabilities: initializeParams.capabilities,
-          clientInfo: initializeParams.clientInfo,
-        });
-        const reconciliation = reconcileClientProfile(provisionalProfile, confirmedProfile);
-
-        setResolvedClientProfile(res.locals, reconciliation.profile);
-
-        if (!reconciliation.mismatch && confirmedProfile) {
-          logClientProfileEvent("profile.detected", {
-            method: req.method ?? "GET",
-            path: getRequestPath(req),
-            profileId: confirmedProfile.profileId,
-            reason: confirmedProfile.reason,
-          });
-        } else if (reconciliation.mismatch && confirmedProfile) {
-          logClientProfileEvent("profile.reconciled", {
-            confirmedProfileId: confirmedProfile.profileId,
-            method: req.method ?? "GET",
-            path: getRequestPath(req),
-            profileId: reconciliation.profile.profileId,
-            provisionalProfileId: provisionalProfile.profileId,
-            reason: reconciliation.profile.reason,
-          });
-        }
-      }
-
-      const resolvedProfile = getResolvedClientProfile(res.locals);
       const authDebugOptions = getRequestAuthDebugOptions(req);
       const fastPathCache = fastPathResponses();
       const jsonRpcMethod = isRecord(parsedBody) ? getStringValue(parsedBody, "method") : undefined;
@@ -918,8 +770,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
             ...getRequestDebugDetails(req, authDebugOptions),
             ...getJsonRpcDebugDetails(parsedBody),
             cleanup: false,
-            profileId: resolvedProfile?.profileId,
-            profileReason: resolvedProfile?.reason,
           });
           writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.initializeResult);
           return;
@@ -930,8 +780,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
             ...getRequestDebugDetails(req, authDebugOptions),
             ...getJsonRpcDebugDetails(parsedBody),
             cleanup: false,
-            profileId: resolvedProfile?.profileId,
-            profileReason: resolvedProfile?.reason,
           });
           writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.toolsListResult);
           return;
@@ -942,8 +790,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
             ...getRequestDebugDetails(req, authDebugOptions),
             ...getJsonRpcDebugDetails(parsedBody),
             cleanup: false,
-            profileId: resolvedProfile?.profileId,
-            profileReason: resolvedProfile?.reason,
           });
           res.status(202).end();
           return;
@@ -954,8 +800,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
             ...getRequestDebugDetails(req, authDebugOptions),
             ...getJsonRpcDebugDetails(parsedBody),
             cleanup: false,
-            profileId: resolvedProfile?.profileId,
-            profileReason: resolvedProfile?.reason,
           });
           logHttpDebug("resource.list.advertised", {
             ...getRequestDebugDetails(req, authDebugOptions),
@@ -1015,8 +859,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
         ...getRequestDebugDetails(req, authDebugOptions),
         ...getJsonRpcDebugDetails(parsedBody),
         cleanup: Boolean(resolution.cleanup),
-        profileId: resolvedProfile?.profileId,
-        profileReason: resolvedProfile?.reason,
       });
 
       if (isRecord(parsedBody) && getStringValue(parsedBody, "method") === "resources/list") {
@@ -1092,12 +934,11 @@ export async function startHttpServer(
       jwksUrl: auth.jwksUrl,
       tokenUrl: auth.tokenUrl,
     });
-  }
 
-  const mcpAuthModule = auth.mode === "oauth" ? createMcpAuthModule(auth) : undefined;
-  const cloudflareCompatibilityMiddleware = auth.mode === "oauth"
-    ? createCloudflareAccessCompatibilityMiddleware(auth)
-    : undefined;
+    if (!options.auth2Config) {
+      throw new Error("OAuth HTTP mode requires auth2Config.");
+    }
+  }
 
   const app = express();
   const jsonParser = express.json();
@@ -1166,30 +1007,6 @@ export async function startHttpServer(
   });
 
   app.use((req, res, next) => {
-    const tokenClientId = auth.mode === "oauth" &&
-      getRequestPath(req) === "/token" &&
-      req.method === "POST"
-      ? getBodyStringValue(req.body, "client_id")
-      : undefined;
-    const persistedProfileId = auth.mode === "oauth" && tokenClientId
-      ? mcpAuthModule?.getClientCompatibilityProfile(tokenClientId)
-      : undefined;
-    const requestProfile = detectClientProfile(toClientProfileRequestContext(req));
-    const detectedProfile = persistedProfileId && requestProfile.profileId === "generic"
-      ? {
-          profileId: persistedProfileId,
-          reason: getPersistedOAuthProfileReason(persistedProfileId),
-        }
-      : requestProfile;
-
-    setResolvedClientProfile(res.locals, detectedProfile);
-    logClientProfileEvent("profile.detected", {
-      method: req.method ?? "GET",
-      path: getRequestPath(req),
-      profileId: detectedProfile.profileId,
-      reason: detectedProfile.reason,
-    });
-
     next();
   });
 
@@ -1225,30 +1042,14 @@ export async function startHttpServer(
   });
 
   if (auth.mode === "oauth") {
-    if (options.auth2Config) {
-      installAuthV2Routes({
-        app,
-        auth,
-        path,
-        auth2Config: options.auth2Config,
-      });
-    } else {
-      installOAuthRoutes({
-        app,
-        auth,
-        cloudflareCompatibilityMiddleware: cloudflareCompatibilityMiddleware!,
-        getCanonicalOAuthDiscoveryPath,
-        getPersistedOAuthProfileReason,
-        getRequestAuthDebugOptions,
-        getRequestDebugDetails,
-        getRequestPath,
-        isDirectUpstreamBearerToken,
-        jsonParser,
-        logHttpDebug,
-        mcpAuthModule: mcpAuthModule!,
-        path,
-      });
-    }
+    const auth2Config = options.auth2Config!;
+
+    installAuthV2Routes({
+      app,
+      auth,
+      path,
+      auth2Config,
+    });
   }
 
   app.use((req, res, next) => {
@@ -1324,7 +1125,6 @@ export async function startHttpServer(
       );
     },
     fastPathResponses: () => fastPathCache,
-    getInitializeParams,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
     getRequestDebugDetails,

@@ -1,0 +1,28 @@
+{
+  "accessTokenTtlSec": 3600,
+  "authCodeTtlSec": 300,
+  "callbackPath": "/oauth/callback",
+  "clients": [
+    {
+      "clientId": "example-claude-client",
+      "displayName": "Claude Web",
+      "providerId": "default",
+      "redirectUri": "https://claude.ai/api/mcp/auth_callback",
+      "scopes": [
+        "openid",
+        "profile"
+      ]
+    }
+  ],
+  "provider": {
+    "authorizationEndpoint": "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/example-client-id/authorization",
+    "clientId": "example-client-id",
+    "clientSecret": "replace-me",
+    "issuer": "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/example-client-id",
+    "jwksUri": "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/example-client-id/jwks",
+    "tokenEndpoint": "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/example-client-id/token",
+    "usePkce": true
+  },
+  "publicBaseUrl": "https://mcp.example.com",
+  "refreshTokenTtlSec": 2592000
+}

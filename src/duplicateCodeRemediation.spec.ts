@@ -148,7 +148,8 @@ describe("duplicate code remediation", () => {
     expect(indexSource).not.toContain('from "./httpServer.js"');
     expect(stdioSource).toContain('from "./serverRuntime.js"');
     expect(stdioSource).not.toContain('from "./server.js"');
-    expect(httpTransportSource).toContain('from "./oauthRuntime.js"');
+    expect(httpTransportSource).toContain('from "./auth2/http/routes.js"');
+    expect(httpTransportSource).not.toContain('from "./oauthRuntime.js"');
     expect(httpTransportSource).toContain('from "./serverRuntime.js"');
     expect(oauthRuntimeSource).toContain('from "./grantLifecycle.js"');
     expect(oauthRuntimeSource).toContain('from "./grantPersistence.js"');

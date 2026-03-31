@@ -5,10 +5,10 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { parseAuthConfig } from "./auth2/config/schema.js";
 import { startHttpServer } from "./httpTransport.js";
 import { setLoggerDestinationForTests } from "./logger.js";
 import {
-  approveAuthorizationConsent,
   createCloudflareOAuthAuth,
   createCodeChallenge,
   registerOAuthClient,
@@ -21,6 +21,38 @@ describe("oauth broker persistence", () => {
   const ynab = {
     apiToken: "test-token",
   } as const;
+
+  function createAuth2Config(upstream: {
+    authorizationUrl: string;
+    issuer: string;
+    jwksUrl: string;
+    tokenUrl: string;
+  }) {
+    return parseAuthConfig({
+      accessTokenTtlSec: 3600,
+      authCodeTtlSec: 300,
+      callbackPath: "/oauth/callback",
+      clients: [
+        {
+          clientId: "client-a",
+          providerId: "default",
+          redirectUri: "https://claude.ai/oauth/callback",
+          scopes: ["openid", "profile"],
+        },
+      ],
+      provider: {
+        authorizationEndpoint: upstream.authorizationUrl,
+        clientId: "cloudflare-client-id",
+        clientSecret: "cloudflare-client-secret",
+        issuer: upstream.issuer,
+        jwksUri: upstream.jwksUrl,
+        tokenEndpoint: upstream.tokenUrl,
+        usePkce: true,
+      },
+      publicBaseUrl: "http://127.0.0.1",
+      refreshTokenTtlSec: 2_592_000,
+    });
+  }
 
   function createBufferedDestination() {
     const destination = new PassThrough();
@@ -52,7 +84,7 @@ describe("oauth broker persistence", () => {
     }
   });
 
-  it("persists approved clients across restart and skips repeated consent", async () => {
+  it("persists registered clients across restart and keeps authorization on the direct redirect path", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
     const storePath = path.join(tempDir, "oauth-store.json");
     cleanups.push(async () => {
@@ -67,6 +99,7 @@ describe("oauth broker persistence", () => {
         storePath,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -76,10 +109,8 @@ describe("oauth broker persistence", () => {
 
     const registration = await registerOAuthClient(httpServer.url);
     const firstAuthorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
-    expect(firstAuthorizeResponse.status).toBe(200);
-
-    const approveResponse = await approveAuthorizationConsent(httpServer.url, await firstAuthorizeResponse.text());
-    expect(approveResponse.status).toBe(302);
+    expect(firstAuthorizeResponse.status).toBe(302);
+    expect(firstAuthorizeResponse.headers.get("location")).toContain(upstream.authorizationUrl);
 
     await httpServer.close();
     cleanups.pop();
@@ -91,6 +122,7 @@ describe("oauth broker persistence", () => {
         storePath,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -101,22 +133,22 @@ describe("oauth broker persistence", () => {
     const secondAuthorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
 
     expect(secondAuthorizeResponse.status).toBe(302);
-    expect(secondAuthorizeResponse.headers.get("location")).toContain("/authorize");
+    expect(secondAuthorizeResponse.headers.get("location")).toContain(upstream.authorizationUrl);
   });
 
-  it("keeps broker runtime ownership in oauthRuntime", () => {
+  it("keeps legacy oauthRuntime helpers available without owning the live HTTP OAuth route stack", () => {
     const oauthRuntimeSource = readFileSync(new URL("./oauthRuntime.ts", import.meta.url), "utf8");
+    const httpTransportSource = readFileSync(new URL("./httpTransport.ts", import.meta.url), "utf8");
 
     expect(oauthRuntimeSource).toContain("export function createOAuthBroker");
-    expect(oauthRuntimeSource).toContain("export function installOAuthRoutes");
+    expect(oauthRuntimeSource).toContain("export function createMcpAuthModule");
     expect(oauthRuntimeSource).toContain("handleCallback");
     expect(oauthRuntimeSource).toContain("handleConsent");
-    expect(oauthRuntimeSource).toContain("verifyAccessToken");
-    expect(oauthRuntimeSource).toContain('"/.well-known/oauth-protected-resource"');
-    expect(oauthRuntimeSource).toContain('reason: res.statusCode === 403 ? "forbidden-scope" : admission.reason');
+    expect(httpTransportSource).not.toContain('from "./oauthRuntime.js"');
+    expect(httpTransportSource).not.toContain("installOAuthRoutes(");
   });
 
-  it("logs callback failures through the shared oauth logger", async () => {
+  it("logs callback failures through the auth2 logger", async () => {
     const sink = createBufferedDestination();
     setLoggerDestinationForTests(sink.destination);
 
@@ -127,6 +159,7 @@ describe("oauth broker persistence", () => {
         ...upstream,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -144,14 +177,14 @@ describe("oauth broker persistence", () => {
     expect(sink.readEntries()).toEqual(expect.arrayContaining([
       expect.objectContaining({
         errorMessage: "Missing upstream OAuth state.",
-        event: "callback.failed",
-        msg: "callback.failed",
-        scope: "oauth",
+        event: "auth.callback.failed",
+        msg: "auth.callback.failed",
+        scope: "auth2",
       }),
     ]));
   });
 
-  it("logs non-callback oauth events through the shared oauth logger", async () => {
+  it("logs direct auth2 authorization events through the shared logger", async () => {
     const sink = createBufferedDestination();
     setLoggerDestinationForTests(sink.destination);
 
@@ -162,6 +195,7 @@ describe("oauth broker persistence", () => {
         ...upstream,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -172,24 +206,24 @@ describe("oauth broker persistence", () => {
     const registration = await registerOAuthClient(httpServer.url);
     const response = await startAuthorization(httpServer.url, registration.client_id);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(302);
     expect(sink.readEntries()).toEqual(expect.arrayContaining([
       expect.objectContaining({
         clientId: registration.client_id,
-        event: "authorize.started",
-        msg: "authorize.started",
-        scope: "oauth",
+        event: "auth.authorize.started",
+        msg: "auth.authorize.started",
+        scope: "auth2",
       }),
       expect.objectContaining({
-        clientId: registration.client_id,
-        event: "authorize.consent_required",
-        msg: "authorize.consent_required",
-        scope: "oauth",
+        event: "auth.http.authorize.redirected",
+        msg: "auth.http.authorize.redirected",
+        route: "/authorize",
+        scope: "auth2",
       }),
     ]));
   });
 
-  it("keeps unapproved clients on the consent screen after restart", async () => {
+  it("keeps registered clients authorizable after restart before any callback completes", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
     const storePath = path.join(tempDir, "oauth-store.json");
     cleanups.push(async () => {
@@ -204,6 +238,7 @@ describe("oauth broker persistence", () => {
         storePath,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -223,6 +258,7 @@ describe("oauth broker persistence", () => {
         storePath,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -232,8 +268,8 @@ describe("oauth broker persistence", () => {
 
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
 
-    expect(authorizeResponse.status).toBe(200);
-    await expect(authorizeResponse.text()).resolves.toContain("Approve MCP client access");
+    expect(authorizeResponse.status).toBe(302);
+    expect(authorizeResponse.headers.get("location")).toContain(upstream.authorizationUrl);
   });
 
   it("persists pending authorization, local authorization codes, refresh tokens, and signed access tokens across restart", async () => {
@@ -253,6 +289,7 @@ describe("oauth broker persistence", () => {
         storePath,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -262,8 +299,7 @@ describe("oauth broker persistence", () => {
 
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id, codeChallenge);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
-    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
+    const upstreamState = new URL(authorizeResponse.headers.get("location")!).searchParams.get("state");
 
     expect(upstreamState).toBeTruthy();
 
@@ -277,6 +313,7 @@ describe("oauth broker persistence", () => {
         storePath,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -307,6 +344,7 @@ describe("oauth broker persistence", () => {
         storePath,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -348,6 +386,7 @@ describe("oauth broker persistence", () => {
         storePath,
         tokenSigningSecret: "test-oauth-signing-secret",
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
