@@ -32,12 +32,12 @@ type AppConfig = {
 
 type EnvConfig = Record<string, string | undefined>;
 
-function readOptionalValue(value: string | undefined) {
+function readOptionalValue(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 }
 
-function readAuth2ConfigFile(configPath: string) {
+function readAuth2ConfigFile(configPath: string): string {
   try {
     return readFileSync(configPath, "utf8");
   } catch (error) {
@@ -46,7 +46,7 @@ function readAuth2ConfigFile(configPath: string) {
   }
 }
 
-function resolveAuth2Config(env: EnvConfig) {
+function resolveAuth2Config(env: EnvConfig): AuthConfig | undefined {
   const configPath = readOptionalValue(env["MCP_AUTH2_CONFIG_PATH"]);
 
   if (!configPath) {

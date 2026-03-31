@@ -4,7 +4,6 @@
  * Outputs/contracts: createOAuthCore(...), PendingAuthorization, and PendingConsent consumed by the OAuth runtime.
  */
 import {
-  InvalidClientMetadataError,
   InvalidGrantError,
   InvalidRequestError,
   InvalidScopeError,
