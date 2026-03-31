@@ -46,7 +46,7 @@ import {
   hasToolCallStarted,
   runWithRequestContext,
 } from "./requestContext.js";
-import { createMcpAuthModule } from "./oauthRuntime.js";
+import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
 import {
   createServer,
   createFastPathToolCallResults,
@@ -1225,12 +1225,30 @@ export async function startHttpServer(
   });
 
   if (auth.mode === "oauth") {
-    installAuthV2Routes({
-      app,
-      auth,
-      path,
-      ...(options.auth2Config ? { auth2Config: options.auth2Config } : {}),
-    });
+    if (options.auth2Config) {
+      installAuthV2Routes({
+        app,
+        auth,
+        path,
+        auth2Config: options.auth2Config,
+      });
+    } else {
+      installOAuthRoutes({
+        app,
+        auth,
+        cloudflareCompatibilityMiddleware: cloudflareCompatibilityMiddleware!,
+        getCanonicalOAuthDiscoveryPath,
+        getPersistedOAuthProfileReason,
+        getRequestAuthDebugOptions,
+        getRequestDebugDetails,
+        getRequestPath,
+        isDirectUpstreamBearerToken,
+        jsonParser,
+        logHttpDebug,
+        mcpAuthModule: mcpAuthModule!,
+        path,
+      });
+    }
   }
 
   app.use((req, res, next) => {

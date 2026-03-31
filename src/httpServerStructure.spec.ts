@@ -11,7 +11,7 @@ describe("http server structure", () => {
     expect(httpTransportSource).toContain('from "./auth2/http/routes.js"');
     expect(httpTransportSource).toContain('from "./serverRuntime.js"');
     expect(httpTransportSource).toContain("installAuthV2Routes(");
-    expect(httpTransportSource).not.toContain("installOAuthRoutes(");
+    expect(httpTransportSource).toContain("installOAuthRoutes(");
     expect(httpTransportSource).toContain("export function installMcpPostRoute");
     expect(httpTransportSource).toContain('reason: "invalid-session-header"');
     expect(httpTransportSource).toContain('"transport.handoff"');

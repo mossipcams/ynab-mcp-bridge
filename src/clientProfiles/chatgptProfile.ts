@@ -7,13 +7,6 @@ const CHATGPT_DISCOVERY_PATHS = new Set([
   "/.well-known/oauth-protected-resource",
 ]);
 
-const CHATGPT_OAUTH_ROUTE_PATHS = new Set([
-  "/.well-known/openid-configuration",
-  "/authorize",
-  "/oauth/callback",
-  "/token",
-]);
-
 export const chatgptProfile: ClientProfile = {
   ...genericProfile,
   id: "chatgpt",
@@ -29,20 +22,14 @@ export const chatgptProfile: ClientProfile = {
       };
     }
 
-    if (
-      CHATGPT_OAUTH_ROUTE_PATHS.has(context.path) &&
-      getRequestUserAgent(context)?.startsWith("openai-mcp/")
-    ) {
+    if (getRequestUserAgent(context)?.startsWith("openai-mcp/")) {
       return {
         profileId: "chatgpt",
         reason: "user-agent:openai-mcp",
       };
     }
 
-    if (
-      CHATGPT_OAUTH_ROUTE_PATHS.has(context.path) &&
-      getRequestUserAgent(context)?.includes("chatgpt")
-    ) {
+    if (getRequestUserAgent(context)?.includes("chatgpt")) {
       return {
         profileId: "chatgpt",
         reason: "user-agent:chatgpt",
