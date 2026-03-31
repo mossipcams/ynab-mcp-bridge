@@ -3,6 +3,18 @@ import { describe, expect, it } from "vitest";
 import { decideAuthAdmission } from "./authAdmissionPolicy.js";
 
 describe("auth admission policy", () => {
+  function getAdmission(jsonRpcMethod: string) {
+    return decideAuthAdmission({
+      hasAuthorizationHeader: false,
+      hasCfAccessJwtAssertion: false,
+      isDirectUpstreamBearerToken: false,
+      jsonRpcMethod,
+      method: "POST",
+      mcpPath: "/mcp",
+      path: "/mcp",
+    });
+  }
+
   it("treats OAuth metadata and route-family requests as public", () => {
     expect(decideAuthAdmission({
       hasAuthorizationHeader: false,
@@ -41,14 +53,42 @@ describe("auth admission policy", () => {
     });
   });
 
-  it("requires a bridge bearer token for all MCP requests", () => {
+  it("allows the minimal unauthenticated MCP bootstrap methods", () => {
+    expect(getAdmission("initialize")).toEqual({
+      action: "allow_public",
+      reason: "public-oauth-route",
+    });
+
+    expect(getAdmission("notifications/initialized")).toEqual({
+      action: "allow_public",
+      reason: "public-oauth-route",
+    });
+
+    expect(getAdmission("tools/list")).toEqual({
+      action: "allow_public",
+      reason: "public-oauth-route",
+    });
+
+    expect(getAdmission("resources/list")).toEqual({
+      action: "allow_public",
+      reason: "public-oauth-route",
+    });
+  });
+
+  it("requires a bridge bearer token for protected MCP methods", () => {
+    expect(getAdmission("tools/call")).toEqual({
+      action: "require_bridge_bearer",
+      reason: "protected-mcp-request",
+    });
+
     expect(decideAuthAdmission({
       hasAuthorizationHeader: false,
       hasCfAccessJwtAssertion: false,
       isDirectUpstreamBearerToken: false,
-      method: "POST",
+      jsonRpcMethod: "resources/read",
+      method: "GET",
       mcpPath: "/mcp",
-      path: "/mcp",
+      path: "/mcp/resources/ynab_get_mcp_version",
     })).toEqual({
       action: "require_bridge_bearer",
       reason: "protected-mcp-request",
@@ -60,6 +100,7 @@ describe("auth admission policy", () => {
       hasAuthorizationHeader: true,
       hasCfAccessJwtAssertion: false,
       isDirectUpstreamBearerToken: true,
+      jsonRpcMethod: "tools/call",
       method: "POST",
       mcpPath: "/mcp",
       path: "/mcp",
@@ -74,6 +115,7 @@ describe("auth admission policy", () => {
       hasAuthorizationHeader: false,
       hasCfAccessJwtAssertion: true,
       isDirectUpstreamBearerToken: false,
+      jsonRpcMethod: "tools/call",
       method: "POST",
       mcpPath: "/mcp",
       path: "/mcp",

@@ -9,6 +9,13 @@ const PUBLIC_OAUTH_ROUTE_PATHS = new Set([
   "/token",
 ]);
 
+const PUBLIC_MCP_BOOTSTRAP_METHODS = new Set([
+  "initialize",
+  "notifications/initialized",
+  "tools/list",
+  "resources/list",
+]);
+
 export type AuthAdmissionDecision =
   | {
       action: "allow_public";
@@ -31,6 +38,7 @@ type AuthAdmissionInput = {
   hasAuthorizationHeader: boolean;
   hasCfAccessJwtAssertion: boolean;
   isDirectUpstreamBearerToken: boolean;
+  jsonRpcMethod?: string;
   method: string;
   mcpPath: string;
   path: string;
@@ -44,21 +52,15 @@ function isPublicOAuthRoute(path: string) {
   return path.startsWith("/.well-known/oauth-protected-resource/");
 }
 
-export function decideAuthAdmission(input: AuthAdmissionInput): AuthAdmissionDecision {
-  if (isPublicOAuthRoute(input.path)) {
-    return {
-      action: "allow_public",
-      reason: "public-oauth-route",
-    };
-  }
+function getMcpResourceDocumentsPathPrefix(mcpPath: string) {
+  return `${mcpPath.replace(/\/$/, "")}/resources/`;
+}
 
-  if (input.path !== input.mcpPath || input.method !== "POST") {
-    return {
-      action: "allow_public",
-      reason: "public-oauth-route",
-    };
-  }
+export function isPublicMcpBootstrapMethod(jsonRpcMethod: string | undefined) {
+  return typeof jsonRpcMethod === "string" && PUBLIC_MCP_BOOTSTRAP_METHODS.has(jsonRpcMethod);
+}
 
+function getProtectedMcpAdmission(input: AuthAdmissionInput): AuthAdmissionDecision {
   if (input.hasCfAccessJwtAssertion) {
     return {
       action: "translate_cf_assertion_then_require_bearer",
@@ -77,4 +79,33 @@ export function decideAuthAdmission(input: AuthAdmissionInput): AuthAdmissionDec
     action: "require_bridge_bearer",
     reason: "protected-mcp-request",
   };
+}
+
+export function decideAuthAdmission(input: AuthAdmissionInput): AuthAdmissionDecision {
+  if (isPublicOAuthRoute(input.path)) {
+    return {
+      action: "allow_public",
+      reason: "public-oauth-route",
+    };
+  }
+
+  if (input.path.startsWith(getMcpResourceDocumentsPathPrefix(input.mcpPath))) {
+    return getProtectedMcpAdmission(input);
+  }
+
+  if (input.path !== input.mcpPath || input.method !== "POST") {
+    return {
+      action: "allow_public",
+      reason: "public-oauth-route",
+    };
+  }
+
+  if (isPublicMcpBootstrapMethod(input.jsonRpcMethod)) {
+    return {
+      action: "allow_public",
+      reason: "public-oauth-route",
+    };
+  }
+
+  return getProtectedMcpAdmission(input);
 }
