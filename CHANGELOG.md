@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.17](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.16...ynab-mcp-bridge-v0.15.17) (2026-03-31)
+
+
+### Bug Fixes
+
+* clear remaining quality lint errors ([7ca5b6f](https://github.com/mossipcams/ynab-mcp-bridge/commit/7ca5b6f7d28df77e53e70fdcd9ac7aa40e18d5af))
+* replace the local oauth flow with auth2 ([5dae945](https://github.com/mossipcams/ynab-mcp-bridge/commit/5dae945fc6748bf41d2648754acaf923ffe1ea0a))
+* restore oauth test compatibility ([2382f37](https://github.com/mossipcams/ynab-mcp-bridge/commit/2382f3748d52ce1da53e14913151699446c6a7fb))
+
 ## [0.15.16](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.15...ynab-mcp-bridge-v0.15.16) (2026-03-31)
 
 
