@@ -113,7 +113,7 @@ describe("oauth broker persistence", () => {
     expect(oauthRuntimeSource).toContain("handleConsent");
     expect(oauthRuntimeSource).toContain("verifyAccessToken");
     expect(oauthRuntimeSource).toContain('"/.well-known/oauth-protected-resource"');
-    expect(oauthRuntimeSource).toContain('reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope"');
+    expect(oauthRuntimeSource).toContain('reason: res.statusCode === 403 ? "forbidden-scope" : admission.reason');
   });
 
   it("logs callback failures through the shared oauth logger", async () => {
