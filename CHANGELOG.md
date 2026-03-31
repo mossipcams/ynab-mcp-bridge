@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.10](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.9...ynab-mcp-bridge-v0.15.10) (2026-03-31)
+
+
+### Bug Fixes
+
+* keep oauth bootstrap generic before client detection ([bb3aa47](https://github.com/mossipcams/ynab-mcp-bridge/commit/bb3aa478670ca92d233b0694c2affcdae50fb7ca))
+
 ## [0.15.9](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.8...ynab-mcp-bridge-v0.15.9) (2026-03-31)
 
 
