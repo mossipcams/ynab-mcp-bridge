@@ -102,11 +102,6 @@ type RequestResolution =
 
 type HttpDebugDetails = Record<string, unknown>;
 
-type InitializeParamsLike = {
-  capabilities?: unknown;
-  clientInfo?: unknown;
-};
-
 type InstallMcpPostRouteOptions = {
   app: express.Express;
   createManagedRequest: () => Promise<ManagedRequest>;
@@ -116,7 +111,6 @@ type InstallMcpPostRouteOptions = {
     toolCallResults: Map<string, CallToolResult>;
     toolsListResult: ReturnType<typeof getToolsListResult>;
   } | undefined;
-  getInitializeParams: (parsedBody: unknown) => { capabilities?: unknown; clientInfo?: unknown } | undefined;
   getJsonRpcDebugDetails: (parsedBody: unknown) => Record<string, unknown>;
   getRequestAuthDebugOptions: (req: Pick<Request, "path" | "url">) => { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean };
   getRequestDebugDetails: (req: Request, options?: { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean }) => Record<string, unknown>;
@@ -312,27 +306,6 @@ function getJsonRpcDebugDetails(parsedBody: unknown): HttpDebugDetails {
   }
 
   return details;
-}
-
-function getInitializeParams(parsedBody: unknown) {
-  if (!isRecord(parsedBody)) {
-    return undefined;
-  }
-
-  if (getStringValue(parsedBody, "method") !== "initialize") {
-    return undefined;
-  }
-
-  const params = getRecordValueIfObject(parsedBody, "params");
-
-  if (!params) {
-    return undefined;
-  }
-
-  return {
-    capabilities: params["capabilities"],
-    clientInfo: params["clientInfo"],
-  } satisfies InitializeParamsLike;
 }
 
 function getToolCallName(parsedBody: unknown) {
@@ -741,7 +714,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
     app,
     createManagedRequest,
     fastPathResponses,
-    getInitializeParams,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
     getRequestDebugDetails,
@@ -1153,7 +1125,6 @@ export async function startHttpServer(
       );
     },
     fastPathResponses: () => fastPathCache,
-    getInitializeParams,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
     getRequestDebugDetails,
