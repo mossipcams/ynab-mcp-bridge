@@ -23,6 +23,8 @@ import {
   type RuntimeAuthConfig,
   type YnabConfig,
 } from "./config.js";
+import type { AuthConfig } from "./auth2/config/schema.js";
+import { installAuthV2Routes } from "./auth2/http/routes.js";
 import { logAppEvent } from "./logger.js";
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
 import {
@@ -43,7 +45,7 @@ import {
   hasToolCallStarted,
   runWithRequestContext,
 } from "./requestContext.js";
-import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
+import { createMcpAuthModule } from "./oauthRuntime.js";
 import {
   createServer,
   createFastPathToolCallResults,
@@ -57,6 +59,7 @@ import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js
 import { createYnabApi } from "./ynabApi.js";
 
 type HttpServerOptions = {
+  auth2Config?: AuthConfig;
   allowedHosts?: string[];
   allowedOrigins?: string[];
   auth?: RuntimeAuthConfig;
@@ -179,6 +182,10 @@ function getRequestPath(req: Pick<Request, "path" | "url">) {
   }
 
   return new URL(req.url, "http://127.0.0.1").pathname;
+}
+
+function getMcpResourceDocumentsPathPrefix(path: string) {
+  return `${path.replace(/\/$/, "")}/resources/`;
 }
 
 function toClientProfileHeaders(
@@ -1098,7 +1105,11 @@ export async function startHttpServer(
   function getRequestAuthDebugOptions(
     req: Pick<Request, "path" | "url">,
   ): { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean } {
-    const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
+    const requestPath = getRequestPath(req);
+    const isProtectedMcpRequest = auth.mode === "oauth" && (
+      requestPath === path ||
+      requestPath.startsWith(getMcpResourceDocumentsPathPrefix(path))
+    );
 
     return {
       authMode: auth.mode,
@@ -1112,7 +1123,11 @@ export async function startHttpServer(
   app.use((req, res, next) => {
     const requestContext = createRequestContext(req.headers);
 
-    runWithRequestContext(requestContext, () => {
+    runWithRequestContext({
+      ...requestContext,
+      method: req.method,
+      path: getRequestPath(req),
+    }, () => {
       res.setHeader(getCorrelationHeaderName(), requestContext.correlationId);
       next();
     });
@@ -1192,20 +1207,11 @@ export async function startHttpServer(
   });
 
   if (auth.mode === "oauth") {
-    installOAuthRoutes({
+    installAuthV2Routes({
       app,
       auth,
-      cloudflareCompatibilityMiddleware: cloudflareCompatibilityMiddleware!,
-      getCanonicalOAuthDiscoveryPath,
-      getPersistedOAuthProfileReason,
-      getRequestAuthDebugOptions,
-      getRequestDebugDetails,
-      getRequestPath,
-      isDirectUpstreamBearerToken,
-      jsonParser,
-      logHttpDebug,
-      mcpAuthModule: mcpAuthModule!,
       path,
+      ...(options.auth2Config ? { auth2Config: options.auth2Config } : {}),
     });
   }
 

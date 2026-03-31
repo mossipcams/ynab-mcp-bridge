@@ -104,6 +104,13 @@ function approvalMatches(left: ApprovalRecord, right: ApprovalRecord) {
     return false;
   }
 
+  const leftHasClientId = typeof left.clientId === "string";
+  const rightHasClientId = typeof right.clientId === "string";
+
+  if (leftHasClientId && rightHasClientId && left.clientId !== right.clientId) {
+    return false;
+  }
+
   if (left.redirectUri || right.redirectUri) {
     return left.redirectUri === right.redirectUri;
   }

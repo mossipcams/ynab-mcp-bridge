@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { createLogger } from "./logger.js";
 import {
+  logAuthConfigLoaded,
   logHttpServerStarted,
   logStartupFailure,
   logStdioServerStarted,
@@ -39,6 +40,20 @@ describe("startup logging", () => {
 
     logHttpServerStarted("http://127.0.0.1:3000/mcp", logger);
     logStdioServerStarted(logger);
+    logAuthConfigLoaded({
+      callbackPath: "/oauth/callback",
+      clientIds: ["client-a"],
+      clientsCount: 1,
+      providerAuthorizationHost: "id.example.com",
+      providerIssuer: "https://id.example.com",
+      redirectUriFingerprints: {
+        "client-a": "125a2894bce9",
+      },
+      scopesByClient: {
+        "client-a": ["openid", "profile"],
+      },
+      usePkce: true,
+    }, logger);
     logStartupFailure(new Error("boom"), logger);
 
     expect(sink.readEntries()).toEqual([
@@ -54,6 +69,23 @@ describe("startup logging", () => {
         msg: "server.started",
         scope: "startup",
         transport: "stdio",
+      }),
+      expect.objectContaining({
+        callbackPath: "/oauth/callback",
+        clientIds: ["client-a"],
+        clientsCount: 1,
+        event: "auth.config.loaded",
+        msg: "auth.config.loaded",
+        providerAuthorizationHost: "id.example.com",
+        providerIssuer: "https://id.example.com",
+        redirectUriFingerprints: {
+          "client-a": "125a2894bce9",
+        },
+        scope: "startup",
+        scopesByClient: {
+          "client-a": ["openid", "profile"],
+        },
+        usePkce: true,
       }),
       expect.objectContaining({
         error: {

@@ -113,7 +113,7 @@ describe("oauth broker persistence", () => {
     expect(oauthRuntimeSource).toContain("handleConsent");
     expect(oauthRuntimeSource).toContain("verifyAccessToken");
     expect(oauthRuntimeSource).toContain('"/.well-known/oauth-protected-resource"');
-    expect(oauthRuntimeSource).toContain('reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope"');
+    expect(oauthRuntimeSource).toContain('reason: res.statusCode === 403 ? "forbidden-scope" : admission.reason');
   });
 
   it("logs callback failures through the shared oauth logger", async () => {
@@ -325,7 +325,7 @@ describe("oauth broker persistence", () => {
         code: localAuthorizationCode!,
         code_verifier: codeVerifier,
         grant_type: "authorization_code",
-        redirect_uri: "https://claude.ai/oauth/callback",
+        redirect_uri: "https://claude.ai/api/mcp/auth_callback",
         resource: "https://mcp.example.com/mcp",
       }),
     });

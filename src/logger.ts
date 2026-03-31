@@ -81,12 +81,55 @@ function getDefaultDestination(): DestinationStream {
   return destination;
 }
 
+function wrapLine(line: string, width: number) {
+  if (line.length <= width) {
+    return `${line}\n`;
+  }
+
+  const wrappedSegments: string[] = [];
+
+  for (let offset = 0; offset < line.length; offset += width) {
+    wrappedSegments.push(line.slice(offset, offset + width));
+  }
+
+  return `${wrappedSegments.join("\n")}\n`;
+}
+
+function createWrappedDestination(destination: DestinationStream, width: number): DestinationStream {
+  let bufferedLine = "";
+
+  return {
+    write(chunk: string | Uint8Array) {
+      const text = typeof chunk === "string"
+        ? chunk
+        : Buffer.from(chunk).toString("utf8");
+
+      bufferedLine += text;
+
+      const completedLines = bufferedLine.split("\n");
+      bufferedLine = completedLines.pop() ?? "";
+
+      for (const line of completedLines) {
+        destination.write(wrapLine(line, width));
+      }
+
+      return true;
+    },
+  };
+}
+
 export function createLogger(options: {
   destination?: DestinationStream | undefined;
+  wrapWidth?: number | undefined;
 } = {}): Logger {
+  const destination = options.destination ?? getDefaultDestination();
+  const wrappedDestination = typeof options.wrapWidth === "number" && options.wrapWidth > 0
+    ? createWrappedDestination(destination, options.wrapWidth)
+    : destination;
+
   return pino({
     base: null,
-  }, options.destination ?? getDefaultDestination());
+  }, wrappedDestination);
 }
 
 let appLogger = createLogger();

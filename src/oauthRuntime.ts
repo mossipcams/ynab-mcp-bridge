@@ -15,9 +15,11 @@ import { createOAuthMetadata, getOAuthProtectedResourceMetadataUrl, mcpAuthRoute
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { getEffectiveOAuthScopes, type RuntimeAuthConfig } from "./config.js";
+import { decideAuthAdmission } from "./authAdmissionPolicy.js";
 import type { ClientProfileId, DetectedClientProfile } from "./clientProfiles/types.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
+import { getFirstHeaderValue } from "./headerUtils.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { logAppEvent } from "./logger.js";
 import { createOAuthCore, type PendingConsent } from "./grantLifecycle.js";
@@ -47,6 +49,10 @@ type InstallOAuthRoutesOptions = {
   mcpAuthModule: ReturnType<typeof createMcpAuthModule>;
   path: string;
 };
+
+function getMcpResourceDocumentsPathPrefix(path: string) {
+  return `${path.replace(/\/$/, "")}/resources/`;
+}
 
 function getConsentPageHeaders(authorizationUrl: string) {
   const authorizationOrigin = new URL(authorizationUrl).origin;
@@ -140,6 +146,43 @@ function getBodyStringValue(body: unknown, key: string) {
   }
 
   return getStringValue(body, key);
+}
+
+function addBearerRealm(wwwAuthenticate: string) {
+  if (!wwwAuthenticate.startsWith("Bearer ") || wwwAuthenticate.includes("realm=")) {
+    return wwwAuthenticate;
+  }
+
+  return wwwAuthenticate.replace("Bearer ", "Bearer realm=\"mcp\", ");
+}
+
+function withBearerRealm(authMiddleware: RequestHandler): RequestHandler {
+  return (req, res, next) => {
+    const originalSetHeader = res.setHeader.bind(res);
+
+    res.setHeader = ((name, value) => {
+      if (name.toLowerCase() === "www-authenticate") {
+        if (typeof value === "string") {
+          return originalSetHeader(name, addBearerRealm(value));
+        }
+
+        if (Array.isArray(value)) {
+          return originalSetHeader(name, value.map((entry) => addBearerRealm(String(entry))));
+        }
+      }
+
+      return originalSetHeader(name, value);
+    }) as typeof res.setHeader;
+
+    const restoreSetHeader = () => {
+      res.setHeader = originalSetHeader;
+    };
+
+    res.once("close", restoreSetHeader);
+    res.once("finish", restoreSetHeader);
+
+    authMiddleware(req, res, next);
+  };
 }
 
 export function createOAuthBroker(config: OAuthAuthConfig): {
@@ -480,11 +523,11 @@ export function createMcpAuthModule(auth: OAuthAuthConfig) {
   }));
 
   return {
-    authMiddleware: requireBearerAuth({
+    authMiddleware: withBearerRealm(requireBearerAuth({
       requiredScopes: requiredAccessScopes,
       resourceMetadataUrl,
       verifier: oauthBroker.provider,
-    }),
+    })),
     getClientCompatibilityProfile: oauthBroker.getClientCompatibilityProfile,
     protectedResourceMetadata: {
       authorization_servers: [oauthBroker.getIssuerUrl().href],
@@ -513,6 +556,7 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
     mcpAuthModule,
     path,
   } = options;
+  const mcpResourceDocumentsPathPrefix = getMcpResourceDocumentsPathPrefix(path);
 
   app.get("/.well-known/oauth-protected-resource", (req, res, next) => {
     const resolvedProfile = getResolvedClientProfile(res.locals);
@@ -558,12 +602,34 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
   });
 
   app.use((req, res, next) => {
-    if (getRequestPath(req) !== path || req.method !== "POST") {
+    const requestPath = getRequestPath(req);
+    const isMcpPostRequest = requestPath === path && req.method === "POST";
+    const isMcpResourceDocumentRequest = requestPath.startsWith(mcpResourceDocumentsPathPrefix);
+
+    if (!isMcpPostRequest && !isMcpResourceDocumentRequest) {
       next();
       return;
     }
 
-    if (isDirectUpstreamBearerToken(req, auth)) {
+    const admission = isMcpPostRequest
+      ? decideAuthAdmission({
+          hasAuthorizationHeader: Boolean(getFirstHeaderValue(req.headers.authorization)),
+          hasCfAccessJwtAssertion: Boolean(getFirstHeaderValue(req.headers["cf-access-jwt-assertion"])),
+          isDirectUpstreamBearerToken: isDirectUpstreamBearerToken(req, auth),
+          method: req.method,
+          mcpPath: path,
+          path: requestPath,
+        })
+      : {
+          action: isDirectUpstreamBearerToken(req, auth)
+            ? "reject_direct_upstream_bearer"
+            : "require_bridge_bearer",
+          reason: isDirectUpstreamBearerToken(req, auth)
+            ? "direct-upstream-bearer"
+            : "protected-mcp-request",
+        };
+
+    if (admission.action === "reject_direct_upstream_bearer") {
       delete req.headers.authorization;
     }
 
@@ -574,7 +640,7 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
 
       logHttpDebug("request.rejected", {
         ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-        reason: res.statusCode === 401 ? "unauthorized" : "forbidden-scope",
+        reason: res.statusCode === 403 ? "forbidden-scope" : admission.reason,
       });
     });
 
