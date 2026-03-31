@@ -302,6 +302,10 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
       res.redirect(302, result.redirectTo);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      logAuthEvent("auth.callback.failed", {
+        errorMessage: message,
+        route: "/oauth/callback",
+      });
       writeOAuthError(res, 400, "invalid_request", message);
     }
   });

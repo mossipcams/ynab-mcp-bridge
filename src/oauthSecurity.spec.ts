@@ -3,9 +3,9 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createServer as createNodeHttpServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { parseAuthConfig } from "./auth2/config/schema.js";
 import { startHttpServer } from "./httpTransport.js";
 import {
-  approveAuthorizationConsent,
   createCloudflareOAuthAuth,
   registerOAuthClient,
   startAuthorization,
@@ -17,6 +17,38 @@ describe("oauth security regressions", () => {
   const ynab = {
     apiToken: "test-token",
   } as const;
+
+  function createAuth2Config(upstream: {
+    authorizationUrl: string;
+    issuer: string;
+    jwksUrl: string;
+    tokenUrl: string;
+  }) {
+    return parseAuthConfig({
+      accessTokenTtlSec: 3600,
+      authCodeTtlSec: 300,
+      callbackPath: "/oauth/callback",
+      clients: [
+        {
+          clientId: "client-a",
+          providerId: "default",
+          redirectUri: "https://claude.ai/oauth/callback",
+          scopes: ["openid", "profile"],
+        },
+      ],
+      provider: {
+        authorizationEndpoint: upstream.authorizationUrl,
+        clientId: "cloudflare-client-id",
+        clientSecret: "cloudflare-client-secret",
+        issuer: upstream.issuer,
+        jwksUri: upstream.jwksUrl,
+        tokenEndpoint: upstream.tokenUrl,
+        usePkce: true,
+      },
+      publicBaseUrl: "http://127.0.0.1",
+      refreshTokenTtlSec: 2_592_000,
+    });
+  }
 
   async function startJwksServer() {
     const { privateKey, publicKey } = await generateKeyPair("RS256");
@@ -92,7 +124,7 @@ describe("oauth security regressions", () => {
     }
   });
 
-  it("keeps consent HTML escaped and locked down", async () => {
+  it("avoids rendering local consent HTML and redirects upstream directly for registered clients", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -102,6 +134,7 @@ describe("oauth security regressions", () => {
         jwksUrl: upstream.jwksUrl,
         tokenUrl: upstream.tokenUrl,
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -127,10 +160,9 @@ describe("oauth security regressions", () => {
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
     const body = await authorizeResponse.text();
 
-    expect(authorizeResponse.status).toBe(200);
-    expect(body).toContain("&lt;script&gt;alert(&#39;boom&#39;)&lt;/script&gt;");
+    expect(authorizeResponse.status).toBe(302);
+    expect(authorizeResponse.headers.get("location")).toContain(upstream.authorizationUrl);
     expect(body).not.toContain("<script>alert('boom')</script>");
-    expect(authorizeResponse.headers.get("content-security-policy")).toContain("default-src 'none'");
   });
 
   it("rejects foreign origins before serving OAuth metadata", async () => {
@@ -138,6 +170,12 @@ describe("oauth security regressions", () => {
     const httpServer = await startHttpServer({
       ynab,
       auth: createCloudflareOAuthAuth({ jwksUrl }),
+      auth2Config: createAuth2Config({
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+        issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+        jwksUrl,
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -167,6 +205,7 @@ describe("oauth security regressions", () => {
         jwksUrl: upstream.jwksUrl,
         tokenUrl: upstream.tokenUrl,
       }),
+      auth2Config: createAuth2Config(upstream),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
       path: "/mcp",
@@ -176,8 +215,7 @@ describe("oauth security regressions", () => {
 
     const registration = await registerOAuthClient(httpServer.url);
     const authorizeResponse = await startAuthorization(httpServer.url, registration.client_id);
-    const consentResponse = await approveAuthorizationConsent(httpServer.url, await authorizeResponse.text());
-    const upstreamState = new URL(consentResponse.headers.get("location")!).searchParams.get("state");
+    const upstreamState = new URL(authorizeResponse.headers.get("location")!).searchParams.get("state");
 
     const firstResponse = await fetch(new URL(
       `/oauth/callback?code=upstream-code-123&state=${encodeURIComponent(upstreamState!)}`,
@@ -212,6 +250,12 @@ describe("oauth security regressions", () => {
       ynab,
       auth: createCloudflareOAuthAuth({
         jwksUrl,
+      }),
+      auth2Config: createAuth2Config({
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+        issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+        jwksUrl,
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
       }),
       allowedOrigins: ["https://claude.ai"],
       host: "127.0.0.1",
