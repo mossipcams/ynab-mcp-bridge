@@ -634,6 +634,11 @@ export function installOAuthRoutes(options: InstallOAuthRoutesOptions) {
             : "protected-mcp-request",
         };
 
+    if (admission.action === "allow_public") {
+      next();
+      return;
+    }
+
     if (admission.action === "reject_direct_upstream_bearer") {
       delete req.headers.authorization;
     }
