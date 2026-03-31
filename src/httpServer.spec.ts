@@ -3491,7 +3491,7 @@ describe("startHttpServer", () => {
     expect(redirectUrl.searchParams.get("state")).toBeTruthy();
   });
 
-  it("skips repeated consent after the same app re-registers with the same redirect URI", async () => {
+  it("does not reuse local approval across re-registered clients even when the redirect URI matches", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const httpServer = await startHttpServer({
       ynab,
@@ -3520,8 +3520,8 @@ describe("startHttpServer", () => {
     const secondRegistration = await registerOAuthClient(httpServer.url);
     const secondAuthorizeResponse = await startAuthorization(httpServer.url, secondRegistration.client_id);
 
-    expect(secondAuthorizeResponse.status).toBe(302);
-    expect(secondAuthorizeResponse.headers.get("location")).toContain("/authorize");
+    expect(secondAuthorizeResponse.status).toBe(200);
+    await expect(secondAuthorizeResponse.text()).resolves.toContain("Approve MCP client access");
   });
 
   it("does not reuse local approval across different redirect URIs on the same client", async () => {

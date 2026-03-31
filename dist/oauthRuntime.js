@@ -11,12 +11,12 @@ import { createOAuthMetadata, getOAuthProtectedResourceMetadataUrl, mcpAuthRoute
 import { getEffectiveOAuthScopes } from "./config.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
+import { getFirstHeaderValue } from "./headerUtils.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { logAppEvent } from "./logger.js";
 import { createOAuthCore } from "./grantLifecycle.js";
 import { createOAuthStore } from "./grantPersistence.js";
 import { getRequestLogFields } from "./requestContext.js";
-import { getFirstHeaderValue } from "./headerUtils.js";
 import { getStringValue, isRecord } from "./typeUtils.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 function getConsentPageHeaders(authorizationUrl) {

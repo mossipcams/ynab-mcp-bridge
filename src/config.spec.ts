@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
 import { readYnabConfig, resolveAppConfig } from "./config.js";
@@ -251,6 +252,62 @@ describe("config", () => {
       MCP_DEPLOYMENT_MODE: "authless",
       YNAB_API_TOKEN: "token-1",
     })).toThrow("MCP_DEPLOYMENT_MODE=authless is incompatible with MCP_AUTH_MODE=oauth.");
+  });
+
+  it("loads strict auth2 config from a file by default", () => {
+    const fixtureDir = mkdtempSync(path.join(tmpdir(), "ynab-auth2-config-"));
+    const configPath = path.join(fixtureDir, "auth2.json");
+
+    writeFileSync(configPath, JSON.stringify({
+      accessTokenTtlSec: 3600,
+      authCodeTtlSec: 300,
+      callbackPath: "/oauth/callback",
+      clients: [
+        {
+          clientId: "client-a",
+          providerId: "default",
+          redirectUri: "https://claude.ai/oauth/callback",
+          scopes: ["openid", "profile"],
+        },
+      ],
+      provider: {
+        authorizationEndpoint: "https://id.example.com/oauth/authorize",
+        clientId: "provider-client-id",
+        clientSecret: "provider-client-secret",
+        issuer: "https://id.example.com",
+        tokenEndpoint: "https://id.example.com/oauth/token",
+        usePkce: true,
+      },
+      publicBaseUrl: "https://mcp.example.com",
+      refreshTokenTtlSec: 2_592_000,
+    }));
+
+    const config = resolveAppConfig([], {
+      MCP_AUTH_MODE: "oauth",
+      MCP_AUTH2_CONFIG_PATH: configPath,
+      MCP_OAUTH_AUDIENCE: "https://mcp.example.com",
+      MCP_OAUTH_AUTHORIZATION_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      MCP_OAUTH_CLIENT_ID: "cloudflare-client-id",
+      MCP_OAUTH_CLIENT_SECRET: "cloudflare-client-secret",
+      MCP_OAUTH_ISSUER: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      MCP_OAUTH_JWKS_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      MCP_OAUTH_STORE_PATH: "/tmp/ynab-mcp-oauth-store.json",
+      MCP_OAUTH_TOKEN_SIGNING_SECRET: "test-signing-secret",
+      MCP_OAUTH_TOKEN_URL: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+      YNAB_API_TOKEN: "token-1",
+    });
+
+    expect(config.auth2Config).toMatchObject({
+      callbackPath: "/oauth/callback",
+      clients: [
+        {
+          clientId: "client-a",
+          redirectUri: "https://claude.ai/oauth/callback",
+        },
+      ],
+      publicBaseUrl: "https://mcp.example.com",
+    });
   });
 
   it("keeps app config focused on composition instead of owning runtime resolution internals", () => {

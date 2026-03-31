@@ -19,12 +19,12 @@ import { decideAuthAdmission } from "./authAdmissionPolicy.js";
 import type { ClientProfileId, DetectedClientProfile } from "./clientProfiles/types.js";
 import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
 import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
+import { getFirstHeaderValue } from "./headerUtils.js";
 import { createLocalTokenService } from "./localTokenService.js";
 import { logAppEvent } from "./logger.js";
 import { createOAuthCore, type PendingConsent } from "./grantLifecycle.js";
 import { createOAuthStore } from "./grantPersistence.js";
 import { getRequestLogFields } from "./requestContext.js";
-import { getFirstHeaderValue } from "./headerUtils.js";
 import { getStringValue, isRecord } from "./typeUtils.js";
 import { createUpstreamOAuthAdapter } from "./upstreamOAuthAdapter.js";
 

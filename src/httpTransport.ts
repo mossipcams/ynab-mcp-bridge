@@ -23,6 +23,8 @@ import {
   type RuntimeAuthConfig,
   type YnabConfig,
 } from "./config.js";
+import type { AuthConfig } from "./auth2/config/schema.js";
+import { installAuthV2Routes } from "./auth2/http/routes.js";
 import { isPublicMcpBootstrapMethod } from "./authAdmissionPolicy.js";
 import { logAppEvent } from "./logger.js";
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
@@ -58,6 +60,7 @@ import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js
 import { createYnabApi } from "./ynabApi.js";
 
 type HttpServerOptions = {
+  auth2Config?: AuthConfig;
   allowedHosts?: string[];
   allowedOrigins?: string[];
   auth?: RuntimeAuthConfig;
@@ -1222,21 +1225,30 @@ export async function startHttpServer(
   });
 
   if (auth.mode === "oauth") {
-    installOAuthRoutes({
-      app,
-      auth,
-      cloudflareCompatibilityMiddleware: cloudflareCompatibilityMiddleware!,
-      getCanonicalOAuthDiscoveryPath,
-      getPersistedOAuthProfileReason,
-      getRequestAuthDebugOptions,
-      getRequestDebugDetails,
-      getRequestPath,
-      isDirectUpstreamBearerToken,
-      jsonParser,
-      logHttpDebug,
-      mcpAuthModule: mcpAuthModule!,
-      path,
-    });
+    if (options.auth2Config) {
+      installAuthV2Routes({
+        app,
+        auth,
+        path,
+        auth2Config: options.auth2Config,
+      });
+    } else {
+      installOAuthRoutes({
+        app,
+        auth,
+        cloudflareCompatibilityMiddleware: cloudflareCompatibilityMiddleware!,
+        getCanonicalOAuthDiscoveryPath,
+        getPersistedOAuthProfileReason,
+        getRequestAuthDebugOptions,
+        getRequestDebugDetails,
+        getRequestPath,
+        isDirectUpstreamBearerToken,
+        jsonParser,
+        logHttpDebug,
+        mcpAuthModule: mcpAuthModule!,
+        path,
+      });
+    }
   }
 
   app.use((req, res, next) => {
