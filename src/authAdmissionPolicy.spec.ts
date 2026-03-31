@@ -108,6 +108,19 @@ describe("auth admission policy", () => {
       action: "reject_direct_upstream_bearer",
       reason: "direct-upstream-bearer",
     });
+
+    expect(decideAuthAdmission({
+      hasAuthorizationHeader: true,
+      hasCfAccessJwtAssertion: false,
+      isDirectUpstreamBearerToken: true,
+      jsonRpcMethod: "tools/list",
+      method: "POST",
+      mcpPath: "/mcp",
+      path: "/mcp",
+    })).toEqual({
+      action: "reject_direct_upstream_bearer",
+      reason: "direct-upstream-bearer",
+    });
   });
 
   it("routes Cloudflare assertions through translation before bearer enforcement", () => {

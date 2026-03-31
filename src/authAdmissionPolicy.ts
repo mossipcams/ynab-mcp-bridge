@@ -100,6 +100,10 @@ export function decideAuthAdmission(input: AuthAdmissionInput): AuthAdmissionDec
     };
   }
 
+  if (input.hasAuthorizationHeader || input.hasCfAccessJwtAssertion) {
+    return getProtectedMcpAdmission(input);
+  }
+
   if (isPublicMcpBootstrapMethod(input.jsonRpcMethod)) {
     return {
       action: "allow_public",
