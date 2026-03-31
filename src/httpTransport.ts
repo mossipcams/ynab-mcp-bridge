@@ -45,7 +45,6 @@ import {
   runWithRequestContext,
 } from "./requestContext.js";
 import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
-import { isPublicMcpBootstrapMethod } from "./authAdmissionPolicy.js";
 import {
   createServer,
   createFastPathToolCallResults,
