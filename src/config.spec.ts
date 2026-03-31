@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
+import { parseAuthConfig } from "./auth2/config/schema.js";
 import { readYnabConfig, resolveAppConfig } from "./config.js";
 
 describe("config", () => {
@@ -310,6 +311,33 @@ describe("config", () => {
     });
   });
 
+  it("ships an example auth2 config file that parses as the canonical oauth path", () => {
+    const exampleConfig = parseAuthConfig(JSON.parse(
+      readFileSync(new URL("../auth2.config.example.json", import.meta.url), "utf8"),
+    ));
+
+    expect(exampleConfig).toMatchObject({
+      callbackPath: "/oauth/callback",
+      clients: [
+        {
+          clientId: "example-claude-client",
+          providerId: "default",
+          redirectUri: "https://claude.ai/api/mcp/auth_callback",
+          scopes: ["openid", "profile"],
+        },
+      ],
+      provider: {
+        authorizationEndpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/example-client-id/authorization",
+        clientId: "example-client-id",
+        clientSecret: "replace-me",
+        issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/example-client-id",
+        tokenEndpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/example-client-id/token",
+        usePkce: true,
+      },
+      publicBaseUrl: "https://mcp.example.com",
+    });
+  });
+
   it("keeps app config focused on composition instead of owning runtime resolution internals", () => {
     const source = readFileSync(new URL("./config.ts", import.meta.url), "utf8");
 
@@ -343,5 +371,7 @@ describe("config", () => {
       "npm run test:ci && npm run test:coverage && npm run lint:deps && npm run lint && npm run typecheck && npm run lint:unused && npm run build",
     );
     expect(readme).toContain("npm run preflight");
+    expect(readme).toContain("auth2.config.example.json");
+    expect(readme).toContain("MCP_AUTH2_CONFIG_PATH");
   });
 });

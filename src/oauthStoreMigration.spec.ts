@@ -10,9 +10,6 @@ describe("oauth store migration", () => {
         resource: "https://mcp.example.com/mcp",
         scopes: ["profile", "openid"],
       }],
-      clientProfiles: {
-        "client-1": "claude",
-      },
       clients: {
         "client-1": {
           client_id: "client-1",
@@ -48,9 +45,6 @@ describe("oauth store migration", () => {
       resource: "https://mcp.example.com/mcp",
       scopes: ["openid", "profile"],
     }]);
-    expect(loaded.clientProfiles).toEqual({
-      "client-1": "claude",
-    });
     expect(loaded.clients["client-1"]?.client_name).toBe("Claude Web");
     expect(loaded.grants["grant-1"]).toMatchObject({
       clientId: "client-1",

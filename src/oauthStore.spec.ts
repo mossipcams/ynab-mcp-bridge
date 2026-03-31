@@ -342,7 +342,7 @@ describe("oauth store", () => {
     expect(Object.keys(persistedState.grants)).toHaveLength(4);
   });
 
-  it("persists compatibility profiles for oauth clients and grants across reload", async () => {
+  it("drops compatibility profile metadata for oauth clients and grants across reload", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-oauth-store-"));
     const storePath = path.join(tempDir, "oauth-store.json");
     cleanups.push(async () => {
@@ -359,16 +359,14 @@ describe("oauth store", () => {
       response_types: ["code"],
       token_endpoint_auth_method: "none",
     });
-    store.saveClientCompatibilityProfile("client-1", "chatgpt");
 
-    const grant: OAuthGrant & { compatibilityProfileId: "chatgpt" } = {
+    const grant: OAuthGrant = {
       authorizationCode: {
         code: "code-1",
         expiresAt: Date.now() + 60_000,
       },
       clientId: "client-1",
       codeChallenge: "challenge",
-      compatibilityProfileId: "chatgpt",
       grantId: "grant-1",
       principalId: "client-1",
       redirectUri: "https://chatgpt.com/oauth/callback",
@@ -385,23 +383,14 @@ describe("oauth store", () => {
 
     const reloadedStore = createOAuthStore(storePath);
 
-    expect(reloadedStore.getClientCompatibilityProfile("client-1")).toBe("chatgpt");
-    expect(reloadedStore.getGrant("grant-1")).toMatchObject({
-      compatibilityProfileId: "chatgpt",
-    });
-    expect(reloadedStore.getAuthorizationCodeGrant("code-1")).toMatchObject({
-      compatibilityProfileId: "chatgpt",
-    });
+    expect(reloadedStore.getGrant("grant-1")).not.toHaveProperty("compatibilityProfileId");
+    expect(reloadedStore.getAuthorizationCodeGrant("code-1")).not.toHaveProperty("compatibilityProfileId");
 
     const persistedState = JSON.parse(await readFile(storePath, "utf8")) as {
-      clientProfiles?: Record<string, unknown>;
       grants: Record<string, { compatibilityProfileId?: unknown }>;
     };
 
-    expect(persistedState.clientProfiles).toEqual({
-      "client-1": "chatgpt",
-    });
-    expect(persistedState.grants["grant-1"]?.compatibilityProfileId).toBe("chatgpt");
+    expect(persistedState.grants["grant-1"]?.compatibilityProfileId).toBeUndefined();
   });
 
   it("does not persist upstream access tokens when a refresh token is available", async () => {

@@ -152,4 +152,55 @@ describe("auth2 protected MCP resource", () => {
 
     expect(authorized.status).toBe(200);
   });
+
+  it("serves canonical protected-resource metadata from auth2", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const server = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      auth2Config: parseAuthConfig({
+        accessTokenTtlSec: 3600,
+        authCodeTtlSec: 300,
+        callbackPath: "/oauth/callback",
+        clients: [
+          {
+            clientId: "client-a",
+            providerId: "default",
+            redirectUri: "https://claude.ai/oauth/callback",
+            scopes: ["openid", "profile"],
+          },
+        ],
+        provider: {
+          authorizationEndpoint: upstream.authorizationUrl,
+          clientId: "cloudflare-client-id",
+          clientSecret: "cloudflare-client-secret",
+          issuer: upstream.issuer,
+          jwksUri: upstream.jwksUrl,
+          tokenEndpoint: upstream.tokenUrl,
+          usePkce: true,
+        },
+        publicBaseUrl: "http://127.0.0.1",
+        refreshTokenTtlSec: 2_592_000,
+      }),
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+      ynab,
+    });
+    cleanups.push(() => server.close());
+
+    const response = await fetch(new URL("/.well-known/oauth-protected-resource/mcp", server.url));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      authorization_servers: ["https://mcp.example.com/"],
+      resource: "https://mcp.example.com/mcp",
+      resource_name: "YNAB MCP Bridge",
+    });
+  });
 });

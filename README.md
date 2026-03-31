@@ -107,9 +107,12 @@ MCP_OAUTH_CLOUDFLARE_DOMAIN=example.cloudflareaccess.com \
 MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
 MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
 MCP_OAUTH_SCOPES=openid,profile \
+MCP_AUTH2_CONFIG_PATH=./auth2.config.example.json \
 YNAB_API_TOKEN=your-token \
 npm run start:http
 ```
+
+The checked-in [auth2.config.example.json](/Users/matt/Desktop/Projects/ynab-mcp-bridge/auth2.config.example.json) shows the canonical auth2 file shape loaded through `MCP_AUTH2_CONFIG_PATH`. Copy it to a private path, replace the placeholder provider values, and keep `/oauth/callback` as the callback path.
 
 ## Environment Variables
 

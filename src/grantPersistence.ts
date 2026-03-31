@@ -1,5 +1,5 @@
 /**
- * Owns: persisted approvals/clients/client-profiles/grants state, legacy migration, pruning, and atomic file persistence.
+ * Owns: persisted approvals/clients/grants state, legacy migration, pruning, and atomic file persistence.
  * Inputs/dependencies: store path plus grant normalization helpers.
  * Outputs/contracts: createOAuthStore(...) and the persistence contract consumed by grant lifecycle and the OAuth runtime.
  */
@@ -7,8 +7,6 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
-
-import type { ClientProfileId } from "./clientProfiles/types.js";
 import {
   getGrantExpiry,
   hasActiveGrantStep,
@@ -66,7 +64,6 @@ type LegacyPersistedOAuthState = {
 export type PersistedOAuthState = {
   approvals: ApprovalRecord[];
   clients: Record<string, OAuthClientInformationFull>;
-  clientProfiles: Record<string, ClientProfileId>;
   grants: Record<string, OAuthGrant>;
   version: 2;
 };
@@ -169,7 +166,6 @@ function createEmptyState(): PersistedOAuthState {
   return {
     approvals: [],
     clients: {},
-    clientProfiles: {},
     grants: {},
     version: 2,
   };
@@ -197,20 +193,6 @@ function parseClients(value: unknown) {
   );
 }
 
-function parseClientProfiles(value: unknown) {
-  if (!value || typeof value !== "object") {
-    return {};
-  }
-
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter((entry): entry is [string, ClientProfileId] => (
-        typeof entry[0] === "string" &&
-        (entry[1] === "chatgpt" || entry[1] === "claude" || entry[1] === "codex" || entry[1] === "generic")
-      )),
-  );
-}
-
 function parseGrantRecord(value: unknown): OAuthGrant | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -229,14 +211,6 @@ function parseGrantRecord(value: unknown): OAuthGrant | undefined {
 
   return normalizeGrant({
     ...(typeof value["clientName"] === "string" ? { clientName: value["clientName"] } : {}),
-    ...(
-      value["compatibilityProfileId"] === "chatgpt" ||
-      value["compatibilityProfileId"] === "claude" ||
-      value["compatibilityProfileId"] === "codex" ||
-      value["compatibilityProfileId"] === "generic"
-        ? { compatibilityProfileId: value["compatibilityProfileId"] }
-        : {}
-    ),
     ...(isAuthorizationCodeStep(value["authorizationCode"]) ? { authorizationCode: value["authorizationCode"] } : {}),
     ...(isConsentStep(value["consent"]) ? { consent: value["consent"] } : {}),
     ...(isPendingAuthorizationStep(value["pendingAuthorization"]) ? { pendingAuthorization: value["pendingAuthorization"] } : {}),
@@ -429,7 +403,6 @@ function migrateLegacyState(parsed: LegacyPersistedOAuthState): PersistedOAuthSt
   return {
     approvals: parseApprovals(parsed.approvals),
     clients: parseClients(parsed.clients),
-    clientProfiles: {},
     grants,
     version: 2,
   };
@@ -460,7 +433,6 @@ export function loadPersistedOAuthState(parsed: unknown): PersistedOAuthState {
     return {
       approvals: parseApprovals(parsed["approvals"]),
       clients: parseClients(parsed["clients"]),
-      clientProfiles: parseClientProfiles(parsed["clientProfiles"]),
       grants: parseGrants(parsed["grants"]),
       version: 2,
     };
@@ -653,15 +625,17 @@ export function createRefreshTokenCompatibilityGrant(
   });
 }
 
-function createPersistedStateSnapshot(state: PersistedOAuthState): PersistedOAuthState {
+function createPersistedStateSnapshot(state: PersistedOAuthState) {
   return {
-    ...state,
+    approvals: state.approvals,
+    clients: state.clients,
     grants: Object.fromEntries(
       Object.entries(state.grants).map(([grantId, grant]) => [grantId, {
         ...grant,
         upstreamTokens: sanitizePersistedUpstreamTokens(grant.upstreamTokens),
       } satisfies OAuthGrant]),
     ),
+    version: state.version,
   };
 }
 
@@ -767,9 +741,6 @@ export function createOAuthStore(storePath: string | undefined) {
     getClient(clientId: string) {
       return state.clients[clientId];
     },
-    getClientCompatibilityProfile(clientId: string) {
-      return state.clientProfiles[clientId];
-    },
     getGrant(grantId: string) {
       const grant = state.grants[grantId];
 
@@ -826,16 +797,6 @@ export function createOAuthStore(storePath: string | undefined) {
         clients: {
           ...state.clients,
           [client.client_id]: client,
-        },
-      };
-      persist();
-    },
-    saveClientCompatibilityProfile(clientId: string, profileId: ClientProfileId) {
-      state = {
-        ...state,
-        clientProfiles: {
-          ...state.clientProfiles,
-          [clientId]: profileId,
         },
       };
       persist();

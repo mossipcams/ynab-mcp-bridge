@@ -19,8 +19,8 @@ const moduleContracts: ModuleContract[] = [
     path: "./httpTransport.ts",
   },
   {
-    exports: ["createMcpAuthModule", "createOAuthBroker"],
-    path: "./oauthRuntime.ts",
+    exports: ["installAuthV2Routes"],
+    path: "./auth2/http/routes.ts",
   },
   {
     exports: ["createOAuthStore"],

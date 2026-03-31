@@ -1,13 +1,13 @@
 import crypto from "node:crypto";
 
-import type express from "express";
+import express from "express";
 
 import { createAuthCore } from "../core/authCore.js";
 import { createPkcePair } from "../core/pkce.js";
 import type { AuthConfig } from "../config/schema.js";
 import { logAuthEvent } from "../logging/authEvents.js";
 import { createProviderAdapter } from "../provider/providerAdapter.js";
-import { createInMemoryAuthStore } from "../store/authStore.js";
+import { createFileAuthStore, createInMemoryAuthStore, type AuthStore } from "../store/authStore.js";
 import type { RuntimeAuthConfig } from "../../config.js";
 
 type InstallAuthV2RoutesContext = {
@@ -17,9 +17,37 @@ type InstallAuthV2RoutesContext = {
   path?: string;
 };
 
+function getIssuerUrl(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
+  return new URL("/", new URL(auth.publicUrl).origin).href;
+}
+
+function getSupportedScopes(config: AuthConfig) {
+  return Array.from(new Set(
+    config.clients.flatMap((client) => client.scopes),
+  )).sort();
+}
+
+function getMetadataEndpoints(auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
+  const origin = new URL(auth.publicUrl).origin;
+
+  return {
+    authorizationEndpoint: new URL("/authorize", origin).href,
+    issuer: getIssuerUrl(auth),
+    protectedResourceMetadataUrl: new URL(`/.well-known/oauth-protected-resource${new URL(auth.publicUrl).pathname}`, origin).href,
+    registrationEndpoint: new URL("/register", origin).href,
+    tokenEndpoint: new URL("/token", origin).href,
+  };
+}
+
 function getSingleString(value: unknown) {
   return typeof value === "string" && value.length > 0
     ? value
+    : undefined;
+}
+
+function getStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
     : undefined;
 }
 
@@ -35,8 +63,74 @@ function writeOAuthError(
   });
 }
 
-function createRouteCore(config: AuthConfig) {
-  const store = createInMemoryAuthStore();
+function createClientId() {
+  return crypto.randomBytes(16).toString("base64url");
+}
+
+function registerClient(config: AuthConfig, store: AuthStore, body: unknown) {
+  const payload = typeof body === "object" && body !== null
+    ? body as Record<string, unknown>
+    : {};
+  const redirectUris = getStringArray(payload["redirect_uris"]);
+  const grantTypes = getStringArray(payload["grant_types"]);
+  const responseTypes = getStringArray(payload["response_types"]);
+  const tokenEndpointAuthMethod = getSingleString(payload["token_endpoint_auth_method"]);
+  const clientName = getSingleString(payload["client_name"]);
+
+  if (!redirectUris || redirectUris.length !== 1) {
+    throw new Error("redirect_uris must contain exactly one redirect URI.");
+  }
+
+  if (!grantTypes?.includes("authorization_code")) {
+    throw new Error("grant_types must include authorization_code.");
+  }
+
+  if (!responseTypes?.includes("code")) {
+    throw new Error("response_types must include code.");
+  }
+
+  if (tokenEndpointAuthMethod !== "none") {
+    throw new Error("token_endpoint_auth_method must be none.");
+  }
+
+  const redirectUri = redirectUris[0];
+
+  if (!redirectUri) {
+    throw new Error("redirect_uris must contain exactly one redirect URI.");
+  }
+
+  const clientId = createClientId();
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const providerId = config.clients[0]?.providerId ?? "default";
+  const scopes = getSupportedScopes(config);
+
+  store.saveRegisteredClient({
+    clientId,
+    clientIdIssuedAt: issuedAt,
+    ...(clientName ? { clientName } : {}),
+    grantTypes,
+    providerId,
+    redirectUri,
+    responseTypes,
+    scopes,
+    tokenEndpointAuthMethod: "none",
+  });
+
+  return {
+    client_id: clientId,
+    client_id_issued_at: issuedAt,
+    ...(clientName ? { client_name: clientName } : {}),
+    grant_types: grantTypes,
+    redirect_uris: redirectUris,
+    response_types: responseTypes,
+    token_endpoint_auth_method: tokenEndpointAuthMethod,
+  };
+}
+
+function createRouteCore(config: AuthConfig, auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
+  const store = auth.storePath
+    ? createFileAuthStore(auth.storePath)
+    : createInMemoryAuthStore();
   const provider = createProviderAdapter(config, fetch);
   const core = createAuthCore({
     config,
@@ -72,8 +166,61 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
     throw new Error("auth2 route installation requires the MCP path.");
   }
 
+  const auth = context.auth;
+  const auth2Config = context.auth2Config;
   const protectedPathPrefix = `${context.path.replace(/\/$/, "")}/resources/`;
-  const { core, store } = createRouteCore(context.auth2Config);
+  const { core, store } = createRouteCore(auth2Config, auth);
+  const metadata = getMetadataEndpoints(auth);
+  const scopesSupported = getSupportedScopes(auth2Config);
+
+  context.app.get("/.well-known/oauth-authorization-server", (_req, res) => {
+    res.status(200).json({
+      authorization_endpoint: metadata.authorizationEndpoint,
+      code_challenge_methods_supported: ["S256"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
+      issuer: metadata.issuer,
+      registration_endpoint: metadata.registrationEndpoint,
+      response_types_supported: ["code"],
+      scopes_supported: scopesSupported,
+      token_endpoint: metadata.tokenEndpoint,
+      token_endpoint_auth_methods_supported: ["none"],
+    });
+  });
+
+  context.app.get("/.well-known/openid-configuration", (_req, res) => {
+    res.status(200).json({
+      authorization_endpoint: metadata.authorizationEndpoint,
+      code_challenge_methods_supported: ["S256"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
+      issuer: metadata.issuer,
+      registration_endpoint: metadata.registrationEndpoint,
+      response_types_supported: ["code"],
+      scopes_supported: scopesSupported,
+      subject_types_supported: ["public"],
+      token_endpoint: metadata.tokenEndpoint,
+      token_endpoint_auth_methods_supported: ["none"],
+    });
+  });
+
+  context.app.get(`/.well-known/oauth-protected-resource${context.path}`, (_req, res) => {
+    res.status(200).json({
+      authorization_servers: [metadata.issuer],
+      bearer_methods_supported: ["header"],
+      resource: auth.publicUrl,
+      resource_name: "YNAB MCP Bridge",
+      scopes_supported: scopesSupported,
+    });
+  });
+
+  context.app.post("/register", express.json(), (req, res) => {
+    try {
+      const registeredClient = registerClient(auth2Config, store, req.body);
+      res.status(201).json(registeredClient);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      writeOAuthError(res, 400, "invalid_client_metadata", message);
+    }
+  });
 
   context.app.use((req, res, next) => {
     const isProtectedRequest = req.path === context.path || req.path.startsWith(protectedPathPrefix);
@@ -86,7 +233,10 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
     const authorization = req.headers.authorization;
 
     if (!authorization?.startsWith("Bearer ")) {
-      res.status(401).setHeader("www-authenticate", 'Bearer realm="mcp"').json({
+      res.status(401).setHeader(
+        "www-authenticate",
+        `Bearer realm="mcp", resource_metadata="${metadata.protectedResourceMetadataUrl}"`,
+      ).json({
         error: "invalid_token",
         error_description: "Missing bearer token.",
       });
@@ -97,7 +247,10 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
     const accessToken = store.getAccessToken(token);
 
     if (!accessToken || accessToken.expiresAt <= Date.now()) {
-      res.status(401).setHeader("www-authenticate", 'Bearer realm="mcp"').json({
+      res.status(401).setHeader(
+        "www-authenticate",
+        `Bearer realm="mcp", resource_metadata="${metadata.protectedResourceMetadataUrl}"`,
+      ).json({
         error: "invalid_token",
         error_description: "Bearer token is invalid or expired.",
       });
@@ -155,6 +308,11 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
 
   context.app.post("/token", async (req, res) => {
     try {
+      if (typeof req.headers.authorization === "string" || getSingleString(req.body?.["client_secret"])) {
+        writeOAuthError(res, 400, "invalid_client", "Public clients must not use token endpoint authentication.");
+        return;
+      }
+
       const grantType = getSingleString(req.body?.["grant_type"]);
       const requestedScopes = getSingleString(req.body?.["scope"])?.split(/\s+/).filter(Boolean);
 

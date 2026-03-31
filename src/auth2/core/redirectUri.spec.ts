@@ -5,6 +5,7 @@ import {
   findClientConfig,
 } from "./redirectUri.js";
 import type { AuthConfig } from "../config/schema.js";
+import { createInMemoryAuthStore } from "../store/authStore.js";
 
 function createConfig(): AuthConfig {
   return {
@@ -39,7 +40,7 @@ function createConfig(): AuthConfig {
 
 describe("redirect URI matching", () => {
   it("accepts an exact registered redirect URI", () => {
-    const client = findClientConfig(createConfig(), "client-a");
+    const client = findClientConfig(createConfig(), createInMemoryAuthStore(), "client-a");
 
     expect(client.redirectUri).toBe("https://claude.ai/oauth/callback");
     expect(assertExactRedirectUri(client, "https://claude.ai/oauth/callback")).toEqual({
@@ -51,7 +52,7 @@ describe("redirect URI matching", () => {
   });
 
   it("rejects a redirect URI with a different path", () => {
-    const client = findClientConfig(createConfig(), "client-a");
+    const client = findClientConfig(createConfig(), createInMemoryAuthStore(), "client-a");
 
     expect(() => assertExactRedirectUri(client, "https://claude.ai/api/mcp/auth_callback")).toThrow(
       "redirect_uri does not match the registered client redirect URI.",
@@ -59,7 +60,7 @@ describe("redirect URI matching", () => {
   });
 
   it("rejects a redirect URI with a trailing slash difference", () => {
-    const client = findClientConfig(createConfig(), "client-a");
+    const client = findClientConfig(createConfig(), createInMemoryAuthStore(), "client-a");
 
     expect(() => assertExactRedirectUri(client, "https://claude.ai/oauth/callback/")).toThrow(
       "redirect_uri does not match the registered client redirect URI.",
@@ -67,7 +68,7 @@ describe("redirect URI matching", () => {
   });
 
   it("rejects a redirect URI with a query string difference", () => {
-    const client = findClientConfig(createConfig(), "client-b");
+    const client = findClientConfig(createConfig(), createInMemoryAuthStore(), "client-b");
 
     expect(() => assertExactRedirectUri(client, "https://chatgpt.com/oauth/callback?foo=bar")).toThrow(
       "redirect_uri does not match the registered client redirect URI.",
@@ -75,7 +76,7 @@ describe("redirect URI matching", () => {
   });
 
   it("rejects an unknown client id", () => {
-    expect(() => findClientConfig(createConfig(), "missing-client")).toThrow(
+    expect(() => findClientConfig(createConfig(), createInMemoryAuthStore(), "missing-client")).toThrow(
       "Unknown OAuth client_id: missing-client",
     );
   });
