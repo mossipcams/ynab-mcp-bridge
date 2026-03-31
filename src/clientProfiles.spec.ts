@@ -82,7 +82,7 @@ describe("client profiles", () => {
     })).toBe(false);
   });
 
-  it("detects Claude setup requests from browser-originated traffic", () => {
+  it("keeps browser-originated traffic generic until stronger Claude signals appear", () => {
     expect(detectClientProfile({
       headers: {
         origin: "https://claude.ai",
@@ -90,8 +90,8 @@ describe("client profiles", () => {
       method: "POST",
       path: "/mcp",
     })).toEqual({
-      profileId: "claude",
-      reason: "origin:claude.ai",
+      profileId: "generic",
+      reason: "fallback:generic",
     });
   });
 
@@ -298,7 +298,7 @@ describe("client profiles", () => {
       },
       method: "POST",
       path: "/mcp",
-    })).toBe(true);
+    })).toBe(false);
   });
 
   it("exposes a Codex profile that tolerates extra OAuth discovery probes safely", () => {
@@ -337,7 +337,7 @@ describe("client profiles", () => {
     })).toBe(true);
   });
 
-  it("keeps the documented pre-auth precedence when multiple profiles could match", () => {
+  it("lets stronger route-specific probes win when Claude is not yet identifiable", () => {
     expect(detectClientProfile({
       headers: {
         origin: "https://claude.ai",
@@ -345,8 +345,8 @@ describe("client profiles", () => {
       method: "GET",
       path: "/.well-known/oauth-authorization-server/sse",
     })).toEqual({
-      profileId: "claude",
-      reason: "origin:claude.ai",
+      profileId: "codex",
+      reason: "path:codex-oauth-probe",
     });
   });
 
