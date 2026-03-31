@@ -45,6 +45,7 @@ import {
   runWithRequestContext,
 } from "./requestContext.js";
 import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
+import { isPublicMcpBootstrapMethod } from "./authAdmissionPolicy.js";
 import {
   createServer,
   createFastPathToolCallResults,
@@ -934,6 +935,18 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
           return;
         }
 
+        if (jsonRpcMethod === "notifications/initialized") {
+          logHttpDebug("transport.handoff", {
+            ...getRequestDebugDetails(req, authDebugOptions),
+            ...getJsonRpcDebugDetails(parsedBody),
+            cleanup: false,
+            profileId: resolvedProfile?.profileId,
+            profileReason: resolvedProfile?.reason,
+          });
+          res.status(202).end();
+          return;
+        }
+
         if (jsonRpcMethod === "resources/list" && fastPathCache.resourcesListResult) {
           logHttpDebug("transport.handoff", {
             ...getRequestDebugDetails(req, authDebugOptions),
@@ -952,17 +965,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
           return;
         }
 
-        if (jsonRpcMethod === "notifications/initialized") {
-          logHttpDebug("transport.handoff", {
-            ...getRequestDebugDetails(req, authDebugOptions),
-            ...getJsonRpcDebugDetails(parsedBody),
-            cleanup: false,
-            profileId: resolvedProfile?.profileId,
-            profileReason: resolvedProfile?.reason,
-          });
-          res.status(202).end();
-          return;
-        }
       }
 
       if (authDebugOptions.authMode === "none" && !getSessionId(req) && fastPathCache && jsonRpcMethod === "tools/call") {
