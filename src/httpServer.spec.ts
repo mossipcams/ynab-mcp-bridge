@@ -2914,6 +2914,22 @@ describe("startHttpServer", () => {
 
     expect(initializeResponse.status).toBe(200);
 
+    const initializedResponse = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "User-Agent": "python-httpx/0.28.1",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+      }),
+    });
+
+    expect(initializedResponse.status).toBe(202);
+
     const resourcesListResponse = await fetch(httpServer.url, {
       method: "POST",
       headers: {
