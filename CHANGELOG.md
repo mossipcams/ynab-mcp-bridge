@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.13](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.12...ynab-mcp-bridge-v0.15.13) (2026-03-31)
+
+
+### Bug Fixes
+
+* require auth for Claude discovery bootstrap ([#220](https://github.com/mossipcams/ynab-mcp-bridge/issues/220)) ([5fe8049](https://github.com/mossipcams/ynab-mcp-bridge/commit/5fe8049a7061806958dbdd4a919a4b0878a3647b))
+
 ## [0.15.12](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.11...ynab-mcp-bridge-v0.15.12) (2026-03-31)
 
 
