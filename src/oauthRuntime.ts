@@ -146,7 +146,7 @@ function getBodyStringValue(body: unknown, key: string) {
 function isUnauthenticatedBootstrapMethod(body: unknown) {
   const method = getBodyStringValue(body, "method");
 
-  return method === "initialize" || method === "tools/list";
+  return method === "initialize" || method === "tools/list" || method === "resources/list";
 }
 
 function addBearerRealm(wwwAuthenticate: string) {
