@@ -126,8 +126,14 @@ function getNormalizedUserAgent(req) {
 function hasHeaderValue(value) {
     return Boolean(getFirstHeaderValue(value));
 }
+function hasRequestAuth(req) {
+    return "auth" in req;
+}
+function getRequestAuth(req) {
+    return hasRequestAuth(req) ? req.auth : undefined;
+}
 function getRequestDebugDetails(req, options = {}) {
-    const requestAuth = req.auth;
+    const requestAuth = getRequestAuth(req);
     const authSubject = requestAuth?.extra?.["subject"];
     return {
         ...getRequestLogFields(),
@@ -476,7 +482,7 @@ export function installMcpPostRoute(options) {
             const isSessionlessPublicBootstrapRequest = !getSessionId(req) &&
                 typeof jsonRpcMethod === "string" &&
                 isPublicMcpBootstrapMethod(jsonRpcMethod) &&
-                (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !req.auth));
+                (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !getRequestAuth(req)));
             if (isSessionlessPublicBootstrapRequest && fastPathCache && typeof jsonRpcMethod === "string") {
                 if (jsonRpcMethod === "initialize") {
                     logHttpDebug("transport.handoff", {

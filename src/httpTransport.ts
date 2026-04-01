@@ -102,7 +102,6 @@ type RequestResolution =
     };
 
 type HttpDebugDetails = Record<string, unknown>;
-type RequestWithAuth = Request & { auth?: AuthInfo };
 
 type InstallMcpPostRouteOptions = {
   app: express.Express;
@@ -266,6 +265,14 @@ function hasHeaderValue(value: string | string[] | undefined) {
   return Boolean(getFirstHeaderValue(value));
 }
 
+function hasRequestAuth(req: Request): req is Request & { auth?: AuthInfo } {
+  return "auth" in req;
+}
+
+function getRequestAuth(req: Request): AuthInfo | undefined {
+  return hasRequestAuth(req) ? req.auth : undefined;
+}
+
 function getRequestDebugDetails(
   req: Request,
   options: {
@@ -273,7 +280,7 @@ function getRequestDebugDetails(
     authRequired?: boolean;
   } = {},
 ): HttpDebugDetails {
-  const requestAuth = (req as RequestWithAuth).auth;
+  const requestAuth = getRequestAuth(req);
   const authSubject = requestAuth?.extra?.["subject"];
   return {
     ...getRequestLogFields(),
@@ -765,7 +772,7 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
       const isSessionlessPublicBootstrapRequest = !getSessionId(req) &&
         typeof jsonRpcMethod === "string" &&
         isPublicMcpBootstrapMethod(jsonRpcMethod) &&
-        (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !(req as RequestWithAuth).auth));
+        (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !getRequestAuth(req)));
 
       if (isSessionlessPublicBootstrapRequest && fastPathCache && typeof jsonRpcMethod === "string") {
         if (jsonRpcMethod === "initialize") {

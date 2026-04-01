@@ -152,6 +152,16 @@ describe("duplicate code remediation", () => {
     expect(httpTransportSource).toContain('from "./serverRuntime.js"');
   });
 
+  it("keeps release metadata aligned with the current mainline version after conflict resolution", () => {
+    const packageSource = readFileSync(path.join(projectRoot, "package.json"), "utf8");
+    const manifestSource = readFileSync(path.join(projectRoot, ".release-please-manifest.json"), "utf8");
+    const changelogSource = readFileSync(path.join(projectRoot, "CHANGELOG.md"), "utf8");
+
+    expect(packageSource).toContain('"version": "0.15.18"');
+    expect(manifestSource).toContain('"." : "0.15.18"'.replace(" ", ""));
+    expect(changelogSource).toContain("## [0.15.18]");
+  });
+
   it("targets the superseded HTTP spread-out runtime helpers for deletion", () => {
     const httpTransportSource = readFileSync(path.join(projectRoot, "src", "httpTransport.ts"), "utf8");
 
