@@ -41,6 +41,8 @@ Build artifact policy:
 
 - `dist/` remains tracked in this repository for now because the published package and CLI entrypoints resolve from built JavaScript under `dist/`.
 - When a source change affects runtime output, keep the generated `dist/` artifacts in sync with the source change rather than treating them as disposable local-only files.
+- CI enforces that policy with `verify:build-sync` after `npm run build`, and it also runs `verify:pack` to smoke-test the packed npm artifact before treating a build as release-ready.
+- When CI passes on the exact release commit and your dependency lockfile is already installed locally, pulling the release should be a restart-first path rather than a rebuild-first path.
 
 ### 2. Run the default local HTTP server
 

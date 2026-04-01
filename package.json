@@ -42,6 +42,8 @@
     "reliability:load": "npm run build && node dist/reliabilityLoadCli.js",
     "debug": "npm run build && npx @modelcontextprotocol/inspector dist/index.js",
     "tech-debt:report": "node ./scripts/tech-debt-report.mjs",
+    "verify:build-sync": "git diff --exit-code -- dist",
+    "verify:pack": "node ./scripts/ci-smoke-pack.mjs",
     "test": "vitest",
     "test:ci": "mkdir -p artifacts/test-results && vitest run --reporter=default --reporter=junit --outputFile.junit=./artifacts/test-results/vitest-junit.xml",
     "test:watch": "vitest watch",
