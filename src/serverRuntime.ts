@@ -244,7 +244,7 @@ function getDiscoveryResourceBaseUrl(baseUrl: string | undefined): string | unde
     : `${baseUrl}/`;
 }
 
-function getToolCompatibilityDiscoveryUri(toolName: string, options: ServerRuntimeOptions = {}) {
+function getToolCompatibilityDiscoveryUri(toolName: string, options: ServerRuntimeOptions = {}): string | undefined {
   const discoveryResourceBaseUrl = getDiscoveryResourceBaseUrl(options.discoveryResourceBaseUrl);
 
   if (!discoveryResourceBaseUrl) {
