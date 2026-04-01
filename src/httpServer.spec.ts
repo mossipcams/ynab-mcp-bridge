@@ -1882,7 +1882,7 @@ describe("startHttpServer", () => {
         resources: expect.arrayContaining([
           expect.objectContaining({
             name: "ynab_get_mcp_version",
-            uri: "https://mcp.example.com/mcp/resources/ynab_get_mcp_version",
+            uri: "ynab-tool://ynab_get_mcp_version",
           }),
         ]),
       },
@@ -3135,10 +3135,20 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(resourcesListResponse.status).toBe(401);
-    expect(resourcesListResponse.headers.get("www-authenticate")).toContain(
-      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(resourcesListResponse.status).toBe(200);
+    expect(resourcesListResponse.headers.get("www-authenticate")).toBeNull();
+    await expect(resourcesListResponse.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 2,
+      result: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_get_mcp_version",
+            uri: "https://mcp.example.com/mcp/resources/ynab_get_mcp_version",
+          }),
+        ]),
+      },
+    });
 
     const challengeResponse = await fetch(httpServer.url, {
       method: "POST",
