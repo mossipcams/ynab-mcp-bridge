@@ -2936,7 +2936,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("returns a bearer challenge for unauthenticated resources/list requests on the MCP endpoint in oauth mode", async () => {
+  it("allows unauthenticated resources/list requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2967,13 +2967,15 @@ describe("startHttpServer", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("www-authenticate")).toBeNull();
     await expect(response.json()).resolves.toMatchObject({
       jsonrpc: "2.0",
       id: 1,
       result: {
         resources: expect.arrayContaining([
           expect.objectContaining({
-            name: "ynab_list_accounts",
+            name: "ynab_get_mcp_version",
+            uri: "https://mcp.example.com/mcp/resources/ynab_get_mcp_version",
           }),
         ]),
       },
@@ -3134,13 +3136,15 @@ describe("startHttpServer", () => {
     });
 
     expect(resourcesListResponse.status).toBe(200);
+    expect(resourcesListResponse.headers.get("www-authenticate")).toBeNull();
     await expect(resourcesListResponse.json()).resolves.toMatchObject({
       jsonrpc: "2.0",
       id: 2,
       result: {
         resources: expect.arrayContaining([
           expect.objectContaining({
-            name: "ynab_list_accounts",
+            name: "ynab_get_mcp_version",
+            uri: "https://mcp.example.com/mcp/resources/ynab_get_mcp_version",
           }),
         ]),
       },

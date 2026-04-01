@@ -8,7 +8,7 @@ import { logAppEvent } from "./logger.js";
 import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import { createRequestContext, getCorrelationHeaderName, getRequestLogFields, hasToolCallStarted, runWithRequestContext, } from "./requestContext.js";
-import { createServer, createFastPathToolCallResults, getDiscoveryResourceDocument, getDiscoveryResourceSummaries, getInitializeResult, getResourcesListResult, getToolsListResult, } from "./serverRuntime.js";
+import { createDirectToolCallExecutor, createServer, createFastPathToolCallResults, getDiscoveryResourceDocument, getDiscoveryResourceSummaries, getInitializeResult, getResourcesListResult, getToolsListResult, } from "./serverRuntime.js";
 import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 import { createYnabApi } from "./ynabApi.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
@@ -449,7 +449,7 @@ function allowsOpaqueNullOrigin(req, authMode) {
         getRequestPath(req) === "/authorize/consent";
 }
 export function installMcpPostRoute(options) {
-    const { app, createManagedRequest, fastPathResponses, getJsonRpcDebugDetails, getRequestAuthDebugOptions, getRequestDebugDetails, getRequestPath, getToolCallName, logHttpDebug, path, resolveRequest, writeMethodNotAllowed, writeRequestResolution, } = options;
+    const { app, createManagedRequest, executeDirectToolCall, fastPathResponses, getJsonRpcDebugDetails, getRequestAuthDebugOptions, getRequestDebugDetails, getRequestPath, getToolCallArguments, getToolCallName, logHttpDebug, path, resolveRequest, writeMethodNotAllowed, writeRequestResolution, } = options;
     app.use(async (req, res, next) => {
         if (getRequestPath(req) !== path) {
             next();
@@ -539,6 +539,27 @@ export function installMcpPostRoute(options) {
                     return;
                 }
             }
+            if (authDebugOptions.authMode === "oauth" &&
+                !getSessionId(req) &&
+                executeDirectToolCall &&
+                jsonRpcMethod === "tools/call" &&
+                req.headers.authorization?.startsWith("Bearer ")) {
+                const toolName = getToolCallName(parsedBody);
+                const toolArguments = getToolCallArguments(parsedBody);
+                const toolCallParams = isRecord(parsedBody)
+                    ? getRecordValueIfObject(parsedBody, "params")
+                    : undefined;
+                if (toolName && !("task" in (toolCallParams ?? {}))) {
+                    logHttpDebug("transport.handoff", {
+                        ...getRequestDebugDetails(req, authDebugOptions),
+                        ...getJsonRpcDebugDetails(parsedBody),
+                        cleanup: false,
+                        directToolDispatch: true,
+                    });
+                    writeJsonRpcResult(res, getJsonRpcId(parsedBody), await executeDirectToolCall(toolName, toolArguments));
+                    return;
+                }
+            }
             const resolution = await resolveRequest(req, createManagedRequest);
             if (resolution.status === "invalid-session-header") {
                 logHttpDebug("request.rejected", {
@@ -618,6 +639,7 @@ export async function startHttpServer(options, dependencies = {}) {
     const port = options.port ?? 3000;
     const ynab = assertYnabConfig(options.ynab);
     const sharedApi = dependencies.createApi?.(ynab) ?? createYnabApi(ynab);
+    const directToolCallExecutor = createDirectToolCallExecutor(ynab, sharedApi);
     if (auth.mode === "oauth") {
         allowedOrigins.add(new URL(auth.publicUrl).origin);
     }
@@ -784,9 +806,11 @@ export async function startHttpServer(options, dependencies = {}) {
         getRequestAuthDebugOptions,
         getRequestDebugDetails,
         getRequestPath,
+        getToolCallArguments,
         getToolCallName,
         logHttpDebug,
         path,
+        executeDirectToolCall: directToolCallExecutor.executeToolCall,
         resolveRequest: async (req, createRequest) => {
             const resolution = await resolveRequest(req, createRequest);
             if (resolution.status === "ready") {

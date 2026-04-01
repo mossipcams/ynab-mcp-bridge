@@ -155,6 +155,19 @@ describe("release-please automation", () => {
     expect(workflow).toContain("node-version: [22.x, 24.x]");
   });
 
+  it("runs full validation on pull requests and only smoke checks on pushes to main", () => {
+    const workflow = readFileSync(new URL("../.github/workflows/test.yml", import.meta.url), "utf8");
+
+    expect(workflow).toContain("pull_request:");
+    expect(workflow).toContain("push:");
+    expect(workflow).toContain("validate:");
+    expect(workflow).toContain("quality:");
+    expect(workflow).toContain("main-smoke:");
+    expect(workflow).toContain("if: github.event_name == 'pull_request'");
+    expect(workflow).toContain("if: github.event_name == 'push' && github.ref == 'refs/heads/main'");
+    expect(workflow).toContain("run: npm run verify:pack");
+  });
+
   it("keeps the 0.8.0 changelog entry aligned with the cleaned release notes", () => {
     const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
     const releaseSection = getVersionSection(changelog, "0.8.0");

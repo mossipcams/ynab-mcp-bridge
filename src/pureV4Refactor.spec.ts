@@ -1,9 +1,31 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const toolsDir = path.join(projectRoot, "src", "tools");
+
+function isTracked(relativePath: string) {
+  try {
+    execFileSync("git", ["ls-files", "--error-unmatch", "--", relativePath], {
+      cwd: projectRoot,
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasTrackedFiles(relativePath: string) {
+  const output = execFileSync("git", ["ls-files", "--", relativePath], {
+    cwd: projectRoot,
+    encoding: "utf8",
+  });
+
+  return output.trim().length > 0;
+}
 
 describe("pure v4 refactor", () => {
   it("keeps only the final read-only tool modules in src/tools", () => {
@@ -84,10 +106,10 @@ describe("pure v4 refactor", () => {
   });
 
   it("keeps housekeeping instruction files out of the tracked repository root", () => {
-    expect(existsSync(path.join(projectRoot, "CLAUDE.md"))).toBe(false);
-    expect(existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
-    expect(existsSync(path.join(projectRoot, "skills"))).toBe(false);
-    expect(existsSync(path.join(projectRoot, "tasks"))).toBe(false);
+    expect(isTracked("CLAUDE.md")).toBe(false);
+    expect(isTracked("AGENTS.md")).toBe(false);
+    expect(hasTrackedFiles("skills")).toBe(false);
+    expect(hasTrackedFiles("tasks")).toBe(false);
   });
 
   it("ignores removed housekeeping docs and folders while keeping core markdown tracked", () => {
