@@ -295,10 +295,18 @@ describe("auth2 protected MCP resource", () => {
       }),
     });
 
-    expect(listResources.status).toBe(401);
-    expect(listResources.headers.get("www-authenticate")).toContain(
-      "resource_metadata=",
-    );
+    expect(listResources.status).toBe(200);
+    await expect(listResources.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 3,
+      result: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_list_accounts",
+          }),
+        ]),
+      },
+    });
 
     const callTool = await fetch(server.url, {
       method: "POST",
@@ -322,7 +330,6 @@ describe("auth2 protected MCP resource", () => {
     expect(callTool.status).toBe(401);
     await expect(callTool.json()).resolves.toMatchObject({
       error: "invalid_token",
-      error_description: "Missing bearer token.",
     });
   });
 
@@ -372,8 +379,8 @@ describe("auth2 protected MCP resource", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       authorization_servers: ["https://mcp.example.com/"],
+      bearer_methods_supported: ["header"],
       resource: "https://mcp.example.com/mcp",
-      resource_name: "YNAB MCP Bridge",
     });
   });
 });

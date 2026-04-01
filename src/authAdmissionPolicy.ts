@@ -12,6 +12,7 @@ const PUBLIC_OAUTH_ROUTE_PATHS = new Set([
 const PUBLIC_MCP_BOOTSTRAP_METHODS = new Set([
   "initialize",
   "notifications/initialized",
+  "resources/list",
   "tools/list",
 ]);
 

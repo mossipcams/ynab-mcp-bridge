@@ -109,16 +109,17 @@ describe("auth core refresh flow", () => {
 
     expect(providerRefreshCalls).toEqual(["provider-refresh-token"]);
     expect(refreshed).toEqual({
-      access_token: "generated-6",
+      access_token: "generated-7",
       expires_in: 3600,
-      refresh_token: "generated-7",
+      refresh_token: "generated-8",
       scope: "openid",
       token_type: "Bearer",
     });
   });
 
-  it("rejects reuse of a rotated refresh token", async () => {
+  it("allows one retry with the previously-used refresh token and then retires the older token", async () => {
     let nextId = 0;
+    const providerRefreshCalls: string[] = [];
     const core = createAuthCore({
       config: createConfig(),
       createId: () => `generated-${++nextId}`,
@@ -135,7 +136,8 @@ describe("auth core refresh flow", () => {
             token_type: "Bearer",
           };
         },
-        async exchangeRefreshToken() {
+        async exchangeRefreshToken(input) {
+          providerRefreshCalls.push(input.refreshToken);
           return {
             access_token: "provider-access-token-2",
             refresh_token: "provider-refresh-token-2",
@@ -157,16 +159,36 @@ describe("auth core refresh flow", () => {
     });
 
     const firstTokens = await issueRefreshToken(core);
-
-    await core.exchangeRefreshToken({
+    const secondTokens = await core.exchangeRefreshToken({
       clientId: "client-a",
       refreshToken: firstTokens.refresh_token,
+    });
+    const retriedTokens = await core.exchangeRefreshToken({
+      clientId: "client-a",
+      refreshToken: firstTokens.refresh_token,
+    });
+    await expect(core.exchangeRefreshToken({
+      clientId: "client-a",
+      refreshToken: secondTokens.refresh_token,
+    })).rejects.toThrow("Refresh token is no longer active.");
+    const fourthTokens = await core.exchangeRefreshToken({
+      clientId: "client-a",
+      refreshToken: retriedTokens.refresh_token,
     });
 
     await expect(core.exchangeRefreshToken({
       clientId: "client-a",
       refreshToken: firstTokens.refresh_token,
-    })).rejects.toThrow("Refresh token has already been used.");
+    })).rejects.toThrow("Refresh token is no longer active.");
+
+    expect(secondTokens.refresh_token).not.toBe(firstTokens.refresh_token);
+    expect(retriedTokens.refresh_token).not.toBe(secondTokens.refresh_token);
+    expect(fourthTokens.refresh_token).not.toBe(retriedTokens.refresh_token);
+    expect(providerRefreshCalls).toEqual([
+      "provider-refresh-token",
+      "provider-refresh-token-2",
+      "provider-refresh-token-2",
+    ]);
   });
 
   it("rejects an expired refresh token", async () => {

@@ -3,6 +3,7 @@ import { createServer as createNodeHttpServer } from "node:http";
 
 import { expect } from "vitest";
 
+import { parseAuthConfig } from "./auth2/config/schema.js";
 import type { RuntimeAuthConfig } from "./config.js";
 import { getArrayValue, getNumberValue, getStringValue, isRecord } from "./typeUtils.js";
 
@@ -14,6 +15,13 @@ const DEFAULT_REMOTE_ORIGIN = "https://claude.ai";
 const DEFAULT_REDIRECT_URI = `${DEFAULT_REMOTE_ORIGIN}/api/mcp/auth_callback`;
 const DEFAULT_RESOURCE = "https://mcp.example.com/mcp";
 const DEFAULT_SCOPE = "openid profile";
+
+type UpstreamOAuthServer = {
+  authorizationUrl: string;
+  issuer: string;
+  jwksUrl: string;
+  tokenUrl: string;
+};
 
 export function createCodeChallenge(codeVerifier: string) {
   return createHash("sha256")
@@ -38,6 +46,44 @@ export function createCloudflareOAuthAuth(overrides: Partial<OAuthAuthConfig> = 
     tokenSigningSecret: "test-oauth-signing-secret",
     tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
     ...overrides,
+  };
+}
+
+export function createAuth2Config(upstream: UpstreamOAuthServer) {
+  return parseAuthConfig({
+    accessTokenTtlSec: 3600,
+    authCodeTtlSec: 300,
+    callbackPath: "/oauth/callback",
+    clients: [
+      {
+        clientId: "client-a",
+        providerId: "default",
+        redirectUri: "https://claude.ai/oauth/callback",
+        scopes: ["openid", "profile"],
+      },
+    ],
+    provider: {
+      authorizationEndpoint: upstream.authorizationUrl,
+      clientId: "cloudflare-client-id",
+      clientSecret: "cloudflare-client-secret",
+      issuer: upstream.issuer,
+      jwksUri: upstream.jwksUrl,
+      tokenEndpoint: upstream.tokenUrl,
+      usePkce: true,
+    },
+    publicBaseUrl: "http://127.0.0.1",
+    refreshTokenTtlSec: 2_592_000,
+  });
+}
+
+export async function readJsonResponse(response: Response) {
+  const text = await response.text();
+  const body: unknown = JSON.parse(text);
+
+  return {
+    body,
+    bytes: Buffer.byteLength(text, "utf8"),
+    text,
   };
 }
 
