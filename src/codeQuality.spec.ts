@@ -33,9 +33,14 @@ describe("code quality guardrails", () => {
     expect(dependencyCruiserConfig).toContain("to.path");
     expect(dependencyCruiserConfig).toContain("httpTransport");
     expect(dependencyCruiserConfig).toContain("serverRuntime");
+    expect(dependencyCruiserConfig).toContain("auth2");
+    expect(dependencyCruiserConfig).toContain("auth2/http/routes");
     expect(dependencyCruiserConfig).not.toContain("httpServer|stdioServer");
     expect(dependencyCruiserConfig).not.toContain("httpServer\\.ts");
     expect(dependencyCruiserConfig).not.toContain("server\\.ts");
+    expect(dependencyCruiserConfig).not.toContain("oauthRuntime");
+    expect(dependencyCruiserConfig).not.toContain("grantLifecycle");
+    expect(dependencyCruiserConfig).not.toContain("grantPersistence");
     expect(packageJson.devDependencies["dependency-cruiser"]).toBeTruthy();
     expect(packageJson.scripts["lint:deps"]).toBeTruthy();
     expect(workflow).toContain("Run dependency rules");
@@ -280,6 +285,7 @@ describe("code quality guardrails", () => {
       "artifacts/**",
       "node_modules/**",
       "tasks/**",
+      "src/auth2/harness/**",
       "**/*.md",
       "package-lock.json",
     ]));

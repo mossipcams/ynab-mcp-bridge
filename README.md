@@ -13,7 +13,7 @@ It gives MCP clients a shared YNAB backend over either:
 - Read-only YNAB tools for plans, accounts, categories, payees, transactions, scheduled transactions, and summary views
 - HTTP mode by default
 - Stateless `POST /mcp` handling that works well with clients that do not keep durable MCP sessions
-- Optional OAuth broker mode for remote clients such as Claude Web
+- Optional auth2-backed OAuth mode for remote clients such as Claude Web
 - Automatic plan resolution when `YNAB_PLAN_ID` is not set
 
 ## Choose A Mode
@@ -79,7 +79,7 @@ npm run lint:duplicates
 npm run tech-debt:report
 ```
 
-`lint:duplicates` runs JSCPD across the whole codebase using the checked-in `.jscpd.json` settings and explicit exclusions for generated or non-code paths. `tech-debt:report` uses the same repo-owned code boundary and prints the current duplication, dead-export, suppression, debt-marker, and dependency-update counts.
+`lint:duplicates` runs JSCPD across maintained production, tooling, and configuration files using the checked-in `.jscpd.json` settings. It excludes generated output, Markdown, specs, contracts, and local task docs, and it also ignores the auth2 harness so duplication reporting stays focused on the production module surface. `tech-debt:report` uses the same advisory boundary and prints the current duplication, dead-export, suppression, debt-marker, and dependency-update counts.
 
 ### 4. Expose authless HTTP intentionally
 
@@ -368,5 +368,5 @@ npm run lint:duplicates
 npm run tech-debt:report
 ```
 
-`lint:duplicates` runs a JSCPD baseline for whole-codebase duplication. It covers maintained repo code, specs, contracts, Markdown, scripts, and tasks, and excludes only generated/vendor paths such as `.git`, `node_modules`, `dist`, `artifacts`, and `package-lock.json`.
-`tech-debt:report` prints the current whole-codebase duplicate-remediation baseline together with dead-export and suppression counts so local cleanup work has one repeatable snapshot command.
+`lint:duplicates` runs a JSCPD baseline across maintained production, tooling, and configuration files. It excludes generated/vendor paths, Markdown, specs, contracts, local task docs, and the auth2 harness so the duplicate baseline tracks the production-facing codebase.
+`tech-debt:report` prints the current advisory duplicate-remediation baseline together with dead-export and suppression counts so local cleanup work has one repeatable snapshot command.

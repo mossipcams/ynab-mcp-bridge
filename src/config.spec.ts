@@ -436,5 +436,7 @@ describe("config", () => {
     expect(readme).toContain("With an auth2 config file in place, the minimal remote OAuth env surface is:");
     expect(readme).toContain("- `MCP_PUBLIC_URL`");
     expect(readme).toContain("- `MCP_AUTH2_CONFIG_PATH`");
+    expect(readme).toContain("Optional auth2-backed OAuth mode for remote clients such as Claude Web");
+    expect(readme).not.toContain("Optional OAuth broker mode");
   });
 });
