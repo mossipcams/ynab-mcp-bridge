@@ -8,6 +8,7 @@ import type { AuthConfig } from "../config/schema.js";
 import { logAuthEvent } from "../logging/authEvents.js";
 import { createProviderAdapter } from "../provider/providerAdapter.js";
 import { createFileAuthStore, createInMemoryAuthStore, type AuthStore } from "../store/authStore.js";
+import { isPublicMcpBootstrapMethod } from "../../authAdmissionPolicy.js";
 import type { RuntimeAuthConfig } from "../../config.js";
 
 type InstallAuthV2RoutesContext = {
@@ -185,6 +186,7 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
   const auth = context.auth;
   const auth2Config = context.auth2Config;
   const protectedPathPrefix = `${context.path.replace(/\/$/, "")}/resources/`;
+  const mcpJsonParser = express.json();
   const { core, store } = createRouteCore(auth2Config, auth);
   const metadata = getMetadataEndpoints(auth);
   const scopesSupported = getSupportedScopes(auth2Config);
@@ -239,6 +241,15 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
   });
 
   context.app.use((req, res, next) => {
+    if (req.path === context.path && req.method === "POST") {
+      mcpJsonParser(req, res, next);
+      return;
+    }
+
+    next();
+  });
+
+  context.app.use((req, res, next) => {
     const isProtectedRequest = req.path === context.path || req.path.startsWith(protectedPathPrefix);
 
     if (!isProtectedRequest) {
@@ -247,6 +258,18 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
     }
 
     const authorization = req.headers.authorization;
+    const jsonRpcMethod = req.path === context.path && req.method === "POST"
+      ? getSingleString(req.body?.["method"])
+      : undefined;
+
+    if (
+      !authorization?.startsWith("Bearer ") &&
+      typeof req.headers["cf-access-jwt-assertion"] !== "string" &&
+      isPublicMcpBootstrapMethod(jsonRpcMethod)
+    ) {
+      next();
+      return;
+    }
 
     if (!authorization?.startsWith("Bearer ")) {
       res.status(401).setHeader(
