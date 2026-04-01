@@ -39,6 +39,7 @@ import {
 import {
   createServer,
   createFastPathToolCallResults,
+  type DiscoveryResourceUriMode,
   getDiscoveryResourceDocument,
   getDiscoveryResourceSummaries,
   getInitializeResult,
@@ -595,6 +596,7 @@ function createManagedRequestRuntimePool(
   api: API | object,
   options: {
     discoveryResourceBaseUrl?: string;
+    discoveryResourceUriMode?: DiscoveryResourceUriMode;
   },
   createServerInstance: typeof createServer,
 ): ManagedRequestRuntimePool {
@@ -631,6 +633,7 @@ async function createManagedRequestFromRuntimePool(
   runtimePool: ManagedRequestRuntimePool,
   options: {
     discoveryResourceBaseUrl?: string;
+    discoveryResourceUriMode?: DiscoveryResourceUriMode;
   },
 ) {
   const runtime = runtimePool.acquire();
@@ -769,9 +772,12 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
       const authDebugOptions = getRequestAuthDebugOptions(req);
       const fastPathCache = fastPathResponses();
       const jsonRpcMethod = isRecord(parsedBody) ? getStringValue(parsedBody, "method") : undefined;
+      const isAuthlessResourcesListRequest = authDebugOptions.authMode === "none"
+        && !getSessionId(req)
+        && jsonRpcMethod === "resources/list";
       const isSessionlessPublicBootstrapRequest = !getSessionId(req) &&
         typeof jsonRpcMethod === "string" &&
-        isPublicMcpBootstrapMethod(jsonRpcMethod) &&
+        (isPublicMcpBootstrapMethod(jsonRpcMethod) || isAuthlessResourcesListRequest) &&
         (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !getRequestAuth(req)));
 
       if (isSessionlessPublicBootstrapRequest && fastPathCache && typeof jsonRpcMethod === "string") {
@@ -954,6 +960,7 @@ export async function startHttpServer(
   const jsonParser = express.json();
   const urlencodedParser = express.urlencoded({ extended: false });
   let discoveryResourceBaseUrl: string | undefined;
+  let discoveryResourceUriMode: DiscoveryResourceUriMode | undefined;
   let fastPathCache:
     | {
         initializeResult: ReturnType<typeof getInitializeResult>;
@@ -1131,7 +1138,9 @@ export async function startHttpServer(
 
       return createManagedRequestFromRuntimePool(
         runtimePool,
-        discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {},
+        discoveryResourceBaseUrl
+          ? { discoveryResourceBaseUrl, ...(discoveryResourceUriMode ? { discoveryResourceUriMode } : {}) }
+          : {},
       );
     },
     fastPathResponses: () => fastPathCache,
@@ -1220,16 +1229,23 @@ export async function startHttpServer(
       ? new URL(auth.publicUrl).origin
       : `http://${host}:${resolvedAddress.port}`;
     discoveryResourceBaseUrl = new URL(`${path.replace(/\/$/, "")}/resources/`, resourceOrigin).toString();
+    discoveryResourceUriMode = auth.mode === "oauth"
+      ? "compatibility-only"
+      : undefined;
+    const discoveryRuntimeOptions = {
+      discoveryResourceBaseUrl,
+      ...(discoveryResourceUriMode ? { discoveryResourceUriMode } : {}),
+    };
     fastPathCache = {
       toolCallResults: await createFastPathToolCallResults(),
       initializeResult: getInitializeResult(),
       toolsListResult: getToolsListResult(),
-      resourcesListResult: getResourcesListResult({ discoveryResourceBaseUrl }),
+      resourcesListResult: getResourcesListResult(discoveryRuntimeOptions),
     };
     runtimePool = createManagedRequestRuntimePool(
       ynab,
       sharedApi,
-      { discoveryResourceBaseUrl },
+      discoveryRuntimeOptions,
       dependencies.createServer ?? createServer,
     );
 

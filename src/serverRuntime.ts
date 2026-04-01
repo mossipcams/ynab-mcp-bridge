@@ -102,8 +102,14 @@ type ToolRegistrar = {
   ) => unknown;
 };
 
+export type DiscoveryResourceUriMode =
+  | "both"
+  | "canonical-only"
+  | "compatibility-only";
+
 type ServerRuntimeOptions = {
   discoveryResourceBaseUrl?: string;
+  discoveryResourceUriMode?: DiscoveryResourceUriMode;
 };
 
 type DiscoveryResourceSummary = {
@@ -238,15 +244,44 @@ function getDiscoveryResourceBaseUrl(baseUrl: string | undefined): string | unde
     : `${baseUrl}/`;
 }
 
-function getToolDiscoveryUris(toolName: string, options: ServerRuntimeOptions = {}): string[] {
-  const uris = [getToolDiscoveryUri(toolName)];
+function getToolCompatibilityDiscoveryUri(toolName: string, options: ServerRuntimeOptions = {}): string | undefined {
   const discoveryResourceBaseUrl = getDiscoveryResourceBaseUrl(options.discoveryResourceBaseUrl);
 
-  if (discoveryResourceBaseUrl) {
-    uris.push(new URL(encodeURIComponent(toolName), discoveryResourceBaseUrl).toString());
+  if (!discoveryResourceBaseUrl) {
+    return undefined;
+  }
+
+  return new URL(encodeURIComponent(toolName), discoveryResourceBaseUrl).toString();
+}
+
+function getToolDiscoveryDocumentUris(toolName: string, options: ServerRuntimeOptions = {}): string[] {
+  const uris = [getToolDiscoveryUri(toolName)];
+  const compatibilityUri = getToolCompatibilityDiscoveryUri(toolName, options);
+
+  if (compatibilityUri) {
+    uris.push(compatibilityUri);
   }
 
   return uris;
+}
+
+function getToolDiscoverySummaryUris(toolName: string, options: ServerRuntimeOptions = {}): string[] {
+  const canonicalUri = getToolDiscoveryUri(toolName);
+  const compatibilityUri = getToolCompatibilityDiscoveryUri(toolName, options);
+  const uriMode = options.discoveryResourceUriMode ?? "both";
+
+  if (!compatibilityUri) {
+    return [canonicalUri];
+  }
+
+  switch (uriMode) {
+    case "canonical-only":
+      return [canonicalUri];
+    case "compatibility-only":
+      return [compatibilityUri];
+    case "both":
+      return [canonicalUri, compatibilityUri];
+  }
 }
 
 function buildDiscoveryResourceDocument(
@@ -258,7 +293,7 @@ function buildDiscoveryResourceDocument(
   return {
     annotations: READ_ONLY_TOOL_ANNOTATIONS,
     description: tool.description,
-    inputSchema: tool.inputSchema,
+    inputSchema: getToolInputJsonSchema(tool.inputSchema),
     title: tool.title,
     toolName: tool.name,
     uri,
@@ -331,7 +366,7 @@ const discoveryCatalogByBaseUrl = new Map<string, DiscoveryCatalog>();
 
 function getDiscoveryCatalog(options: ServerRuntimeOptions = {}): DiscoveryCatalog {
   const normalizedBaseUrl = getDiscoveryResourceBaseUrl(options.discoveryResourceBaseUrl);
-  const cacheKey = normalizedBaseUrl ?? "";
+  const cacheKey = `${normalizedBaseUrl ?? ""}|${options.discoveryResourceUriMode ?? "both"}`;
   const cachedCatalog = discoveryCatalogByBaseUrl.get(cacheKey);
 
   if (cachedCatalog) {
@@ -343,15 +378,18 @@ function getDiscoveryCatalog(options: ServerRuntimeOptions = {}): DiscoveryCatal
   const toolNameByUri = new Map<string, string>();
 
   for (const tool of toolRegistrations) {
-    for (const uri of getToolDiscoveryUris(tool.name, options)) {
+    for (const uri of getToolDiscoveryDocumentUris(tool.name, options)) {
+      documentsByUri.set(uri, buildDiscoveryResourceDocument(tool, uri));
+      toolNameByUri.set(uri, tool.name);
+    }
+
+    for (const uri of getToolDiscoverySummaryUris(tool.name, options)) {
       summaries.push({
         description: tool.description,
         name: tool.name,
         title: tool.title,
         uri,
       });
-      documentsByUri.set(uri, buildDiscoveryResourceDocument(tool, uri));
-      toolNameByUri.set(uri, tool.name);
     }
   }
 
@@ -426,6 +464,17 @@ export type ToolCatalogMetrics = {
   tools_list_chars: number;
 };
 
+export type RemoteBootstrapMetrics = {
+  legacy_bootstrap_bytes: number;
+  legacy_resources_count: number;
+  legacy_resources_list_bytes: number;
+  remote_bootstrap_bytes: number;
+  remote_resources_count: number;
+  remote_resources_list_bytes: number;
+  tool_count: number;
+  tools_list_bytes: number;
+};
+
 export function getToolCatalogMetrics(): ToolCatalogMetrics {
   const toolsListResult = getToolsListResult();
   const serializedToolsList = JSON.stringify(toolsListResult);
@@ -434,6 +483,28 @@ export function getToolCatalogMetrics(): ToolCatalogMetrics {
     tool_count: toolsListResult.tools.length,
     tools_list_bytes: Buffer.byteLength(serializedToolsList, "utf8"),
     tools_list_chars: serializedToolsList.length,
+  };
+}
+
+export function getRemoteBootstrapMetrics(discoveryResourceBaseUrl: string): RemoteBootstrapMetrics {
+  const toolCatalogMetrics = getToolCatalogMetrics();
+  const legacyResourcesList = getResourcesListResult({ discoveryResourceBaseUrl });
+  const remoteResourcesList = getResourcesListResult({
+    discoveryResourceBaseUrl,
+    discoveryResourceUriMode: "compatibility-only",
+  });
+  const legacyResourcesListBytes = Buffer.byteLength(JSON.stringify(legacyResourcesList), "utf8");
+  const remoteResourcesListBytes = Buffer.byteLength(JSON.stringify(remoteResourcesList), "utf8");
+
+  return {
+    tool_count: toolCatalogMetrics.tool_count,
+    tools_list_bytes: toolCatalogMetrics.tools_list_bytes,
+    legacy_resources_count: legacyResourcesList.resources.length,
+    legacy_resources_list_bytes: legacyResourcesListBytes,
+    legacy_bootstrap_bytes: toolCatalogMetrics.tools_list_bytes + legacyResourcesListBytes,
+    remote_resources_count: remoteResourcesList.resources.length,
+    remote_resources_list_bytes: remoteResourcesListBytes,
+    remote_bootstrap_bytes: toolCatalogMetrics.tools_list_bytes,
   };
 }
 

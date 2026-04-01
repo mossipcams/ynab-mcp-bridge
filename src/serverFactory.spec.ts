@@ -9,6 +9,7 @@ import {
   defineTool,
   getDiscoveryResourceDocument,
   getDiscoveryResourceSummaries,
+  getToolsListResult,
   registerServerTools,
 } from "./serverRuntime.js";
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
@@ -168,6 +169,18 @@ describe("createServer", () => {
     }));
   });
 
+  it("reuses compact JSON Schema in discovery documents instead of raw zod internals", () => {
+    const searchDocument = getDiscoveryResourceDocument(
+      "ynab_search_transactions",
+      "ynab-tool://ynab_search_transactions",
+    ) as Record<string, unknown>;
+    const searchTool = getToolsListResult().tools.find((tool) => tool.name === "ynab_search_transactions");
+
+    expect(searchTool).toBeDefined();
+    expect(searchDocument["inputSchema"]).toEqual(searchTool!.inputSchema);
+    expect(JSON.stringify(searchDocument["inputSchema"])).not.toContain("\"_def\"");
+  });
+
   it("registers a compatibility URI alias for each discovery resource without changing its metadata contract", async () => {
     const server = createServer(
       {
@@ -211,6 +224,54 @@ describe("createServer", () => {
       title: payload.title,
       toolName: payload.toolName,
     })))).toHaveLength(1);
+  });
+
+  it("can advertise compatibility discovery URLs without duplicate aliases", async () => {
+    const options = {
+      discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
+      discoveryResourceUriMode: "compatibility-only" as const,
+    };
+    const server = createServer(
+      {
+        apiToken: "test-token",
+      },
+      undefined,
+      options,
+    );
+    const summaries = getDiscoveryResourceSummaries(options);
+    const registeredResources = (server as any)._registeredResources as Record<string, {
+      name: string;
+      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
+    }>;
+
+    expect(new Set(summaries.map((summary) => summary.name)).size).toBe(47);
+    expect(summaries).toHaveLength(47);
+    expect(summaries.every((summary) => summary.uri.startsWith("https://mcp.example.com/mcp/resources/"))).toBe(true);
+
+    const categoryEntries = Object.entries(registeredResources)
+      .filter(([, resource]) => resource.name === "ynab_list_categories");
+
+    expect(categoryEntries.map(([uri]) => uri)).toEqual([
+      "https://mcp.example.com/mcp/resources/ynab_list_categories",
+    ]);
+
+    const directPayload = JSON.parse(
+      (await categoryEntries[0]![1].readCallback(new URL(categoryEntries[0]![0]), {})).contents[0].text,
+    ) as Record<string, unknown>;
+    const canonicalPayload = getDiscoveryResourceDocument(
+      "ynab_list_categories",
+      "ynab-tool://ynab_list_categories",
+      options,
+    ) as Record<string, unknown>;
+
+    expect(directPayload).toEqual(expect.objectContaining({
+      title: "List Categories",
+      toolName: "ynab_list_categories",
+    }));
+    expect(canonicalPayload).toEqual(expect.objectContaining({
+      title: "List Categories",
+      toolName: "ynab_list_categories",
+    }));
   });
 
   it("adds explicit required-argument guidance for strict-input discovery tools", async () => {

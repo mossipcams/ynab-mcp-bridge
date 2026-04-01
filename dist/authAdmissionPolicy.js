@@ -12,7 +12,6 @@ const PUBLIC_MCP_BOOTSTRAP_METHODS = new Set([
     "initialize",
     "notifications/initialized",
     "tools/list",
-    "resources/list",
 ]);
 function isPublicOAuthRoute(path) {
     if (PUBLIC_OAUTH_ROUTE_PATHS.has(path)) {

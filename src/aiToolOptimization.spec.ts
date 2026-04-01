@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { getToolCatalogMetrics, getToolsListResult } from "./serverRuntime.js";
+import { getRemoteBootstrapMetrics, getToolCatalogMetrics, getToolsListResult } from "./serverRuntime.js";
 import * as GetFinancialHealthCheckTool from "./tools/GetFinancialHealthCheckTool.js";
 import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";
 import * as GetTransactionsByAccountTool from "./tools/GetTransactionsByAccountTool.js";
@@ -170,6 +170,24 @@ describe("AI tool optimization", () => {
     expect(cashFlow?.description).toBe("Cash flow summary with inflow, outflow, net flow, and assigned vs spent.");
     expect(monthlyReview?.description).toBe("Monthly review with income, cash flow, budget health, top spending, and notable changes.");
     expect(upcomingObligations?.description).toBe("Upcoming scheduled inflows and outflows across 7, 14, and 30 day windows.");
+  });
+
+  it("keeps the remote oauth bootstrap materially leaner than dual-alias discovery", () => {
+    const metrics = getRemoteBootstrapMetrics("https://mcp.example.com/mcp/resources/");
+
+    expect(metrics).toEqual({
+      tool_count: 47,
+      tools_list_bytes: expect.any(Number),
+      remote_resources_count: 47,
+      remote_resources_list_bytes: expect.any(Number),
+      remote_bootstrap_bytes: expect.any(Number),
+      legacy_resources_count: 94,
+      legacy_resources_list_bytes: expect.any(Number),
+      legacy_bootstrap_bytes: expect.any(Number),
+    });
+    expect(metrics.remote_resources_list_bytes).toBeLessThan(metrics.legacy_resources_list_bytes);
+    expect(metrics.remote_bootstrap_bytes).toBeLessThan(metrics.legacy_bootstrap_bytes);
+    expect(metrics.remote_bootstrap_bytes).toBeLessThan(metrics.legacy_bootstrap_bytes * 0.8);
   });
 
   it("supports bounded projected transaction listings", async () => {

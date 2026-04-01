@@ -479,9 +479,12 @@ export function installMcpPostRoute(options) {
             const authDebugOptions = getRequestAuthDebugOptions(req);
             const fastPathCache = fastPathResponses();
             const jsonRpcMethod = isRecord(parsedBody) ? getStringValue(parsedBody, "method") : undefined;
+            const isAuthlessResourcesListRequest = authDebugOptions.authMode === "none"
+                && !getSessionId(req)
+                && jsonRpcMethod === "resources/list";
             const isSessionlessPublicBootstrapRequest = !getSessionId(req) &&
                 typeof jsonRpcMethod === "string" &&
-                isPublicMcpBootstrapMethod(jsonRpcMethod) &&
+                (isPublicMcpBootstrapMethod(jsonRpcMethod) || isAuthlessResourcesListRequest) &&
                 (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !getRequestAuth(req)));
             if (isSessionlessPublicBootstrapRequest && fastPathCache && typeof jsonRpcMethod === "string") {
                 if (jsonRpcMethod === "initialize") {
@@ -633,6 +636,7 @@ export async function startHttpServer(options, dependencies = {}) {
     const jsonParser = express.json();
     const urlencodedParser = express.urlencoded({ extended: false });
     let discoveryResourceBaseUrl;
+    let discoveryResourceUriMode;
     let fastPathCache;
     let runtimePool;
     let resolveStartupReady;
@@ -771,7 +775,9 @@ export async function startHttpServer(options, dependencies = {}) {
             if (!runtimePool) {
                 throw new Error("Managed request runtime pool is not initialized.");
             }
-            return createManagedRequestFromRuntimePool(runtimePool, discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {});
+            return createManagedRequestFromRuntimePool(runtimePool, discoveryResourceBaseUrl
+                ? { discoveryResourceBaseUrl, ...(discoveryResourceUriMode ? { discoveryResourceUriMode } : {}) }
+                : {});
         },
         fastPathResponses: () => fastPathCache,
         getJsonRpcDebugDetails,
@@ -843,13 +849,20 @@ export async function startHttpServer(options, dependencies = {}) {
             ? new URL(auth.publicUrl).origin
             : `http://${host}:${resolvedAddress.port}`;
         discoveryResourceBaseUrl = new URL(`${path.replace(/\/$/, "")}/resources/`, resourceOrigin).toString();
+        discoveryResourceUriMode = auth.mode === "oauth"
+            ? "compatibility-only"
+            : undefined;
+        const discoveryRuntimeOptions = {
+            discoveryResourceBaseUrl,
+            ...(discoveryResourceUriMode ? { discoveryResourceUriMode } : {}),
+        };
         fastPathCache = {
             toolCallResults: await createFastPathToolCallResults(),
             initializeResult: getInitializeResult(),
             toolsListResult: getToolsListResult(),
-            resourcesListResult: getResourcesListResult({ discoveryResourceBaseUrl }),
+            resourcesListResult: getResourcesListResult(discoveryRuntimeOptions),
         };
-        runtimePool = createManagedRequestRuntimePool(ynab, sharedApi, { discoveryResourceBaseUrl }, dependencies.createServer ?? createServer);
+        runtimePool = createManagedRequestRuntimePool(ynab, sharedApi, discoveryRuntimeOptions, dependencies.createServer ?? createServer);
         resolveStartupReady();
         return {
             host,
