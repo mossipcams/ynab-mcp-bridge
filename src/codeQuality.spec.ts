@@ -295,6 +295,41 @@ describe("code quality guardrails", () => {
     expect(workflow).toContain("npm run tech-debt:report");
   });
 
+  it("fails CI when committed build artifacts drift from the generated runtime output", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      scripts?: Record<string, string>;
+    };
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(packageJson.scripts?.["verify:build-sync"]).toBeTruthy();
+    expect(packageJson.scripts?.["verify:build-sync"]).toContain("git diff");
+    expect(packageJson.scripts?.["verify:build-sync"]).toContain("dist");
+    expect(workflow).toContain("Verify build artifacts are committed");
+    expect(workflow).toContain("npm run verify:build-sync");
+  });
+
+  it("smoke-tests the packed npm artifact in CI before treating a build as release-ready", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      scripts?: Record<string, string>;
+    };
+    const workflow = readFileSync(
+      new URL("../.github/workflows/test.yml", import.meta.url),
+      "utf8",
+    );
+
+    expect(packageJson.scripts?.["verify:pack"]).toBeTruthy();
+    expect(packageJson.scripts?.["verify:pack"]).toContain("ci-smoke-pack");
+    expect(workflow).toContain("Smoke-test packed npm artifact");
+    expect(workflow).toContain("npm run verify:pack");
+  });
+
   it("runs the main CI workflow in the expected validation order", () => {
     const workflow = readFileSync(
       new URL("../.github/workflows/test.yml", import.meta.url),

@@ -21,6 +21,9 @@ describe("local preflight command", () => {
     expect(preflightScript).toContain("npm run lint:unused");
     expect(preflightScript).toContain("npm run build");
     expect(readme).toContain("npm run preflight");
+    expect(readme).toContain("verify:build-sync");
+    expect(readme).toContain("verify:pack");
+    expect(readme).toContain("restart");
   });
 
   it("documents the advisory duplicate-detection and tech debt report commands separately", () => {
