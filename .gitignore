@@ -12,3 +12,5 @@ tasks/
 *.md
 !README.md
 !CHANGELOG.md
+architecture.md
+AGENTS.md

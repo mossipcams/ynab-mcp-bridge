@@ -1,8 +1,8 @@
 /** @type {import("dependency-cruiser").IConfiguration} */
 const entryLayer = "^src/index\\.ts$";
-const transportLayer = "^src/(httpTransport|stdioServer)\\.ts$";
-const compositionLayer = "^src/(serverRuntime|oauthRuntime)\\.ts$";
-const domainLayer = "^src/(?!index\\.ts$|httpTransport\\.ts$|stdioServer\\.ts$|serverRuntime\\.ts$|oauthRuntime\\.ts$).+\\.ts$";
+const transportLayer = "^src/((httpTransport|stdioServer)\\.ts|auth2/http/routes\\.ts)$";
+const compositionLayer = "^src/serverRuntime\\.ts$";
+const domainLayer = "^src/(?!index\\.ts$|httpTransport\\.ts$|stdioServer\\.ts$|serverRuntime\\.ts$|auth2/http/routes\\.ts$).+\\.ts$";
 
 const config = {
   // Layers: entry, transport, composition, domain.
@@ -28,8 +28,9 @@ const config = {
       from: {
         orphan: true,
         path: [
-          "^src/(index|httpTransport|stdioServer|serverRuntime|oauthRuntime|cloudflareCompatibility|config|grantLifecycle|grantPersistence|headerUtils|localTokenService|logger|oauthGrant|oauthSchemas|oauthVerifier|originPolicy|packageInfo|requestContext|runtimeConfig|startupLogging|transactionQueryEngine|typeUtils|upstreamOAuthAdapter|ynabApi|ynabConfig|ynabRateLimiter)\\.ts$",
+          "^src/(index|authAdmissionPolicy|cloudflareCompatibility|config|headerUtils|httpTransport|localTokenService|logger|originPolicy|packageInfo|requestContext|runtimeConfig|runtimePlanToolUtils|serverRuntime|startupLogging|stdioServer|transactionQueryEngine|typeUtils|ynabApi|ynabConfig|ynabRateLimiter)\\.ts$",
           "^src/clientProfiles/(?!types\\.ts$).+\\.ts$",
+          "^src/auth2/(config|core|http|logging|provider|store)/.+\\.ts$",
           "^src/tools/.+\\.ts$",
         ],
       },
