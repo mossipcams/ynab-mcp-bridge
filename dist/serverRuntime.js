@@ -130,20 +130,43 @@ function getDiscoveryResourceBaseUrl(baseUrl) {
         ? baseUrl
         : `${baseUrl}/`;
 }
-function getToolDiscoveryUris(toolName, options = {}) {
-    const uris = [getToolDiscoveryUri(toolName)];
+function getToolCompatibilityDiscoveryUri(toolName, options = {}) {
     const discoveryResourceBaseUrl = getDiscoveryResourceBaseUrl(options.discoveryResourceBaseUrl);
-    if (discoveryResourceBaseUrl) {
-        uris.push(new URL(encodeURIComponent(toolName), discoveryResourceBaseUrl).toString());
+    if (!discoveryResourceBaseUrl) {
+        return undefined;
+    }
+    return new URL(encodeURIComponent(toolName), discoveryResourceBaseUrl).toString();
+}
+function getToolDiscoveryDocumentUris(toolName, options = {}) {
+    const uris = [getToolDiscoveryUri(toolName)];
+    const compatibilityUri = getToolCompatibilityDiscoveryUri(toolName, options);
+    if (compatibilityUri) {
+        uris.push(compatibilityUri);
     }
     return uris;
+}
+function getToolDiscoverySummaryUris(toolName, options = {}) {
+    const canonicalUri = getToolDiscoveryUri(toolName);
+    const compatibilityUri = getToolCompatibilityDiscoveryUri(toolName, options);
+    const uriMode = options.discoveryResourceUriMode ?? "both";
+    if (!compatibilityUri) {
+        return [canonicalUri];
+    }
+    switch (uriMode) {
+        case "canonical-only":
+            return [canonicalUri];
+        case "compatibility-only":
+            return [compatibilityUri];
+        case "both":
+            return [canonicalUri, compatibilityUri];
+    }
 }
 function buildDiscoveryResourceDocument(tool, uri) {
     const invocationGuidance = discoveryInvocationGuidanceByToolName[tool.name];
     return {
         annotations: READ_ONLY_TOOL_ANNOTATIONS,
         description: tool.description,
-        inputSchema: tool.inputSchema,
+        inputSchema: getToolInputJsonSchema(tool.inputSchema),
         title: tool.title,
         toolName: tool.name,
         uri,
@@ -212,7 +235,7 @@ const toolRegistrations = [
 const discoveryCatalogByBaseUrl = new Map();
 function getDiscoveryCatalog(options = {}) {
     const normalizedBaseUrl = getDiscoveryResourceBaseUrl(options.discoveryResourceBaseUrl);
-    const cacheKey = normalizedBaseUrl ?? "";
+    const cacheKey = `${normalizedBaseUrl ?? ""}|${options.discoveryResourceUriMode ?? "both"}`;
     const cachedCatalog = discoveryCatalogByBaseUrl.get(cacheKey);
     if (cachedCatalog) {
         return cachedCatalog;
@@ -221,15 +244,17 @@ function getDiscoveryCatalog(options = {}) {
     const documentsByUri = new Map();
     const toolNameByUri = new Map();
     for (const tool of toolRegistrations) {
-        for (const uri of getToolDiscoveryUris(tool.name, options)) {
+        for (const uri of getToolDiscoveryDocumentUris(tool.name, options)) {
+            documentsByUri.set(uri, buildDiscoveryResourceDocument(tool, uri));
+            toolNameByUri.set(uri, tool.name);
+        }
+        for (const uri of getToolDiscoverySummaryUris(tool.name, options)) {
             summaries.push({
                 description: tool.description,
                 name: tool.name,
                 title: tool.title,
                 uri,
             });
-            documentsByUri.set(uri, buildDiscoveryResourceDocument(tool, uri));
-            toolNameByUri.set(uri, tool.name);
         }
     }
     const catalog = {
@@ -294,6 +319,26 @@ export function getToolCatalogMetrics() {
         tool_count: toolsListResult.tools.length,
         tools_list_bytes: Buffer.byteLength(serializedToolsList, "utf8"),
         tools_list_chars: serializedToolsList.length,
+    };
+}
+export function getRemoteBootstrapMetrics(discoveryResourceBaseUrl) {
+    const toolCatalogMetrics = getToolCatalogMetrics();
+    const legacyResourcesList = getResourcesListResult({ discoveryResourceBaseUrl });
+    const remoteResourcesList = getResourcesListResult({
+        discoveryResourceBaseUrl,
+        discoveryResourceUriMode: "compatibility-only",
+    });
+    const legacyResourcesListBytes = Buffer.byteLength(JSON.stringify(legacyResourcesList), "utf8");
+    const remoteResourcesListBytes = Buffer.byteLength(JSON.stringify(remoteResourcesList), "utf8");
+    return {
+        tool_count: toolCatalogMetrics.tool_count,
+        tools_list_bytes: toolCatalogMetrics.tools_list_bytes,
+        legacy_resources_count: legacyResourcesList.resources.length,
+        legacy_resources_list_bytes: legacyResourcesListBytes,
+        legacy_bootstrap_bytes: toolCatalogMetrics.tools_list_bytes + legacyResourcesListBytes,
+        remote_resources_count: remoteResourcesList.resources.length,
+        remote_resources_list_bytes: remoteResourcesListBytes,
+        remote_bootstrap_bytes: toolCatalogMetrics.tools_list_bytes,
     };
 }
 export function getResourcesListResult(options = {}) {

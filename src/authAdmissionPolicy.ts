@@ -13,7 +13,6 @@ const PUBLIC_MCP_BOOTSTRAP_METHODS = new Set([
   "initialize",
   "notifications/initialized",
   "tools/list",
-  "resources/list",
 ]);
 
 export type AuthAdmissionDecision =
