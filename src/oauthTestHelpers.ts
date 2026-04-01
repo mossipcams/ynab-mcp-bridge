@@ -76,11 +76,12 @@ export function createAuth2Config(upstream: UpstreamOAuthServer) {
   });
 }
 
-export async function readJsonResponse<T>(response: Response) {
+export async function readJsonResponse(response: Response) {
   const text = await response.text();
+  const body: unknown = JSON.parse(text);
 
   return {
-    body: JSON.parse(text) as T,
+    body,
     bytes: Buffer.byteLength(text, "utf8"),
     text,
   };
