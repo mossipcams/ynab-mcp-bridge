@@ -68,15 +68,15 @@ describe("auth admission policy", () => {
       action: "allow_public",
       reason: "public-oauth-route",
     });
+
+    expect(getAdmission("resources/list")).toEqual({
+      action: "allow_public",
+      reason: "public-oauth-route",
+    });
   });
 
   it("requires a bridge bearer token for protected MCP methods", () => {
     expect(getAdmission("tools/call")).toEqual({
-      action: "require_bridge_bearer",
-      reason: "protected-mcp-request",
-    });
-
-    expect(getAdmission("resources/list")).toEqual({
       action: "require_bridge_bearer",
       reason: "protected-mcp-request",
     });

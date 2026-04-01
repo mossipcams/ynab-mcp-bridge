@@ -9,6 +9,10 @@ const repoCodeFileExtensions = new Set([".cjs", ".js", ".json", ".mjs", ".sh", "
 const repoCodeIgnoredDirectories = new Set([".git", "artifacts", "dist", "node_modules", "tasks"]);
 const repoCodeIgnoredRootRelativePaths = new Set(["package-lock.json"]);
 const repoCodeSpecialBasenames = new Set(["Dockerfile"]);
+const todoFixmeHackIgnoredRootRelativePaths = new Set([
+  "scripts/tech-debt-report.mjs",
+  "src/techDebtReport.spec.ts",
+]);
 
 export const reportMetricLabels = [
   "Duplication",
@@ -89,18 +93,29 @@ function walkRepoOwnedCodeFiles(root, currentRelativePath = "") {
       return [];
     }
 
-    return [fullPath];
+    return [{
+      fullPath,
+      relativePath: normalizedRelativePath,
+    }];
   });
 }
 
-function countPatternMatches(pattern) {
+function countPatternMatches(pattern, ignoredRootRelativePaths = new Set()) {
   const regex = new RegExp(pattern, "g");
 
   return walkRepoOwnedCodeFiles(repoRoot)
     .reduce((count, filePath) => {
-      const matches = readFileSync(filePath, "utf8").match(regex);
+      if (ignoredRootRelativePaths.has(filePath.relativePath)) {
+        return count;
+      }
+
+      const matches = readFileSync(filePath.fullPath, "utf8").match(regex);
       return count + (matches?.length ?? 0);
     }, 0);
+}
+
+export function countTodoFixmeHackMatches() {
+  return countPatternMatches("TODO|FIXME|HACK", todoFixmeHackIgnoredRootRelativePaths);
 }
 
 function readDuplicationPercentage() {
@@ -140,7 +155,7 @@ export async function collectTechDebtMetrics() {
     deadExports: readDeadExportCount(),
     tsIgnoreCount: countPatternMatches("@ts-ignore|@ts-expect-error"),
     eslintDisableCount: countPatternMatches("eslint-disable"),
-    todoFixmeHackCount: countPatternMatches("TODO|FIXME|HACK"),
+    todoFixmeHackCount: countTodoFixmeHackMatches(),
     majorDependencyUpdates: readMajorDependencyUpdateCount(),
   };
 }

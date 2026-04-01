@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   validate:
-    if: github.event_name != 'pull_request' || !startsWith(github.event.pull_request.head.ref, 'release-please--')
+    if: github.event_name == 'pull_request' && !startsWith(github.event.pull_request.head.ref, 'release-please--')
     runs-on: ubuntu-latest
 
     strategy:
@@ -50,7 +50,7 @@ jobs:
           if-no-files-found: error
 
   quality:
-    if: github.event_name != 'pull_request' || !startsWith(github.event.pull_request.head.ref, 'release-please--')
+    if: github.event_name == 'pull_request' && !startsWith(github.event.pull_request.head.ref, 'release-please--')
     runs-on: ubuntu-latest
 
     steps:
@@ -108,3 +108,31 @@ jobs:
           name: coverage-node-22.x
           path: artifacts/coverage
           if-no-files-found: error
+
+  main-smoke:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build
+
+      - name: Verify build artifacts are committed
+        run: npm run verify:build-sync
+
+      - name: Smoke-test packed npm artifact
+        run: npm run verify:pack

@@ -14,6 +14,7 @@ describe("tech debt report implementation", () => {
     expect(existsSync(new URL("../scripts/tech-debt-report.mjs", import.meta.url))).toBe(true);
 
     const reportModule = await import(new URL("../scripts/tech-debt-report.mjs", import.meta.url).href) as {
+      countTodoFixmeHackMatches?: unknown;
       collectTechDebtMetrics?: unknown;
       formatTechDebtReport?: unknown;
       isRepoOwnedCodePath?: unknown;
@@ -21,6 +22,7 @@ describe("tech debt report implementation", () => {
       reportMetricLabels?: unknown;
     };
 
+    expect(reportModule.countTodoFixmeHackMatches).toBeTypeOf("function");
     expect(reportModule.collectTechDebtMetrics).toBeTypeOf("function");
     expect(reportModule.formatTechDebtReport).toBeTypeOf("function");
     expect(reportModule.isRepoOwnedCodePath).toBeTypeOf("function");
@@ -38,5 +40,14 @@ describe("tech debt report implementation", () => {
       "TODO/FIXME/HACK count",
       "Dependencies with major updates",
     ]);
+  });
+
+  it("ignores the tech debt report's self-referential TODO/FIXME/HACK strings", async () => {
+    const reportModule = await import(new URL("../scripts/tech-debt-report.mjs", import.meta.url).href) as {
+      countTodoFixmeHackMatches?: () => number;
+    };
+
+    expect(reportModule.countTodoFixmeHackMatches).toBeTypeOf("function");
+    expect(reportModule.countTodoFixmeHackMatches?.()).toBe(0);
   });
 });

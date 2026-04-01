@@ -519,7 +519,9 @@ describe("code quality guardrails", () => {
       "utf8",
     );
 
-    expect(workflow).toContain("if: github.event_name != 'pull_request' || !startsWith(github.event.pull_request.head.ref, 'release-please--')");
+    expect(workflow).toContain("if: github.event_name == 'pull_request' && !startsWith(github.event.pull_request.head.ref, 'release-please--')");
+    expect(workflow).toContain("if: github.event_name == 'push' && github.ref == 'refs/heads/main'");
+    expect(workflow).toContain("main-smoke:");
     expect(workflow).not.toContain("github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'release-please--')");
   });
 
