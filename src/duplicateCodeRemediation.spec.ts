@@ -142,7 +142,6 @@ describe("duplicate code remediation", () => {
     const indexSource = readFileSync(path.join(projectRoot, "src", "index.ts"), "utf8");
     const stdioSource = readFileSync(path.join(projectRoot, "src", "stdioServer.ts"), "utf8");
     const httpTransportSource = readFileSync(path.join(projectRoot, "src", "httpTransport.ts"), "utf8");
-    const oauthRuntimeSource = readFileSync(path.join(projectRoot, "src", "oauthRuntime.ts"), "utf8");
 
     expect(indexSource).toContain('from "./httpTransport.js"');
     expect(indexSource).not.toContain('from "./httpServer.js"');
@@ -151,20 +150,16 @@ describe("duplicate code remediation", () => {
     expect(httpTransportSource).toContain('from "./auth2/http/routes.js"');
     expect(httpTransportSource).not.toContain('from "./oauthRuntime.js"');
     expect(httpTransportSource).toContain('from "./serverRuntime.js"');
-    expect(oauthRuntimeSource).toContain('from "./grantLifecycle.js"');
-    expect(oauthRuntimeSource).toContain('from "./grantPersistence.js"');
-    expect(oauthRuntimeSource).not.toContain('from "./oauthCore.js"');
-    expect(oauthRuntimeSource).not.toContain('from "./oauthStore.js"');
   });
 
-  it("keeps authorization-code validation explicit at the two oauth core call sites", () => {
-    const oauthCoreSource = readFileSync(path.join(projectRoot, "src", "grantLifecycle.ts"), "utf8");
+  it("keeps release metadata aligned with the current mainline version after conflict resolution", () => {
+    const packageSource = readFileSync(path.join(projectRoot, "package.json"), "utf8");
+    const manifestSource = readFileSync(path.join(projectRoot, ".release-please-manifest.json"), "utf8");
+    const changelogSource = readFileSync(path.join(projectRoot, "CHANGELOG.md"), "utf8");
 
-    expect(oauthCoreSource).toContain("async function getAuthorizationCodeChallenge(");
-    expect(oauthCoreSource).toContain("async function exchangeAuthorizationCode(");
-    expect(oauthCoreSource).not.toContain("function requireAuthorizationCodeGrant(");
-    expect(oauthCoreSource.match(/Unknown authorization code\./g)?.length ?? 0).toBe(2);
-    expect(oauthCoreSource.match(/Authorization code has expired\./g)?.length ?? 0).toBe(2);
+    expect(packageSource).toContain('"version": "0.15.18"');
+    expect(manifestSource).toContain('"." : "0.15.18"'.replace(" ", ""));
+    expect(changelogSource).toContain("## [0.15.18]");
   });
 
   it("targets the superseded HTTP spread-out runtime helpers for deletion", () => {
@@ -180,14 +175,24 @@ describe("duplicate code remediation", () => {
   });
 
   it("targets the superseded OAuth helper modules for deletion", () => {
-    const grantPersistenceSource = readFileSync(path.join(projectRoot, "src", "grantPersistence.ts"), "utf8");
-
-    expect(grantPersistenceSource).not.toContain('from "./oauthCompatibilityGrants.js"');
-    expect(grantPersistenceSource).not.toContain('from "./oauthGrantViews.js"');
-    expect(grantPersistenceSource).not.toContain('from "./oauthStoreMigration.js"');
-
     for (const fileName of supersededOAuthModules) {
       expect(existsSync(path.join(projectRoot, "src", fileName))).toBe(false);
+    }
+  });
+
+  it("removes retired oauth module paths from lint and typed-eslint config", () => {
+    const packageSource = readFileSync(path.join(projectRoot, "package.json"), "utf8");
+    const eslintConfigSource = readFileSync(path.join(projectRoot, "eslint.config.mjs"), "utf8");
+    const eslintTsconfigSource = readFileSync(path.join(projectRoot, "tsconfig.eslint.json"), "utf8");
+
+    for (const retiredPath of [
+      "src/oauthRuntime.ts",
+      "src/grantPersistence.ts",
+      "src/grantLifecycle.ts",
+    ] as const) {
+      expect(packageSource).not.toContain(retiredPath);
+      expect(eslintConfigSource).not.toContain(retiredPath);
+      expect(eslintTsconfigSource).not.toContain(retiredPath);
     }
   });
 
@@ -201,30 +206,4 @@ describe("duplicate code remediation", () => {
     }
   });
 
-  it("keeps oauth grant mutation explicit through store.saveGrant at transition sites", () => {
-    const oauthCoreSource = readFileSync(path.join(projectRoot, "src", "grantLifecycle.ts"), "utf8");
-
-    expect(oauthCoreSource).not.toContain("function replaceGrant(");
-    expect(oauthCoreSource.match(/store\.saveGrant\(\{/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
-  });
-
-  it("keeps pending oauth grant validation explicit in consent and callback flows", () => {
-    const oauthCoreSource = readFileSync(path.join(projectRoot, "src", "grantLifecycle.ts"), "utf8");
-
-    expect(oauthCoreSource).not.toContain("function requirePendingConsentGrant(");
-    expect(oauthCoreSource).not.toContain("function requirePendingAuthorizationGrant(");
-    expect(oauthCoreSource.match(/store\.getPendingConsentGrant\(/g)?.length ?? 0).toBe(1);
-    expect(oauthCoreSource.match(/store\.getPendingAuthorizationGrant\(/g)?.length ?? 0).toBe(1);
-    expect(oauthCoreSource.match(/Unknown consent challenge\./g)?.length ?? 0).toBe(2);
-    expect(oauthCoreSource.match(/Unknown upstream OAuth state\./g)?.length ?? 0).toBe(1);
-  });
-
-  it("keeps refresh-token grant validation explicit in the refresh exchange flow", () => {
-    const oauthCoreSource = readFileSync(path.join(projectRoot, "src", "grantLifecycle.ts"), "utf8");
-
-    expect(oauthCoreSource).not.toContain("function requireRefreshTokenGrant(");
-    expect(oauthCoreSource.match(/store\.getRefreshTokenGrant\(/g)?.length ?? 0).toBe(1);
-    expect(oauthCoreSource.match(/Unknown refresh token\./g)?.length ?? 0).toBe(1);
-    expect(oauthCoreSource.match(/Refresh token has expired\./g)?.length ?? 0).toBe(1);
-  });
 });

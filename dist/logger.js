@@ -63,10 +63,41 @@ function getDefaultDestination() {
     };
     return destination;
 }
+function wrapLine(line, width) {
+    if (line.length <= width) {
+        return `${line}\n`;
+    }
+    const wrappedSegments = [];
+    for (let offset = 0; offset < line.length; offset += width) {
+        wrappedSegments.push(line.slice(offset, offset + width));
+    }
+    return `${wrappedSegments.join("\n")}\n`;
+}
+function createWrappedDestination(destination, width) {
+    let bufferedLine = "";
+    return {
+        write(chunk) {
+            const text = typeof chunk === "string"
+                ? chunk
+                : Buffer.from(chunk).toString("utf8");
+            bufferedLine += text;
+            const completedLines = bufferedLine.split("\n");
+            bufferedLine = completedLines.pop() ?? "";
+            for (const line of completedLines) {
+                destination.write(wrapLine(line, width));
+            }
+            return true;
+        },
+    };
+}
 export function createLogger(options = {}) {
+    const destination = options.destination ?? getDefaultDestination();
+    const wrappedDestination = typeof options.wrapWidth === "number" && options.wrapWidth > 0
+        ? createWrappedDestination(destination, options.wrapWidth)
+        : destination;
     return pino({
         base: null,
-    }, options.destination ?? getDefaultDestination());
+    }, wrappedDestination);
 }
 let appLogger = createLogger();
 export function getAppLogger() {

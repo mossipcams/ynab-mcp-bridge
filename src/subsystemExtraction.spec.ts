@@ -22,14 +22,6 @@ const moduleContracts: ModuleContract[] = [
     exports: ["installAuthV2Routes"],
     path: "./auth2/http/routes.ts",
   },
-  {
-    exports: ["createOAuthStore"],
-    path: "./grantPersistence.ts",
-  },
-  {
-    exports: ["createOAuthCore"],
-    path: "./grantLifecycle.ts",
-  },
 ];
 
 const retiredShimPaths = [
@@ -40,7 +32,13 @@ const retiredShimPaths = [
   "./mcpAuthServer.ts",
   "./oauthBroker.ts",
   "./oauthCore.ts",
+  "./grantLifecycle.ts",
+  "./grantPersistence.ts",
+  "./oauthGrant.ts",
+  "./oauthSchemas.ts",
+  "./oauthRuntime.ts",
   "./oauthStore.ts",
+  "./upstreamOAuthAdapter.ts",
 ] as const;
 
 function getAbsolutePath(relativePath: string) {

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
+import { parseAuthConfig } from "./auth2/config/schema.js";
 import { assertBackendEnvironment, resolveRuntimeConfig } from "./runtimeConfig.js";
 
 describe("resolveRuntimeConfig", () => {
@@ -299,6 +300,160 @@ describe("resolveRuntimeConfig", () => {
       path: "/mcp",
       port: 3000,
       transport: "http",
+    });
+  });
+
+  it("derives oauth runtime settings from auth2 config when legacy upstream env vars are omitted", () => {
+    expect(resolveRuntimeConfig(
+      [],
+      {
+        MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
+        MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+      },
+      {
+        auth2Config: parseAuthConfig({
+          accessTokenTtlSec: 3600,
+          authCodeTtlSec: 300,
+          callbackPath: "/oauth/callback",
+          clients: [
+            {
+              clientId: "claude-web",
+              providerId: "default",
+              redirectUri: "https://claude.ai/api/mcp/auth_callback",
+              scopes: ["openid", "profile", "email"],
+            },
+          ],
+          provider: {
+            authorizationEndpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+            clientId: "cloudflare-client-id",
+            clientSecret: "cloudflare-client-secret",
+            issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+            jwksUri: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+            tokenEndpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+            usePkce: true,
+          },
+          publicBaseUrl: "https://mcp.example.com",
+          refreshTokenTtlSec: 2_592_000,
+        }),
+      },
+    )).toEqual({
+      allowedHosts: [],
+      allowedOrigins: [],
+      auth: {
+        audience: "https://mcp.example.com/mcp",
+        authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+        callbackPath: "/oauth/callback",
+        clientId: "cloudflare-client-id",
+        clientSecret: "cloudflare-client-secret",
+        deployment: "oauth-single-tenant",
+        issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+        jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+        mode: "oauth",
+        publicUrl: "https://mcp.example.com/mcp",
+        scopes: ["openid", "profile", "email", "offline_access"],
+        storePath: path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json"),
+        tokenSigningSecret: createHash("sha256")
+          .update("cloudflare-client-secret\nhttps://mcp.example.com/mcp\ncloudflare-client-id")
+          .digest("base64url"),
+        tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+      },
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 3000,
+      transport: "http",
+    });
+  });
+
+  it("prefers explicit legacy oauth env vars over auth2-derived defaults", () => {
+    expect(resolveRuntimeConfig(
+      [],
+      {
+        MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
+        MCP_OAUTH_AUTHORIZATION_URL: "https://explicit.example.com/oauth/authorize",
+        MCP_OAUTH_CLIENT_ID: "explicit-client-id",
+        MCP_OAUTH_CLIENT_SECRET: "explicit-client-secret",
+        MCP_OAUTH_ISSUER: "https://explicit.example.com",
+        MCP_OAUTH_JWKS_URL: "https://explicit.example.com/.well-known/jwks.json",
+        MCP_OAUTH_SCOPES: "custom-scope",
+        MCP_OAUTH_TOKEN_URL: "https://explicit.example.com/oauth/token",
+        MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+      },
+      {
+        auth2Config: parseAuthConfig({
+          accessTokenTtlSec: 3600,
+          authCodeTtlSec: 300,
+          callbackPath: "/oauth/callback",
+          clients: [
+            {
+              clientId: "claude-web",
+              providerId: "default",
+              redirectUri: "https://claude.ai/api/mcp/auth_callback",
+              scopes: ["openid", "profile", "email"],
+            },
+          ],
+          provider: {
+            authorizationEndpoint: "https://auth2.example.com/oauth/authorize",
+            clientId: "auth2-client-id",
+            clientSecret: "auth2-client-secret",
+            issuer: "https://auth2.example.com",
+            jwksUri: "https://auth2.example.com/.well-known/jwks.json",
+            tokenEndpoint: "https://auth2.example.com/oauth/token",
+            usePkce: true,
+          },
+          publicBaseUrl: "https://mcp.example.com",
+          refreshTokenTtlSec: 2_592_000,
+        }),
+      },
+    ).auth).toMatchObject({
+      authorizationUrl: "https://explicit.example.com/oauth/authorize",
+      clientId: "explicit-client-id",
+      clientSecret: "explicit-client-secret",
+      issuer: "https://explicit.example.com",
+      jwksUrl: "https://explicit.example.com/.well-known/jwks.json",
+      scopes: ["custom-scope", "offline_access"],
+      tokenUrl: "https://explicit.example.com/oauth/token",
+    });
+  });
+
+  it("derives scopes, store path, and token signing secret from auth2 defaults when env vars are omitted", () => {
+    expect(resolveRuntimeConfig(
+      [],
+      {
+        MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
+        MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+      },
+      {
+        auth2Config: parseAuthConfig({
+          accessTokenTtlSec: 3600,
+          authCodeTtlSec: 300,
+          callbackPath: "/oauth/callback",
+          clients: [
+            {
+              clientId: "claude-web",
+              providerId: "default",
+              redirectUri: "https://claude.ai/api/mcp/auth_callback",
+              scopes: ["openid", "profile", "email"],
+            },
+          ],
+          provider: {
+            authorizationEndpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+            clientId: "cloudflare-client-id",
+            clientSecret: "cloudflare-client-secret",
+            issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+            jwksUri: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+            tokenEndpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+            usePkce: true,
+          },
+          publicBaseUrl: "https://mcp.example.com",
+          refreshTokenTtlSec: 2_592_000,
+        }),
+      },
+    ).auth).toMatchObject({
+      scopes: ["openid", "profile", "email", "offline_access"],
+      storePath: path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json"),
+      tokenSigningSecret: createHash("sha256")
+        .update("cloudflare-client-secret\nhttps://mcp.example.com/mcp\ncloudflare-client-id")
+        .digest("base64url"),
     });
   });
 

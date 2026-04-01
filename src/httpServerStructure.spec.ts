@@ -19,26 +19,10 @@ describe("http server structure", () => {
 
   it("does not keep alias discovery rewrites or profile-specific protected-resource routes", () => {
     const httpTransportSource = readFileSync(new URL("./httpTransport.ts", import.meta.url), "utf8");
-    const oauthRuntimeSource = readFileSync(new URL("./oauthRuntime.ts", import.meta.url), "utf8");
-    const grantPersistenceSource = readFileSync(new URL("./grantPersistence.ts", import.meta.url), "utf8");
-    const oauthGrantSource = readFileSync(new URL("./oauthGrant.ts", import.meta.url), "utf8");
 
     expect(httpTransportSource).not.toContain("function getCanonicalOAuthDiscoveryPath");
     expect(httpTransportSource).not.toContain("getCanonicalOAuthDiscoveryPath,");
     expect(httpTransportSource).not.toContain('from "./clientProfiles/types.js"');
     expect(httpTransportSource).not.toContain("getPersistedOAuthProfileReason(");
-    expect(oauthRuntimeSource).not.toContain("getCanonicalOAuthDiscoveryPath:");
-    expect(oauthRuntimeSource).not.toContain('resolvedProfile?.profileId !== "chatgpt"');
-    expect(oauthRuntimeSource).not.toContain("req.url = canonicalPath");
-    expect(oauthRuntimeSource).not.toContain('from "./clientProfiles/types.js"');
-    expect(oauthRuntimeSource).not.toContain('from "./clientProfiles/profileContext.js"');
-    expect(oauthRuntimeSource).not.toContain('from "./clientProfiles/profileLogger.js"');
-    expect(oauthRuntimeSource).not.toContain("getClientCompatibilityProfile:");
-    expect(grantPersistenceSource).not.toContain('from "./clientProfiles/types.js"');
-    expect(grantPersistenceSource).not.toContain("clientProfiles:");
-    expect(grantPersistenceSource).not.toContain("getClientCompatibilityProfile(");
-    expect(grantPersistenceSource).not.toContain("saveClientCompatibilityProfile(");
-    expect(oauthGrantSource).not.toContain('from "./clientProfiles/types.js"');
-    expect(oauthGrantSource).not.toContain("compatibilityProfileId");
   });
 });

@@ -311,6 +311,66 @@ describe("config", () => {
     });
   });
 
+  it("derives oauth runtime settings from auth2 config when legacy env vars are omitted", () => {
+    const fixtureDir = mkdtempSync(path.join(tmpdir(), "ynab-auth2-config-"));
+    const configPath = path.join(fixtureDir, "auth2.json");
+
+    writeFileSync(configPath, JSON.stringify({
+      accessTokenTtlSec: 3600,
+      authCodeTtlSec: 300,
+      callbackPath: "/oauth/callback",
+      clients: [
+        {
+          clientId: "client-a",
+          providerId: "default",
+          redirectUri: "https://claude.ai/api/mcp/auth_callback",
+          scopes: ["openid", "profile", "email"],
+        },
+      ],
+      provider: {
+        authorizationEndpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+        clientId: "provider-client-id",
+        clientSecret: "provider-client-secret",
+        issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+        jwksUri: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+        tokenEndpoint: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+        usePkce: true,
+      },
+      publicBaseUrl: "https://mcp.example.com",
+      refreshTokenTtlSec: 2_592_000,
+    }));
+
+    const config = resolveAppConfig([], {
+      MCP_AUTH2_CONFIG_PATH: configPath,
+      MCP_DEPLOYMENT_MODE: "oauth-single-tenant",
+      MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+      YNAB_API_TOKEN: "token-1",
+    });
+
+    expect(config.auth2Config).toMatchObject({
+      callbackPath: "/oauth/callback",
+      publicBaseUrl: "https://mcp.example.com",
+    });
+    expect(config.runtime.auth).toEqual({
+      audience: "https://mcp.example.com/mcp",
+      authorizationUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/authorization",
+      callbackPath: "/oauth/callback",
+      clientId: "provider-client-id",
+      clientSecret: "provider-client-secret",
+      deployment: "oauth-single-tenant",
+      issuer: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123",
+      jwksUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/jwks",
+      mode: "oauth",
+      publicUrl: "https://mcp.example.com/mcp",
+      scopes: ["openid", "profile", "email", "offline_access"],
+      storePath: path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json"),
+      tokenSigningSecret: createHash("sha256")
+        .update("provider-client-secret\nhttps://mcp.example.com/mcp\nprovider-client-id")
+        .digest("base64url"),
+      tokenUrl: "https://example.cloudflareaccess.com/cdn-cgi/access/sso/oidc/client-123/token",
+    });
+  });
+
   it("ships an example auth2 config file that parses as the canonical oauth path", () => {
     const exampleConfig = parseAuthConfig(JSON.parse(
       readFileSync(new URL("../auth2.config.example.json", import.meta.url), "utf8"),
@@ -373,5 +433,8 @@ describe("config", () => {
     expect(readme).toContain("npm run preflight");
     expect(readme).toContain("auth2.config.example.json");
     expect(readme).toContain("MCP_AUTH2_CONFIG_PATH");
+    expect(readme).toContain("With an auth2 config file in place, the minimal remote OAuth env surface is:");
+    expect(readme).toContain("- `MCP_PUBLIC_URL`");
+    expect(readme).toContain("- `MCP_AUTH2_CONFIG_PATH`");
   });
 });
