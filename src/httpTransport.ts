@@ -37,6 +37,7 @@ import {
   runWithRequestContext,
 } from "./requestContext.js";
 import {
+  createDirectToolCallExecutor,
   createServer,
   createFastPathToolCallResults,
   type DiscoveryResourceUriMode,
@@ -107,6 +108,7 @@ type HttpDebugDetails = Record<string, unknown>;
 type InstallMcpPostRouteOptions = {
   app: express.Express;
   createManagedRequest: () => Promise<ManagedRequest>;
+  executeDirectToolCall?: (toolName: string, input: Record<string, unknown> | undefined) => Promise<CallToolResult>;
   fastPathResponses: () => {
     initializeResult: ReturnType<typeof getInitializeResult>;
     resourcesListResult?: ReturnType<typeof getResourcesListResult>;
@@ -117,6 +119,7 @@ type InstallMcpPostRouteOptions = {
   getRequestAuthDebugOptions: (req: Pick<Request, "path" | "url">) => { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean };
   getRequestDebugDetails: (req: Request, options?: { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean }) => Record<string, unknown>;
   getRequestPath: (req: Pick<Request, "path" | "url">) => string;
+  getToolCallArguments: (parsedBody: unknown) => Record<string, unknown> | undefined;
   getToolCallName: (parsedBody: unknown) => string | undefined;
   logHttpDebug: (event: string, details: Record<string, unknown>) => void;
   path: string;
@@ -726,11 +729,13 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
   const {
     app,
     createManagedRequest,
+    executeDirectToolCall,
     fastPathResponses,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
     getRequestDebugDetails,
     getRequestPath,
+    getToolCallArguments,
     getToolCallName,
     logHttpDebug,
     path,
@@ -840,6 +845,31 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
         }
       }
 
+      if (
+        authDebugOptions.authMode === "oauth" &&
+        !getSessionId(req) &&
+        executeDirectToolCall &&
+        jsonRpcMethod === "tools/call" &&
+        req.headers.authorization?.startsWith("Bearer ")
+      ) {
+        const toolName = getToolCallName(parsedBody);
+        const toolArguments = getToolCallArguments(parsedBody);
+        const toolCallParams = isRecord(parsedBody)
+          ? getRecordValueIfObject(parsedBody, "params")
+          : undefined;
+
+        if (toolName && !("task" in (toolCallParams ?? {}))) {
+          logHttpDebug("transport.handoff", {
+            ...getRequestDebugDetails(req, authDebugOptions),
+            ...getJsonRpcDebugDetails(parsedBody),
+            cleanup: false,
+            directToolDispatch: true,
+          });
+          writeJsonRpcResult(res, getJsonRpcId(parsedBody), await executeDirectToolCall(toolName, toolArguments));
+          return;
+        }
+      }
+
       const resolution = await resolveRequest(
         req,
         createManagedRequest,
@@ -938,6 +968,7 @@ export async function startHttpServer(
   const port = options.port ?? 3000;
   const ynab = assertYnabConfig(options.ynab);
   const sharedApi = dependencies.createApi?.(ynab) ?? createYnabApi(ynab);
+  const directToolCallExecutor = createDirectToolCallExecutor(ynab, sharedApi);
 
   if (auth.mode === "oauth") {
     allowedOrigins.add(new URL(auth.publicUrl).origin);
@@ -1148,9 +1179,11 @@ export async function startHttpServer(
     getRequestAuthDebugOptions,
     getRequestDebugDetails,
     getRequestPath,
+    getToolCallArguments,
     getToolCallName,
     logHttpDebug,
     path,
+    executeDirectToolCall: directToolCallExecutor.executeToolCall,
     resolveRequest: async (req, createRequest) => {
       const resolution = await resolveRequest(req, createRequest);
 
