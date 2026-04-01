@@ -295,18 +295,10 @@ describe("auth2 protected MCP resource", () => {
       }),
     });
 
-    expect(listResources.status).toBe(200);
-    await expect(listResources.json()).resolves.toMatchObject({
-      jsonrpc: "2.0",
-      id: 3,
-      result: {
-        resources: expect.arrayContaining([
-          expect.objectContaining({
-            name: "ynab_list_accounts",
-          }),
-        ]),
-      },
-    });
+    expect(listResources.status).toBe(401);
+    expect(listResources.headers.get("www-authenticate")).toContain(
+      "resource_metadata=",
+    );
 
     const callTool = await fetch(server.url, {
       method: "POST",

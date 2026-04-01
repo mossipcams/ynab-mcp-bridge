@@ -772,9 +772,12 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
       const authDebugOptions = getRequestAuthDebugOptions(req);
       const fastPathCache = fastPathResponses();
       const jsonRpcMethod = isRecord(parsedBody) ? getStringValue(parsedBody, "method") : undefined;
+      const isAuthlessResourcesListRequest = authDebugOptions.authMode === "none"
+        && !getSessionId(req)
+        && jsonRpcMethod === "resources/list";
       const isSessionlessPublicBootstrapRequest = !getSessionId(req) &&
         typeof jsonRpcMethod === "string" &&
-        isPublicMcpBootstrapMethod(jsonRpcMethod) &&
+        (isPublicMcpBootstrapMethod(jsonRpcMethod) || isAuthlessResourcesListRequest) &&
         (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !getRequestAuth(req)));
 
       if (isSessionlessPublicBootstrapRequest && fastPathCache && typeof jsonRpcMethod === "string") {
