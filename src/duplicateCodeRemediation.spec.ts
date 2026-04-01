@@ -156,10 +156,13 @@ describe("duplicate code remediation", () => {
     const packageSource = readFileSync(path.join(projectRoot, "package.json"), "utf8");
     const manifestSource = readFileSync(path.join(projectRoot, ".release-please-manifest.json"), "utf8");
     const changelogSource = readFileSync(path.join(projectRoot, "CHANGELOG.md"), "utf8");
+    const packageMetadata = JSON.parse(packageSource) as { version: string };
+    const manifestMetadata = JSON.parse(manifestSource) as Record<string, string>;
+    const currentVersion = packageMetadata.version;
 
-    expect(packageSource).toContain('"version": "0.15.18"');
-    expect(manifestSource).toContain('"." : "0.15.18"'.replace(" ", ""));
-    expect(changelogSource).toContain("## [0.15.18]");
+    expect(currentVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(manifestMetadata["."]).toBe(currentVersion);
+    expect(changelogSource).toContain(`## [${currentVersion}]`);
   });
 
   it("targets the superseded HTTP spread-out runtime helpers for deletion", () => {
