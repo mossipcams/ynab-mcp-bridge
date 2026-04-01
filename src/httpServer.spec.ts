@@ -2845,7 +2845,7 @@ describe("startHttpServer", () => {
     );
   });
 
-  it("challenges unauthenticated initialize requests on the MCP endpoint in oauth mode", async () => {
+  it("allows unauthenticated initialize requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2882,13 +2882,17 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      error: "invalid_token",
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+      },
     });
   });
 
-  it("challenges unauthenticated tools/list requests on the MCP endpoint in oauth mode", async () => {
+  it("allows unauthenticated tools/list requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2918,13 +2922,21 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      error: "invalid_token",
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_get_mcp_version",
+          }),
+        ]),
+      },
     });
   });
 
-  it("challenges unauthenticated resources/list requests on the MCP endpoint in oauth mode", async () => {
+  it("allows unauthenticated resources/list requests on the MCP endpoint in oauth mode", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2954,13 +2966,21 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      error: "invalid_token",
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_list_accounts",
+          }),
+        ]),
+      },
     });
   });
 
-  it("challenges the generic oauth bootstrap sequence until a bearer token is presented", async () => {
+  it("allows the generic oauth bootstrap sequence while still challenging protected tool calls", async () => {
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
       ynab,
@@ -2997,7 +3017,14 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(initializeResponse.status).toBe(401);
+    expect(initializeResponse.status).toBe(200);
+    await expect(initializeResponse.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+      },
+    });
 
     const challengeResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -3045,7 +3072,7 @@ describe("startHttpServer", () => {
     });
   });
 
-  it("challenges unauthenticated Claude discovery requests and still records protected tool-call challenges", async () => {
+  it("allows unauthenticated Claude discovery requests and still records protected tool-call challenges", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { jwksUrl } = await startJwksServer();
     const httpServer = await startHttpServer({
@@ -3082,7 +3109,18 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(toolsListResponse.status).toBe(401);
+    expect(toolsListResponse.status).toBe(200);
+    await expect(toolsListResponse.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_get_mcp_version",
+          }),
+        ]),
+      },
+    });
 
     const resourcesListResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -3095,7 +3133,18 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(resourcesListResponse.status).toBe(401);
+    expect(resourcesListResponse.status).toBe(200);
+    await expect(resourcesListResponse.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 2,
+      result: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_list_accounts",
+          }),
+        ]),
+      },
+    });
 
     const challengeResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -3121,7 +3170,7 @@ describe("startHttpServer", () => {
     ))).toBeTruthy();
   });
 
-  it("challenges sessionless oauth bootstrap requests without acquiring a managed runtime", async () => {
+  it("serves sessionless oauth bootstrap requests without acquiring a managed runtime", async () => {
     const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
       createServer(...args)
     ));
@@ -3169,7 +3218,14 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(initializeResponse.status).toBe(401);
+    expect(initializeResponse.status).toBe(200);
+    await expect(initializeResponse.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+      },
+    });
     expect(managedRequestCount).toBe(0);
     expect(createServerSpy).not.toHaveBeenCalled();
   });

@@ -59,7 +59,7 @@ describe("auth2 protected MCP resource", () => {
     };
   }
 
-  it("protects /mcp with auth2-issued bearer tokens", async () => {
+  it("protects tool calls on /mcp with auth2-issued bearer tokens while leaving bootstrap public", async () => {
     const upstream = await startUpstreamOAuthServer(cleanups);
     const server = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
@@ -100,7 +100,7 @@ describe("auth2 protected MCP resource", () => {
     });
     cleanups.push(() => server.close());
 
-    const unauthorized = await fetch(server.url, {
+    const bootstrap = await fetch(server.url, {
       method: "POST",
       headers: {
         Accept: "application/json, text/event-stream",
@@ -119,6 +119,34 @@ describe("auth2 protected MCP resource", () => {
             name: "auth2-client",
             version: "1.0.0",
           },
+        },
+      }),
+    });
+
+    expect(bootstrap.status).toBe(200);
+    await expect(bootstrap.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+      },
+    });
+
+    const unauthorized = await fetch(server.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
         },
       }),
     });
@@ -137,6 +165,69 @@ describe("auth2 protected MCP resource", () => {
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(authorized.status).toBe(200);
+  });
+
+  it("allows unauthenticated MCP bootstrap methods while keeping tool calls protected", async () => {
+    const upstream = await startUpstreamOAuthServer(cleanups);
+    const server = await startHttpServer({
+      allowedOrigins: ["https://claude.ai"],
+      auth: createCloudflareOAuthAuth({
+        authorizationUrl: upstream.authorizationUrl,
+        issuer: upstream.issuer,
+        jwksUrl: upstream.jwksUrl,
+        tokenUrl: upstream.tokenUrl,
+      }),
+      auth2Config: parseAuthConfig({
+        accessTokenTtlSec: 3600,
+        authCodeTtlSec: 300,
+        callbackPath: "/oauth/callback",
+        clients: [
+          {
+            clientId: "client-a",
+            providerId: "default",
+            redirectUri: "https://claude.ai/oauth/callback",
+            scopes: ["openid", "profile"],
+          },
+        ],
+        provider: {
+          authorizationEndpoint: upstream.authorizationUrl,
+          clientId: "cloudflare-client-id",
+          clientSecret: "cloudflare-client-secret",
+          issuer: upstream.issuer,
+          jwksUri: upstream.jwksUrl,
+          tokenEndpoint: upstream.tokenUrl,
+          usePkce: true,
+        },
+        publicBaseUrl: "http://127.0.0.1",
+        refreshTokenTtlSec: 2_592_000,
+      }),
+      host: "127.0.0.1",
+      path: "/mcp",
+      port: 0,
+      ynab,
+    });
+    cleanups.push(() => server.close());
+
+    const initialize = await fetch(server.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
         id: 1,
         method: "initialize",
         params: {
@@ -150,7 +241,97 @@ describe("auth2 protected MCP resource", () => {
       }),
     });
 
-    expect(authorized.status).toBe(200);
+    expect(initialize.status).toBe(200);
+    await expect(initialize.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+      },
+    });
+
+    const listTools = await fetch(server.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(listTools.status).toBe(200);
+    await expect(listTools.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 2,
+      result: {
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_get_mcp_version",
+          }),
+        ]),
+      },
+    });
+
+    const listResources = await fetch(server.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "resources/list",
+        params: {},
+      }),
+    });
+
+    expect(listResources.status).toBe(200);
+    await expect(listResources.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 3,
+      result: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_list_accounts",
+          }),
+        ]),
+      },
+    });
+
+    const callTool = await fetch(server.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(callTool.status).toBe(401);
+    await expect(callTool.json()).resolves.toMatchObject({
+      error: "invalid_token",
+      error_description: "Missing bearer token.",
+    });
   });
 
   it("serves canonical protected-resource metadata from auth2", async () => {

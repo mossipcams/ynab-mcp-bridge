@@ -5,6 +5,7 @@ import { createPkcePair } from "../core/pkce.js";
 import { logAuthEvent } from "../logging/authEvents.js";
 import { createProviderAdapter } from "../provider/providerAdapter.js";
 import { createFileAuthStore, createInMemoryAuthStore } from "../store/authStore.js";
+import { isPublicMcpBootstrapMethod } from "../../authAdmissionPolicy.js";
 function getIssuerUrl(auth) {
     return new URL("/", new URL(auth.publicUrl).origin).href;
 }
@@ -137,6 +138,7 @@ export function installAuthV2Routes(context) {
     const auth = context.auth;
     const auth2Config = context.auth2Config;
     const protectedPathPrefix = `${context.path.replace(/\/$/, "")}/resources/`;
+    const mcpJsonParser = express.json();
     const { core, store } = createRouteCore(auth2Config, auth);
     const metadata = getMetadataEndpoints(auth);
     const scopesSupported = getSupportedScopes(auth2Config);
@@ -187,12 +189,28 @@ export function installAuthV2Routes(context) {
         }
     });
     context.app.use((req, res, next) => {
+        if (req.path === context.path && req.method === "POST") {
+            mcpJsonParser(req, res, next);
+            return;
+        }
+        next();
+    });
+    context.app.use((req, res, next) => {
         const isProtectedRequest = req.path === context.path || req.path.startsWith(protectedPathPrefix);
         if (!isProtectedRequest) {
             next();
             return;
         }
         const authorization = req.headers.authorization;
+        const jsonRpcMethod = req.path === context.path && req.method === "POST"
+            ? getSingleString(req.body?.["method"])
+            : undefined;
+        if (!authorization?.startsWith("Bearer ") &&
+            typeof req.headers["cf-access-jwt-assertion"] !== "string" &&
+            isPublicMcpBootstrapMethod(jsonRpcMethod)) {
+            next();
+            return;
+        }
         if (!authorization?.startsWith("Bearer ")) {
             res.status(401).setHeader("www-authenticate", `Bearer realm="mcp", resource_metadata="${metadata.protectedResourceMetadataUrl}"`).json({
                 error: "invalid_token",
