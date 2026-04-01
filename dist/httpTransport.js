@@ -1,23 +1,17 @@
 import express from "express";
-import { decodeJwt } from "jose";
 import { hostHeaderValidation, localhostHostValidation, } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { assertYnabConfig, validateCloudflareAccessOAuthSettings, } from "./config.js";
+import { installAuthV2Routes } from "./auth2/http/routes.js";
+import { isPublicMcpBootstrapMethod } from "./authAdmissionPolicy.js";
 import { logAppEvent } from "./logger.js";
-import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
-import { detectInitializeClientProfile, detectClientProfile, reconcileClientProfile, } from "./clientProfiles/detectClient.js";
-import { getClientProfile } from "./clientProfiles/index.js";
-import { getResolvedClientProfile, setResolvedClientProfile } from "./clientProfiles/profileContext.js";
-import { logClientProfileEvent } from "./clientProfiles/profileLogger.js";
 import { applyCorsHeaders, installCorsGuard, normalizeOrigin, resolveOriginPolicy } from "./originPolicy.js";
 import { getFirstHeaderValue, isLoopbackHostname } from "./headerUtils.js";
 import { createRequestContext, getCorrelationHeaderName, getRequestLogFields, hasToolCallStarted, runWithRequestContext, } from "./requestContext.js";
-import { createMcpAuthModule, installOAuthRoutes } from "./oauthRuntime.js";
 import { createServer, createFastPathToolCallResults, getDiscoveryResourceDocument, getDiscoveryResourceSummaries, getInitializeResult, getResourcesListResult, getToolsListResult, } from "./serverRuntime.js";
 import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 import { createYnabApi } from "./ynabApi.js";
 const HTTP_ALLOWED_METHODS = ["POST"];
-const CF_ACCESS_AUTHORIZATION_SOURCE_HEADER = "x-mcp-cf-access-authorization-source";
 class StreamableTransportAdapter {
     transport;
     onclose = () => { };
@@ -54,58 +48,8 @@ function getRequestPath(req) {
     }
     return new URL(req.url, "http://127.0.0.1").pathname;
 }
-function toClientProfileHeaders(headers) {
-    const normalizedHeaders = {};
-    for (const [name, value] of Object.entries(headers)) {
-        if (typeof value === "string" || Array.isArray(value)) {
-            normalizedHeaders[name] = value;
-            continue;
-        }
-        normalizedHeaders[name] = undefined;
-    }
-    return normalizedHeaders;
-}
-function toClientProfileRequestContext(req) {
-    return {
-        headers: toClientProfileHeaders(req.headers),
-        method: req.method ?? "GET",
-        path: getRequestPath(req),
-    };
-}
-function getCanonicalOAuthDiscoveryPath(pathname, profileId) {
-    if (profileId === "chatgpt") {
-        return undefined;
-    }
-    const profile = getClientProfile(profileId);
-    const canonicalPath = "/.well-known/oauth-authorization-server";
-    if (!profile.oauth.tolerateExtraDiscoveryProbes || pathname === canonicalPath) {
-        return undefined;
-    }
-    return profile.oauth.discoveryPathVariants.includes(pathname)
-        ? canonicalPath
-        : undefined;
-}
-function getBearerToken(authorizationHeader) {
-    if (!authorizationHeader?.startsWith("Bearer ")) {
-        return undefined;
-    }
-    return authorizationHeader.slice("Bearer ".length).trim();
-}
-function isDirectUpstreamBearerToken(req, auth) {
-    const authorizationSource = getFirstHeaderValue(req.headers[CF_ACCESS_AUTHORIZATION_SOURCE_HEADER]);
-    if (authorizationSource === "cf-access-jwt-assertion") {
-        return false;
-    }
-    const token = getBearerToken(getFirstHeaderValue(req.headers.authorization));
-    if (!token) {
-        return false;
-    }
-    try {
-        return decodeJwt(token).iss === auth.issuer;
-    }
-    catch {
-        return false;
-    }
+function getMcpResourceDocumentsPathPrefix(path) {
+    return `${path.replace(/\/$/, "")}/resources/`;
 }
 function writeJson(res, statusCode, body) {
     res.status(statusCode);
@@ -183,11 +127,12 @@ function hasHeaderValue(value) {
     return Boolean(getFirstHeaderValue(value));
 }
 function getRequestDebugDetails(req, options = {}) {
-    const authSubject = req.auth?.extra?.["subject"];
+    const requestAuth = req.auth;
+    const authSubject = requestAuth?.extra?.["subject"];
     return {
         ...getRequestLogFields(),
         authMode: options.authMode,
-        authClientId: req.auth?.clientId,
+        authClientId: requestAuth?.clientId,
         authRequired: options.authRequired,
         authSubject: typeof authSubject === "string" ? authSubject : undefined,
         hasAuthorizationHeader: hasHeaderValue(req.headers.authorization),
@@ -213,22 +158,6 @@ function getJsonRpcDebugDetails(parsedBody) {
         details["jsonRpcId"] = parsedBody["id"];
     }
     return details;
-}
-function getInitializeParams(parsedBody) {
-    if (!isRecord(parsedBody)) {
-        return undefined;
-    }
-    if (getStringValue(parsedBody, "method") !== "initialize") {
-        return undefined;
-    }
-    const params = getRecordValueIfObject(parsedBody, "params");
-    if (!params) {
-        return undefined;
-    }
-    return {
-        capabilities: params["capabilities"],
-        clientInfo: params["clientInfo"],
-    };
 }
 function getToolCallName(parsedBody) {
     if (!isRecord(parsedBody)) {
@@ -392,9 +321,6 @@ function getBodyStringValue(body, key) {
     }
     return getStringValue(body, key);
 }
-function getPersistedOAuthProfileReason(profileId) {
-    return `oauth-client-profile:${profileId}`;
-}
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (Array.isArray(sessionId)) {
@@ -517,7 +443,7 @@ function allowsOpaqueNullOrigin(req, authMode) {
         getRequestPath(req) === "/authorize/consent";
 }
 export function installMcpPostRoute(options) {
-    const { app, createManagedRequest, fastPathResponses, getInitializeParams, getJsonRpcDebugDetails, getRequestAuthDebugOptions, getRequestDebugDetails, getRequestPath, getToolCallName, logHttpDebug, path, resolveRequest, writeMethodNotAllowed, writeRequestResolution, } = options;
+    const { app, createManagedRequest, fastPathResponses, getJsonRpcDebugDetails, getRequestAuthDebugOptions, getRequestDebugDetails, getRequestPath, getToolCallName, logHttpDebug, path, resolveRequest, writeMethodNotAllowed, writeRequestResolution, } = options;
     app.use(async (req, res, next) => {
         if (getRequestPath(req) !== path) {
             next();
@@ -544,47 +470,19 @@ export function installMcpPostRoute(options) {
         }
         let cleanup = async () => { };
         try {
-            const provisionalProfile = getResolvedClientProfile(res.locals);
-            const initializeParams = getInitializeParams(parsedBody);
-            if (provisionalProfile && initializeParams) {
-                const confirmedProfile = detectInitializeClientProfile({
-                    capabilities: initializeParams.capabilities,
-                    clientInfo: initializeParams.clientInfo,
-                });
-                const reconciliation = reconcileClientProfile(provisionalProfile, confirmedProfile);
-                setResolvedClientProfile(res.locals, reconciliation.profile);
-                if (!reconciliation.mismatch && confirmedProfile) {
-                    logClientProfileEvent("profile.detected", {
-                        method: req.method ?? "GET",
-                        path: getRequestPath(req),
-                        profileId: confirmedProfile.profileId,
-                        reason: confirmedProfile.reason,
-                    });
-                }
-                else if (reconciliation.mismatch && confirmedProfile) {
-                    logClientProfileEvent("profile.reconciled", {
-                        confirmedProfileId: confirmedProfile.profileId,
-                        method: req.method ?? "GET",
-                        path: getRequestPath(req),
-                        profileId: reconciliation.profile.profileId,
-                        provisionalProfileId: provisionalProfile.profileId,
-                        reason: reconciliation.profile.reason,
-                    });
-                }
-            }
-            const resolvedProfile = getResolvedClientProfile(res.locals);
             const authDebugOptions = getRequestAuthDebugOptions(req);
             const fastPathCache = fastPathResponses();
-            const isSessionlessAuthlessRequest = authDebugOptions.authMode === "none" && !getSessionId(req);
             const jsonRpcMethod = isRecord(parsedBody) ? getStringValue(parsedBody, "method") : undefined;
-            if (isSessionlessAuthlessRequest && fastPathCache && typeof jsonRpcMethod === "string") {
+            const isSessionlessPublicBootstrapRequest = !getSessionId(req) &&
+                typeof jsonRpcMethod === "string" &&
+                isPublicMcpBootstrapMethod(jsonRpcMethod) &&
+                (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !req.auth));
+            if (isSessionlessPublicBootstrapRequest && fastPathCache && typeof jsonRpcMethod === "string") {
                 if (jsonRpcMethod === "initialize") {
                     logHttpDebug("transport.handoff", {
                         ...getRequestDebugDetails(req, authDebugOptions),
                         ...getJsonRpcDebugDetails(parsedBody),
                         cleanup: false,
-                        profileId: resolvedProfile?.profileId,
-                        profileReason: resolvedProfile?.reason,
                     });
                     writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.initializeResult);
                     return;
@@ -594,10 +492,17 @@ export function installMcpPostRoute(options) {
                         ...getRequestDebugDetails(req, authDebugOptions),
                         ...getJsonRpcDebugDetails(parsedBody),
                         cleanup: false,
-                        profileId: resolvedProfile?.profileId,
-                        profileReason: resolvedProfile?.reason,
                     });
                     writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.toolsListResult);
+                    return;
+                }
+                if (jsonRpcMethod === "notifications/initialized") {
+                    logHttpDebug("transport.handoff", {
+                        ...getRequestDebugDetails(req, authDebugOptions),
+                        ...getJsonRpcDebugDetails(parsedBody),
+                        cleanup: false,
+                    });
+                    res.status(202).end();
                     return;
                 }
                 if (jsonRpcMethod === "resources/list" && fastPathCache.resourcesListResult) {
@@ -605,8 +510,6 @@ export function installMcpPostRoute(options) {
                         ...getRequestDebugDetails(req, authDebugOptions),
                         ...getJsonRpcDebugDetails(parsedBody),
                         cleanup: false,
-                        profileId: resolvedProfile?.profileId,
-                        profileReason: resolvedProfile?.reason,
                     });
                     logHttpDebug("resource.list.advertised", {
                         ...getRequestDebugDetails(req, authDebugOptions),
@@ -617,14 +520,14 @@ export function installMcpPostRoute(options) {
                     writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.resourcesListResult);
                     return;
                 }
-                if (jsonRpcMethod === "tools/call") {
-                    const toolName = getToolCallName(parsedBody);
-                    const toolArguments = getToolCallArguments(parsedBody);
-                    const fastPathResult = toolName ? fastPathCache.toolCallResults.get(toolName) : undefined;
-                    if (fastPathResult && isEmptyRecord(toolArguments)) {
-                        writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathResult);
-                        return;
-                    }
+            }
+            if (authDebugOptions.authMode === "none" && !getSessionId(req) && fastPathCache && jsonRpcMethod === "tools/call") {
+                const toolName = getToolCallName(parsedBody);
+                const toolArguments = getToolCallArguments(parsedBody);
+                const fastPathResult = toolName ? fastPathCache.toolCallResults.get(toolName) : undefined;
+                if (fastPathResult && isEmptyRecord(toolArguments)) {
+                    writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathResult);
+                    return;
                 }
             }
             const resolution = await resolveRequest(req, createManagedRequest);
@@ -653,8 +556,6 @@ export function installMcpPostRoute(options) {
                 ...getRequestDebugDetails(req, authDebugOptions),
                 ...getJsonRpcDebugDetails(parsedBody),
                 cleanup: Boolean(resolution.cleanup),
-                profileId: resolvedProfile?.profileId,
-                profileReason: resolvedProfile?.reason,
             });
             if (isRecord(parsedBody) && getStringValue(parsedBody, "method") === "resources/list") {
                 logHttpDebug("resource.list.advertised", {
@@ -718,11 +619,10 @@ export async function startHttpServer(options, dependencies = {}) {
             jwksUrl: auth.jwksUrl,
             tokenUrl: auth.tokenUrl,
         });
+        if (!options.auth2Config) {
+            throw new Error("OAuth HTTP mode requires auth2Config.");
+        }
     }
-    const mcpAuthModule = auth.mode === "oauth" ? createMcpAuthModule(auth) : undefined;
-    const cloudflareCompatibilityMiddleware = auth.mode === "oauth"
-        ? createCloudflareAccessCompatibilityMiddleware(auth)
-        : undefined;
     const app = express();
     const jsonParser = express.json();
     const urlencodedParser = express.urlencoded({ extended: false });
@@ -736,7 +636,10 @@ export async function startHttpServer(options, dependencies = {}) {
         rejectStartupReady = reject;
     });
     function getRequestAuthDebugOptions(req) {
-        const isProtectedMcpRequest = auth.mode === "oauth" && getRequestPath(req) === path;
+        const requestPath = getRequestPath(req);
+        const jsonRpcMethod = getBodyStringValue(req.body, "method");
+        const isProtectedMcpRequest = auth.mode === "oauth" && (requestPath.startsWith(getMcpResourceDocumentsPathPrefix(path)) ||
+            (requestPath === path && !isPublicMcpBootstrapMethod(jsonRpcMethod)));
         return {
             authMode: auth.mode,
             ...(isProtectedMcpRequest ? { authRequired: true } : {}),
@@ -746,7 +649,11 @@ export async function startHttpServer(options, dependencies = {}) {
     app.set("trust proxy", 1);
     app.use((req, res, next) => {
         const requestContext = createRequestContext(req.headers);
-        runWithRequestContext(requestContext, () => {
+        runWithRequestContext({
+            ...requestContext,
+            method: req.method,
+            path: getRequestPath(req),
+        }, () => {
             res.setHeader(getCorrelationHeaderName(), requestContext.correlationId);
             next();
         });
@@ -763,28 +670,6 @@ export async function startHttpServer(options, dependencies = {}) {
         next();
     });
     app.use((req, res, next) => {
-        const tokenClientId = auth.mode === "oauth" &&
-            getRequestPath(req) === "/token" &&
-            req.method === "POST"
-            ? getBodyStringValue(req.body, "client_id")
-            : undefined;
-        const persistedProfileId = auth.mode === "oauth" && tokenClientId
-            ? mcpAuthModule?.getClientCompatibilityProfile(tokenClientId)
-            : undefined;
-        const requestProfile = detectClientProfile(toClientProfileRequestContext(req));
-        const detectedProfile = persistedProfileId && requestProfile.profileId === "generic"
-            ? {
-                profileId: persistedProfileId,
-                reason: getPersistedOAuthProfileReason(persistedProfileId),
-            }
-            : requestProfile;
-        setResolvedClientProfile(res.locals, detectedProfile);
-        logClientProfileEvent("profile.detected", {
-            method: req.method ?? "GET",
-            path: getRequestPath(req),
-            profileId: detectedProfile.profileId,
-            reason: detectedProfile.reason,
-        });
         next();
     });
     if (allowedHosts.length > 0) {
@@ -814,20 +699,12 @@ export async function startHttpServer(options, dependencies = {}) {
         next();
     });
     if (auth.mode === "oauth") {
-        installOAuthRoutes({
+        const auth2Config = options.auth2Config;
+        installAuthV2Routes({
             app,
             auth,
-            cloudflareCompatibilityMiddleware: cloudflareCompatibilityMiddleware,
-            getCanonicalOAuthDiscoveryPath,
-            getPersistedOAuthProfileReason,
-            getRequestAuthDebugOptions,
-            getRequestDebugDetails,
-            getRequestPath,
-            isDirectUpstreamBearerToken,
-            jsonParser,
-            logHttpDebug,
-            mcpAuthModule: mcpAuthModule,
             path,
+            auth2Config,
         });
     }
     app.use((req, res, next) => {
@@ -891,7 +768,6 @@ export async function startHttpServer(options, dependencies = {}) {
             return createManagedRequestFromRuntimePool(runtimePool, discoveryResourceBaseUrl ? { discoveryResourceBaseUrl } : {});
         },
         fastPathResponses: () => fastPathCache,
-        getInitializeParams,
         getJsonRpcDebugDetails,
         getRequestAuthDebugOptions,
         getRequestDebugDetails,

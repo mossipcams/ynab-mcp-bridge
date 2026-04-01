@@ -56,6 +56,8 @@ export function getRequestLogFields() {
     }
     return {
         correlationId: context.correlationId,
+        ...(typeof context.method === "string" ? { method: context.method } : {}),
+        ...(typeof context.path === "string" ? { path: context.path } : {}),
         requestId: context.requestId,
     };
 }

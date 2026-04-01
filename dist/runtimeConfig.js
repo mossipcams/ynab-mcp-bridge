@@ -168,6 +168,12 @@ function buildCloudflareAccessUrls(hostname, clientId) {
 function getDefaultOAuthStorePath() {
     return path.join(homedir(), ".ynab-mcp-bridge", "oauth-store.json");
 }
+function getAuth2Scopes(auth2Config) {
+    if (!auth2Config) {
+        return [];
+    }
+    return Array.from(new Set(auth2Config.clients.flatMap((client) => client.scopes)));
+}
 function deriveTokenSigningSecret(clientSecret, publicUrl, clientId) {
     if (!clientSecret || !publicUrl || !clientId) {
         return undefined;
@@ -211,27 +217,34 @@ function readDeploymentMode(args, env) {
     }
     return legacyAuthMode === "oauth" ? "oauth-single-tenant" : "authless";
 }
-function resolveRuntimeAuthConfig(args, env) {
+function resolveRuntimeAuthConfig(args, env, options) {
     const deployment = readDeploymentMode(args, env);
     const explicitDeploymentMode = readOptionalValue(readFlag(args, "--deployment-mode")) ?? readOptionalValue(env["MCP_DEPLOYMENT_MODE"]);
+    const auth2Config = options?.auth2Config;
     if (deployment === "authless") {
         return {
             deployment,
             mode: "none",
         };
     }
-    const callbackPath = readPathValue(readFlag(args, "--oauth-callback-path") ?? env["MCP_OAUTH_CALLBACK_PATH"] ?? "/oauth/callback", "MCP_OAUTH_CALLBACK_PATH");
+    const callbackPath = readPathValue(readFlag(args, "--oauth-callback-path") ?? env["MCP_OAUTH_CALLBACK_PATH"] ?? "/oauth/callback", "MCP_OAUTH_CALLBACK_PATH") ?? auth2Config?.callbackPath;
     const publicUrl = readUrlLikeValue(readFlag(args, "--public-url") ?? env["MCP_PUBLIC_URL"], "MCP_PUBLIC_URL");
-    const clientId = readOptionalValue(readFlag(args, "--oauth-client-id") ?? env["MCP_OAUTH_CLIENT_ID"]);
-    const clientSecret = readOptionalValue(readFlag(args, "--oauth-client-secret") ?? env["MCP_OAUTH_CLIENT_SECRET"]);
+    const clientId = readOptionalValue(readFlag(args, "--oauth-client-id") ?? env["MCP_OAUTH_CLIENT_ID"])
+        ?? auth2Config?.provider.clientId;
+    const clientSecret = readOptionalValue(readFlag(args, "--oauth-client-secret") ?? env["MCP_OAUTH_CLIENT_SECRET"])
+        ?? auth2Config?.provider.clientSecret;
     const cloudflareDomain = readHostnameLikeValue(readFlag(args, "--oauth-cloudflare-domain") ?? env["MCP_OAUTH_CLOUDFLARE_DOMAIN"], "MCP_OAUTH_CLOUDFLARE_DOMAIN");
     const cloudflareAccessUrls = buildCloudflareAccessUrls(cloudflareDomain, clientId);
     const issuer = readUrlLikeValue(readFlag(args, "--oauth-issuer") ?? env["MCP_OAUTH_ISSUER"], "MCP_OAUTH_ISSUER")
+        ?? auth2Config?.provider.issuer
         ?? cloudflareAccessUrls?.issuer;
-    const authorizationUrl = readUrlLikeValue(readFlag(args, "--oauth-authorization-url") ?? env["MCP_OAUTH_AUTHORIZATION_URL"], "MCP_OAUTH_AUTHORIZATION_URL") ?? cloudflareAccessUrls?.authorizationUrl;
+    const authorizationUrl = readUrlLikeValue(readFlag(args, "--oauth-authorization-url") ?? env["MCP_OAUTH_AUTHORIZATION_URL"], "MCP_OAUTH_AUTHORIZATION_URL") ?? auth2Config?.provider.authorizationEndpoint
+        ?? cloudflareAccessUrls?.authorizationUrl;
     const tokenUrl = readUrlLikeValue(readFlag(args, "--oauth-token-url") ?? env["MCP_OAUTH_TOKEN_URL"], "MCP_OAUTH_TOKEN_URL")
+        ?? auth2Config?.provider.tokenEndpoint
         ?? cloudflareAccessUrls?.tokenUrl;
     const jwksUrl = readUrlLikeValue(readFlag(args, "--oauth-jwks-url") ?? env["MCP_OAUTH_JWKS_URL"], "MCP_OAUTH_JWKS_URL")
+        ?? auth2Config?.provider.jwksUri
         ?? cloudflareAccessUrls?.jwksUrl;
     const audience = readOptionalValue(readFlag(args, "--oauth-audience") ?? env["MCP_OAUTH_AUDIENCE"]) ?? publicUrl;
     const skipLocalConsent = readBooleanValue(readFlag(args, "--oauth-skip-local-consent") ?? env["MCP_OAUTH_SKIP_LOCAL_CONSENT"], "MCP_OAUTH_SKIP_LOCAL_CONSENT");
@@ -252,7 +265,10 @@ function resolveRuntimeAuthConfig(args, env) {
         jwksUrl,
         tokenUrl,
     });
-    const scopes = getEffectiveOAuthScopes(parseCsv(readFlag(args, "--oauth-scopes") ?? env["MCP_OAUTH_SCOPES"] ?? ""));
+    const configuredScopes = readFlag(args, "--oauth-scopes") ?? env["MCP_OAUTH_SCOPES"];
+    const scopes = getEffectiveOAuthScopes(configuredScopes
+        ? parseCsv(configuredScopes)
+        : getAuth2Scopes(auth2Config));
     return {
         audience,
         authorizationUrl,
@@ -285,7 +301,7 @@ function getConfiguredList(args, env, flagName, envName) {
     const envValues = env[envName] ? parseCsv(env[envName]) : undefined;
     return flagValues.length > 0 ? flagValues : (envValues ?? []);
 }
-export function resolveRuntimeConfig(args, env) {
+export function resolveRuntimeConfig(args, env, options) {
     const rawTransport = readFlag(args, "--transport") ?? env["MCP_TRANSPORT"] ?? "http";
     const transport = parseTransport(rawTransport);
     const rawPort = readFlag(args, "--port") ?? env["MCP_PORT"] ?? "3000";
@@ -295,7 +311,7 @@ export function resolveRuntimeConfig(args, env) {
     }
     const resolvedAllowedOrigins = getConfiguredList(args, env, "--allowed-origins", "MCP_ALLOWED_ORIGINS");
     const resolvedAllowedHosts = getConfiguredList(args, env, "--allowed-hosts", "MCP_ALLOWED_HOSTS");
-    const auth = resolveRuntimeAuthConfig(args, env);
+    const auth = resolveRuntimeAuthConfig(args, env, options);
     if (auth.mode === "oauth" && transport !== "http") {
         throw new Error("OAuth deployment modes require HTTP transport.");
     }

@@ -15,3 +15,6 @@ export function logStartupFailure(error, logger = getAppLogger()) {
         error,
     });
 }
+export function logAuthConfigLoaded(details, logger = getAppLogger()) {
+    logEvent(logger, "startup", "auth.config.loaded", details);
+}

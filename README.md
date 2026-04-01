@@ -21,8 +21,8 @@ It gives MCP clients a shared YNAB backend over either:
 | Mode | Use it when | Auth | Key settings |
 | --- | --- | --- | --- |
 | `http` + `authless` | Local use or a trusted self-hosted setup | None | `YNAB_API_TOKEN` |
-| `http` + `oauth-single-tenant` | Remote client access behind an upstream IdP | MCP-side OAuth | `MCP_PUBLIC_URL` and OAuth settings |
-| `http` + `oauth-hardened` | Same as above, but fail closed unless origins are explicitly allowed | MCP-side OAuth | OAuth settings plus `MCP_ALLOWED_ORIGINS` |
+| `http` + `oauth-single-tenant` | Remote client access behind an upstream IdP | MCP-side OAuth | `MCP_PUBLIC_URL` and `MCP_AUTH2_CONFIG_PATH` |
+| `http` + `oauth-hardened` | Same as above, but fail closed unless origins are explicitly allowed | MCP-side OAuth | `MCP_PUBLIC_URL`, `MCP_AUTH2_CONFIG_PATH`, and `MCP_ALLOWED_ORIGINS` |
 | `stdio` | Local desktop clients and debugging | None | `YNAB_API_TOKEN` |
 
 `authless` is the default deployment mode. `http` is the default transport.
@@ -103,16 +103,19 @@ MCP_HOST=0.0.0.0 \
 MCP_ALLOWED_ORIGINS=https://claude.ai \
 MCP_DEPLOYMENT_MODE=oauth-single-tenant \
 MCP_PUBLIC_URL=https://mcp.example.com/mcp \
-MCP_OAUTH_CLOUDFLARE_DOMAIN=example.cloudflareaccess.com \
-MCP_OAUTH_CLIENT_ID=cloudflare-access-client-id \
-MCP_OAUTH_CLIENT_SECRET=cloudflare-access-client-secret \
-MCP_OAUTH_SCOPES=openid,profile \
 MCP_AUTH2_CONFIG_PATH=./auth2.config.example.json \
 YNAB_API_TOKEN=your-token \
 npm run start:http
 ```
 
 The checked-in [auth2.config.example.json](/Users/matt/Desktop/Projects/ynab-mcp-bridge/auth2.config.example.json) shows the canonical auth2 file shape loaded through `MCP_AUTH2_CONFIG_PATH`. Copy it to a private path, replace the placeholder provider values, and keep `/oauth/callback` as the callback path.
+
+With an auth2 config file in place, the minimal remote OAuth env surface is:
+
+- `MCP_PUBLIC_URL`
+- `MCP_AUTH2_CONFIG_PATH`
+
+Legacy `MCP_OAUTH_*` settings are still supported as compatibility overrides, but they are no longer required for the primary auth2 HTTP path.
 
 ## Environment Variables
 
@@ -149,19 +152,20 @@ Notes:
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `MCP_PUBLIC_URL` | Yes in OAuth modes | Public MCP URL, for example `https://mcp.example.com/mcp` |
-| `MCP_OAUTH_CLOUDFLARE_DOMAIN` | Optional | Shortcut for Cloudflare Access endpoint derivation |
-| `MCP_OAUTH_ISSUER` | Yes unless Cloudflare shortcut is used | Upstream issuer |
-| `MCP_OAUTH_AUTHORIZATION_URL` | Yes unless Cloudflare shortcut is used | Upstream authorization endpoint |
-| `MCP_OAUTH_TOKEN_URL` | Yes unless Cloudflare shortcut is used | Upstream token endpoint |
-| `MCP_OAUTH_JWKS_URL` | Yes unless Cloudflare shortcut is used | Upstream JWKS endpoint |
+| `MCP_AUTH2_CONFIG_PATH` | Yes in OAuth modes | Path to the auth2 JSON config file |
 | `MCP_OAUTH_AUDIENCE` | No | Defaults to `MCP_PUBLIC_URL` |
-| `MCP_OAUTH_CLIENT_ID` | Yes in OAuth modes | Upstream confidential client ID |
-| `MCP_OAUTH_CLIENT_SECRET` | Yes in OAuth modes | Upstream confidential client secret |
 | `MCP_OAUTH_STORE_PATH` | No | Defaults to `~/.ynab-mcp-bridge/oauth-store.json` |
 | `MCP_OAUTH_TOKEN_SIGNING_SECRET` | No | Defaults to a stable derived secret |
 | `MCP_OAUTH_CALLBACK_PATH` | No | Defaults to `/oauth/callback` |
 | `MCP_OAUTH_SKIP_LOCAL_CONSENT` | No | Set to `true` to bypass the bridge-hosted approval screen for every OAuth client |
-| `MCP_OAUTH_SCOPES` | No | Comma-separated scopes to advertise and require |
+| `MCP_OAUTH_SCOPES` | No | Comma-separated runtime scope override; defaults to the auth2 config scopes |
+| `MCP_OAUTH_CLOUDFLARE_DOMAIN` | Optional compatibility override | Shortcut for Cloudflare Access endpoint derivation |
+| `MCP_OAUTH_ISSUER` | Optional compatibility override | Upstream issuer |
+| `MCP_OAUTH_AUTHORIZATION_URL` | Optional compatibility override | Upstream authorization endpoint |
+| `MCP_OAUTH_TOKEN_URL` | Optional compatibility override | Upstream token endpoint |
+| `MCP_OAUTH_JWKS_URL` | Optional compatibility override | Upstream JWKS endpoint |
+| `MCP_OAUTH_CLIENT_ID` | Optional compatibility override | Upstream confidential client ID |
+| `MCP_OAUTH_CLIENT_SECRET` | Optional compatibility override | Upstream confidential client secret |
 
 ## How HTTP Mode Behaves
 
@@ -181,11 +185,9 @@ Notes:
 For Cloudflare Access, the simplest setup is:
 
 - `MCP_PUBLIC_URL`
-- `MCP_OAUTH_CLOUDFLARE_DOMAIN`
-- `MCP_OAUTH_CLIENT_ID`
-- `MCP_OAUTH_CLIENT_SECRET`
+- `MCP_AUTH2_CONFIG_PATH`
 
-The bridge will derive the per-application OIDC SaaS endpoints under `/cdn-cgi/access/sso/oidc/<client-id>`.
+Put the Cloudflare issuer, authorization endpoint, token endpoint, JWKS URI, client ID, and client secret in the auth2 config file. The legacy `MCP_OAUTH_*` settings remain available if you need to override those values at runtime.
 
 Important details:
 

@@ -6,8 +6,8 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createCloudflareAccessCompatibilityMiddleware } from "./cloudflareCompatibility.js";
-import { createMcpAuthModule } from "./oauthRuntime.js";
 import { createCloudflareOAuthAuth } from "./oauthTestHelpers.js";
+import { createLocalTokenService } from "./localTokenService.js";
 
 describe("createCloudflareAccessCompatibilityMiddleware", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -68,13 +68,30 @@ describe("createCloudflareAccessCompatibilityMiddleware", () => {
       jwksUrl: `http://127.0.0.1:${jwksAddress.port}/jwks`,
       tokenSigningSecret: "test-local-signing-secret",
     });
-    const mcpAuthModule = createMcpAuthModule(auth);
     const compatibilityMiddleware = createCloudflareAccessCompatibilityMiddleware(auth);
+    const localTokenService = createLocalTokenService({
+      allowedAudiences: [auth.audience, auth.publicUrl],
+      issuer: new URL(new URL(auth.publicUrl).origin).href,
+      tokenSecret: Buffer.from(auth.tokenSigningSecret!, "utf8"),
+    });
     const app = express();
 
     app.use(compatibilityMiddleware);
-    app.post("/mcp", mcpAuthModule.authMiddleware, (_req, res) => {
-      res.status(200).json({ ok: true });
+    app.post("/mcp", async (req, res) => {
+      const authorization = req.headers.authorization;
+
+      if (!authorization?.startsWith("Bearer ")) {
+        res.status(401).json({ error: "missing bearer token" });
+        return;
+      }
+
+      const verifiedToken = await localTokenService.verifyAccessToken(authorization.slice("Bearer ".length));
+
+      res.status(200).json({
+        clientId: verifiedToken.clientId,
+        ok: true,
+        subject: verifiedToken.extra?.["subject"],
+      });
     });
 
     const appServer = app.listen(0, "127.0.0.1");
@@ -136,5 +153,10 @@ describe("createCloudflareAccessCompatibilityMiddleware", () => {
     });
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      clientId: "client-123",
+      ok: true,
+      subject: "user-123",
+    });
   });
 });

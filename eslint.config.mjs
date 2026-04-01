@@ -20,9 +20,6 @@ const TYPE_CHECKED_IGNORES = [
   "src/httpTransport.ts",
   "src/index.ts",
   "src/serverRuntime.ts",
-  "src/oauthRuntime.ts",
-  "src/grantPersistence.ts",
-  "src/grantLifecycle.ts",
   "src/stdioServer.ts",
 ];
 

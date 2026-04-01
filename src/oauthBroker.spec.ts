@@ -1,5 +1,4 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -134,18 +133,6 @@ describe("oauth broker persistence", () => {
 
     expect(secondAuthorizeResponse.status).toBe(302);
     expect(secondAuthorizeResponse.headers.get("location")).toContain(upstream.authorizationUrl);
-  });
-
-  it("keeps legacy oauthRuntime helpers available without owning the live HTTP OAuth route stack", () => {
-    const oauthRuntimeSource = readFileSync(new URL("./oauthRuntime.ts", import.meta.url), "utf8");
-    const httpTransportSource = readFileSync(new URL("./httpTransport.ts", import.meta.url), "utf8");
-
-    expect(oauthRuntimeSource).toContain("export function createOAuthBroker");
-    expect(oauthRuntimeSource).toContain("export function createMcpAuthModule");
-    expect(oauthRuntimeSource).toContain("handleCallback");
-    expect(oauthRuntimeSource).toContain("handleConsent");
-    expect(httpTransportSource).not.toContain('from "./oauthRuntime.js"');
-    expect(httpTransportSource).not.toContain("installOAuthRoutes(");
   });
 
   it("logs callback failures through the auth2 logger", async () => {

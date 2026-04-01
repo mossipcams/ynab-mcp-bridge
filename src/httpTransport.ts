@@ -1,6 +1,6 @@
 /**
  * Owns: Express app assembly for MCP HTTP transport, request parsing, request/session validation, JSON-RPC response writers, CORS/origin enforcement, MCP POST handoff, and top-level HTTP error handling.
- * Inputs/dependencies: auth config, YNAB config, serverRuntime, header helpers, request-context helpers, origin-policy helpers, and oauthRuntime.
+ * Inputs/dependencies: auth config, YNAB config, auth2 route wiring, serverRuntime, header helpers, request-context helpers, and origin-policy helpers.
  * Outputs/contracts: startHttpServer(...) plus explicit helper interfaces consumed by route-local wiring.
  */
 import type { Server as NodeHttpServer } from "node:http";
@@ -9,6 +9,7 @@ import type { AddressInfo } from "node:net";
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
 import type { API } from "ynab";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import {
   hostHeaderValidation,
   localhostHostValidation,
@@ -101,6 +102,7 @@ type RequestResolution =
     };
 
 type HttpDebugDetails = Record<string, unknown>;
+type RequestWithAuth = Request & { auth?: AuthInfo };
 
 type InstallMcpPostRouteOptions = {
   app: express.Express;
@@ -271,11 +273,12 @@ function getRequestDebugDetails(
     authRequired?: boolean;
   } = {},
 ): HttpDebugDetails {
-  const authSubject = req.auth?.extra?.["subject"];
+  const requestAuth = (req as RequestWithAuth).auth;
+  const authSubject = requestAuth?.extra?.["subject"];
   return {
     ...getRequestLogFields(),
     authMode: options.authMode,
-    authClientId: req.auth?.clientId,
+    authClientId: requestAuth?.clientId,
     authRequired: options.authRequired,
     authSubject: typeof authSubject === "string" ? authSubject : undefined,
     hasAuthorizationHeader: hasHeaderValue(req.headers.authorization),
@@ -762,7 +765,7 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
       const isSessionlessPublicBootstrapRequest = !getSessionId(req) &&
         typeof jsonRpcMethod === "string" &&
         isPublicMcpBootstrapMethod(jsonRpcMethod) &&
-        (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !req.auth));
+        (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !(req as RequestWithAuth).auth));
 
       if (isSessionlessPublicBootstrapRequest && fastPathCache && typeof jsonRpcMethod === "string") {
         if (jsonRpcMethod === "initialize") {

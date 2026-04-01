@@ -69,7 +69,7 @@ export function resolveAppConfig(args: string[], env: EnvConfig): AppConfig {
 
   return {
     ...(auth2Config ? { auth2Config } : {}),
-    runtime: resolveRuntimeConfig(args, env),
+    runtime: resolveRuntimeConfig(args, env, auth2Config ? { auth2Config } : undefined),
     ynab: readYnabConfig(env),
   };
 }
