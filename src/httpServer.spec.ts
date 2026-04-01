@@ -2966,18 +2966,10 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      jsonrpc: "2.0",
-      id: 1,
-      result: {
-        resources: expect.arrayContaining([
-          expect.objectContaining({
-            name: "ynab_list_accounts",
-          }),
-        ]),
-      },
-    });
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(
+      "Bearer realm=\"mcp\", resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
+    );
   });
 
   it("allows the generic oauth bootstrap sequence while still challenging protected tool calls", async () => {
@@ -3133,18 +3125,10 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(resourcesListResponse.status).toBe(200);
-    await expect(resourcesListResponse.json()).resolves.toMatchObject({
-      jsonrpc: "2.0",
-      id: 2,
-      result: {
-        resources: expect.arrayContaining([
-          expect.objectContaining({
-            name: "ynab_list_accounts",
-          }),
-        ]),
-      },
-    });
+    expect(resourcesListResponse.status).toBe(401);
+    expect(resourcesListResponse.headers.get("www-authenticate")).toContain(
+      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
+    );
 
     const challengeResponse = await fetch(httpServer.url, {
       method: "POST",
