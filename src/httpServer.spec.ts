@@ -2694,7 +2694,7 @@ describe("startHttpServer", () => {
     await expect(response.json()).resolves.toMatchObject({
       authorization_servers: ["https://mcp.example.com/"],
       resource: "https://mcp.example.com/mcp",
-      scopes_supported: ["openid", "profile"],
+      bearer_methods_supported: ["header"],
     });
   });
 
@@ -2966,10 +2966,18 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toBe(
-      "Bearer realm=\"mcp\", resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_list_accounts",
+          }),
+        ]),
+      },
+    });
   });
 
   it("allows the generic oauth bootstrap sequence while still challenging protected tool calls", async () => {
@@ -3125,10 +3133,18 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(resourcesListResponse.status).toBe(401);
-    expect(resourcesListResponse.headers.get("www-authenticate")).toContain(
-      "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
-    );
+    expect(resourcesListResponse.status).toBe(200);
+    await expect(resourcesListResponse.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 2,
+      result: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            name: "ynab_list_accounts",
+          }),
+        ]),
+      },
+    });
 
     const challengeResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -3240,7 +3256,6 @@ describe("startHttpServer", () => {
     expect(response.headers.get("www-authenticate")).toContain("Bearer realm=\"mcp\"");
     await expect(response.json()).resolves.toEqual({
       error: "invalid_token",
-      error_description: "Missing bearer token.",
     });
   });
 
@@ -4052,8 +4067,70 @@ describe("startHttpServer", () => {
       }),
     });
 
-    expect(replayResponse.status).toBe(400);
-    await expect(replayResponse.json()).resolves.toMatchObject({
+    expect(replayResponse.status).toBe(200);
+    const replayTokens = await replayResponse.json() as {
+      refresh_token: string;
+    };
+    expect(replayTokens.refresh_token).toEqual(expect.any(String));
+    expect(replayTokens.refresh_token).not.toBe(initialTokens.refresh_token);
+    expect(replayTokens.refresh_token).not.toBe(refreshedTokens.refresh_token);
+
+    const retiredSiblingResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        grant_type: "refresh_token",
+        refresh_token: refreshedTokens.refresh_token,
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(retiredSiblingResponse.status).toBe(400);
+    await expect(retiredSiblingResponse.json()).resolves.toMatchObject({
+      error: "invalid_grant",
+    });
+
+    const latestRefreshResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        grant_type: "refresh_token",
+        refresh_token: replayTokens.refresh_token,
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(latestRefreshResponse.status).toBe(200);
+    await expect(latestRefreshResponse.json()).resolves.toMatchObject({
+      access_token: expect.any(String),
+      refresh_token: expect.any(String),
+      token_type: "Bearer",
+    });
+
+    const finalReplayResponse = await fetch(new URL("/token", httpServer.url), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://claude.ai",
+      },
+      body: new URLSearchParams({
+        client_id: registration.client_id,
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token,
+        resource: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(finalReplayResponse.status).toBe(400);
+    await expect(finalReplayResponse.json()).resolves.toMatchObject({
       error: "invalid_grant",
     });
   });
