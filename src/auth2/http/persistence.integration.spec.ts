@@ -1,6 +1,7 @@
 import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
@@ -148,6 +149,12 @@ describe("auth2 persistence", () => {
       access_token: string;
       refresh_token: string;
     };
+
+    const persistedAfterExchange = readFileSync(storePath, "utf8");
+    expect(persistedAfterExchange).not.toContain(tokens.access_token);
+    expect(persistedAfterExchange).not.toContain(tokens.refresh_token);
+    expect(persistedAfterExchange).not.toContain("upstream-access-token");
+    expect(persistedAfterExchange).not.toContain("upstream-refresh-token");
 
     await server.close();
     cleanups.pop();

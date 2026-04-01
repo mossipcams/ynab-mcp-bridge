@@ -96,7 +96,7 @@ describe("auth core token exchange", () => {
     expect(tokens).toEqual({
       access_token: "generated-4",
       expires_in: 3600,
-      refresh_token: "generated-5",
+      refresh_token: "generated-6",
       scope: "openid profile",
       token_type: "Bearer",
     });
@@ -273,5 +273,81 @@ describe("auth core token exchange", () => {
       codeVerifier: "wrong-verifier",
       redirectUri: "https://claude.ai/oauth/callback",
     })).rejects.toThrow("PKCE code_verifier is invalid.");
+  });
+
+  it("updates grant props and access-token props through the token exchange callback", async () => {
+    let nextId = 0;
+    const store = createInMemoryAuthStore();
+    const core = createAuthCore({
+      config: createConfig(),
+      createId: () => `generated-${++nextId}`,
+      now: () => 1_700_000_000_000,
+      provider: {
+        buildAuthorizationUrl(input) {
+          return `https://id.example.com/oauth/authorize?state=${encodeURIComponent(input.state)}`;
+        },
+        async exchangeAuthorizationCode() {
+          return {
+            access_token: "provider-access-token",
+            refresh_token: "provider-refresh-token",
+            subject: "user-123",
+            token_type: "Bearer",
+          };
+        },
+      },
+      store,
+      tokenExchangeCallback(options) {
+        expect(options).toMatchObject({
+          clientId: "client-a",
+          grantType: "authorization_code",
+          props: {},
+          scope: ["openid", "profile"],
+          subject: "user-123",
+        });
+
+        return {
+          accessTokenProps: {
+            ...options.props,
+            accessLevel: "ephemeral",
+          },
+          newProps: {
+            ...options.props,
+            upstreamRefreshState: "latest",
+          },
+        };
+      },
+      upstreamPkce: {
+        createPair() {
+          return {
+            challenge: "upstream-challenge",
+            method: "S256",
+            verifier: "upstream-verifier",
+          };
+        },
+      },
+    });
+
+    const localAuthorizationCode = await createAuthorizationCode(core);
+    const tokens = await core.exchangeAuthorizationCode({
+      clientId: "client-a",
+      code: localAuthorizationCode,
+      codeVerifier: "challenge-verifier",
+      redirectUri: "https://claude.ai/oauth/callback",
+    });
+
+    expect(tokens).toMatchObject({
+      access_token: "generated-4",
+      refresh_token: "generated-6",
+    });
+    expect(store.getAccessToken(tokens.access_token)).toMatchObject({
+      props: {
+        accessLevel: "ephemeral",
+      },
+    });
+    expect(store.getGrant("generated-5")).toMatchObject({
+      props: {
+        upstreamRefreshState: "latest",
+      },
+    });
   });
 });

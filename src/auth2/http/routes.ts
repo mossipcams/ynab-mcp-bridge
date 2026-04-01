@@ -64,6 +64,31 @@ function writeOAuthError(
   });
 }
 
+function getProtectedResourceMetadata(
+  auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>,
+  authorizationServerIssuer: string,
+) {
+  return {
+    authorization_servers: [authorizationServerIssuer],
+    bearer_methods_supported: ["header"],
+    resource: auth.publicUrl,
+  };
+}
+
+function writeProtectedResourceAuthError(
+  res: express.Response,
+  protectedResourceMetadataUrl: string,
+  errorDescription?: string,
+) {
+  res.status(401).setHeader(
+    "www-authenticate",
+    `Bearer realm="mcp", resource_metadata="${protectedResourceMetadataUrl}"`,
+  ).json({
+    error: "invalid_token",
+    ...(errorDescription ? { error_description: errorDescription } : {}),
+  });
+}
+
 function createClientId() {
   return crypto.randomBytes(16).toString("base64url");
 }
@@ -145,9 +170,10 @@ function registerClient(config: AuthConfig, store: AuthStore, body: unknown) {
 }
 
 function createRouteCore(config: AuthConfig, auth: Extract<RuntimeAuthConfig, { mode: "oauth" }>) {
+  const storeSecret = auth.tokenSigningSecret ?? auth.clientSecret;
   const store = auth.storePath
-    ? createFileAuthStore(auth.storePath)
-    : createInMemoryAuthStore();
+    ? createFileAuthStore(auth.storePath, { secret: storeSecret })
+    : createInMemoryAuthStore({ secret: storeSecret });
   const provider = createProviderAdapter(config, fetch);
   const core = createAuthCore({
     config,
@@ -221,13 +247,7 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
   });
 
   context.app.get(`/.well-known/oauth-protected-resource${context.path}`, (_req, res) => {
-    res.status(200).json({
-      authorization_servers: [metadata.issuer],
-      bearer_methods_supported: ["header"],
-      resource: auth.publicUrl,
-      resource_name: "YNAB MCP Bridge",
-      scopes_supported: scopesSupported,
-    });
+    res.status(200).json(getProtectedResourceMetadata(auth, metadata.issuer));
   });
 
   context.app.post("/register", express.json(), (req, res) => {
@@ -272,13 +292,7 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
     }
 
     if (!authorization?.startsWith("Bearer ")) {
-      res.status(401).setHeader(
-        "www-authenticate",
-        `Bearer realm="mcp", resource_metadata="${metadata.protectedResourceMetadataUrl}"`,
-      ).json({
-        error: "invalid_token",
-        error_description: "Missing bearer token.",
-      });
+      writeProtectedResourceAuthError(res, metadata.protectedResourceMetadataUrl);
       return;
     }
 
@@ -286,13 +300,7 @@ export function installAuthV2Routes(context: InstallAuthV2RoutesContext) {
     const accessToken = store.getAccessToken(token);
 
     if (!accessToken || accessToken.expiresAt <= Date.now()) {
-      res.status(401).setHeader(
-        "www-authenticate",
-        `Bearer realm="mcp", resource_metadata="${metadata.protectedResourceMetadataUrl}"`,
-      ).json({
-        error: "invalid_token",
-        error_description: "Bearer token is invalid or expired.",
-      });
+      writeProtectedResourceAuthError(res, metadata.protectedResourceMetadataUrl, "Bearer token is invalid or expired.");
       return;
     }
 
