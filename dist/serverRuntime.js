@@ -4,7 +4,7 @@
  * Outputs/contracts: defineTool(...), registerServerTools(...), and createServer(...).
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { normalizeObjectSchema, } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import { getParseErrorMessage, normalizeObjectSchema, objectFromShape, safeParseAsync, } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { assertYnabConfig } from "./config.js";
@@ -284,6 +284,19 @@ function getToolInputJsonSchema(inputSchema) {
     });
     return jsonSchema;
 }
+function isToolSchemaCandidate(value) {
+    return typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        ("_def" in value || "_zod" in value || "parse" in value);
+}
+function isToolRawShape(value) {
+    return typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        !("_def" in value) &&
+        !("_zod" in value);
+}
 export function getInitializeResult() {
     return {
         protocolVersion: LATEST_PROTOCOL_VERSION,
@@ -364,6 +377,88 @@ export async function createFastPathToolCallResults() {
     });
     return fastPathResults;
 }
+function createToolErrorResult(errorMessage) {
+    return {
+        content: [
+            {
+                type: "text",
+                text: errorMessage,
+            },
+        ],
+        isError: true,
+    };
+}
+async function validateDirectToolInput(tool, input) {
+    if (!tool.inputSchema) {
+        return undefined;
+    }
+    const schemaCandidate = tool.inputSchema;
+    const normalizedSchema = isToolSchemaCandidate(schemaCandidate) || isToolRawShape(schemaCandidate)
+        ? normalizeObjectSchema(schemaCandidate)
+        : undefined;
+    const schemaToParse = normalizedSchema ?? (isToolRawShape(schemaCandidate)
+        ? objectFromShape(schemaCandidate)
+        : isToolSchemaCandidate(schemaCandidate)
+            ? schemaCandidate
+            : undefined);
+    if (!schemaToParse) {
+        return input;
+    }
+    const parseResult = await safeParseAsync(schemaToParse, input);
+    if (!parseResult.success) {
+        const error = "error" in parseResult ? parseResult.error : "Unknown error";
+        throw new Error(`Input validation error: Invalid arguments for tool ${tool.name}: ${getParseErrorMessage(error)}`);
+    }
+    if (typeof parseResult.data !== "object" || parseResult.data === null || Array.isArray(parseResult.data)) {
+        return {};
+    }
+    return parseResult.data;
+}
+async function executeToolModule(tool, input, api) {
+    markToolCallStarted();
+    logAppEvent("mcp", "tool.call.started", {
+        ...getRequestLogFields(),
+        toolName: tool.name,
+    });
+    try {
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- MCP validates tool input before invocation and the shared dispatcher reuses the same module contract.
+        const result = await tool.execute(input, api);
+        const failed = "isError" in result && result.isError === true;
+        logAppEvent("mcp", failed ? "tool.call.failed" : "tool.call.succeeded", {
+            ...getRequestLogFields(),
+            toolName: tool.name,
+        });
+        return result;
+    }
+    catch (error) {
+        logAppEvent("mcp", "tool.call.failed", {
+            ...getRequestLogFields(),
+            error,
+            toolName: tool.name,
+        });
+        throw error;
+    }
+}
+export function createDirectToolCallExecutor(config, api = createYnabApi(config)) {
+    const normalizedConfig = assertYnabConfig(config);
+    const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
+    const toolsByName = new Map(toolRegistrations.map((tool) => [tool.name, tool]));
+    return {
+        async executeToolCall(toolName, input) {
+            const tool = toolsByName.get(toolName);
+            if (!tool) {
+                return createToolErrorResult(`Tool ${toolName} not found`);
+            }
+            try {
+                const validatedInput = await validateDirectToolInput(tool, input);
+                return await executeToolModule(tool, validatedInput ?? {}, configuredApi);
+            }
+            catch (error) {
+                return createToolErrorResult(error instanceof Error ? error.message : String(error));
+            }
+        },
+    };
+}
 export function getDiscoveryResourceDocument(toolName, uri, options = {}) {
     const catalog = getDiscoveryCatalog(options);
     const resolvedToolName = catalog.toolNameByUri.get(uri);
@@ -383,29 +478,7 @@ function registerTool(registrar, tool, api) {
         inputSchema: tool.inputSchema,
         annotations: READ_ONLY_TOOL_ANNOTATIONS,
     }, async (input) => {
-        markToolCallStarted();
-        logAppEvent("mcp", "tool.call.started", {
-            ...getRequestLogFields(),
-            toolName: tool.name,
-        });
-        try {
-            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- MCP validates tool input before invocation.
-            const result = await tool.execute(input, api);
-            const failed = "isError" in result && result.isError === true;
-            logAppEvent("mcp", failed ? "tool.call.failed" : "tool.call.succeeded", {
-                ...getRequestLogFields(),
-                toolName: tool.name,
-            });
-            return result;
-        }
-        catch (error) {
-            logAppEvent("mcp", "tool.call.failed", {
-                ...getRequestLogFields(),
-                error,
-                toolName: tool.name,
-            });
-            throw error;
-        }
+        return await executeToolModule(tool, input, api);
     });
 }
 export function registerServerTools(registrar, api) {
