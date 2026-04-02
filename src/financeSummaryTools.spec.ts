@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { registerServerTools } from "./serverRuntime.js";
-import * as GetBudgetHealthSummaryTool from "./tools/GetBudgetHealthSummaryTool.js";
-import * as GetCashFlowSummaryTool from "./tools/GetCashFlowSummaryTool.js";
-import * as GetFinancialSnapshotTool from "./tools/GetFinancialSnapshotTool.js";
-import * as GetMonthlyReviewTool from "./tools/GetMonthlyReviewTool.js";
-import * as GetSpendingSummaryTool from "./tools/GetSpendingSummaryTool.js";
+import * as GetBudgetHealthSummaryTool from "./features/financialHealth/GetBudgetHealthSummaryTool.js";
+import * as GetCashFlowSummaryTool from "./features/financialHealth/GetCashFlowSummaryTool.js";
+import * as GetFinancialSnapshotTool from "./features/financialHealth/GetFinancialSnapshotTool.js";
+import * as GetMonthlyReviewTool from "./features/financialHealth/GetMonthlyReviewTool.js";
+import * as GetSpendingSummaryTool from "./features/financialHealth/GetSpendingSummaryTool.js";
 import * as ListAccountsTool from "./tools/ListAccountsTool.js";
 
 function parseText(result: Awaited<ReturnType<typeof GetFinancialSnapshotTool.execute>>) {

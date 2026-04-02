@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import * as GetUserTool from "./tools/GetUserTool.js";
+import * as GetUserTool from "./features/meta/GetUserTool.js";
 
 function parseResponseText(result: Awaited<ReturnType<typeof GetUserTool.execute>>) {
   return JSON.parse(result.content[0].text);

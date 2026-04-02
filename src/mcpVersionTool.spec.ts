@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { getPackageInfo } from "./packageInfo.js";
-import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
+import * as GetMcpVersionTool from "./features/meta/GetMcpVersionTool.js";
 
 describe("GetMcpVersionTool", () => {
   it("returns the MCP server release version from package metadata", async () => {

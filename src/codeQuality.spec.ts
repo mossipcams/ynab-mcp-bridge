@@ -4,6 +4,28 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const ESLINT_BIN = fileURLToPath(new URL("../node_modules/eslint/bin/eslint.js", import.meta.url));
+const printedEslintConfigCache = new Map<string, string>();
+
+function printEslintConfig(filePath: string): string {
+  const cached = printedEslintConfigCache.get(filePath);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const printedConfig = execFileSync(
+    "node",
+    [ESLINT_BIN, "--print-config", filePath],
+    {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    },
+  );
+
+  printedEslintConfigCache.set(filePath, printedConfig);
+
+  return printedConfig;
+}
 
 describe("code quality guardrails", () => {
   it("defines Dependency Cruiser architecture enforcement in repo config, package scripts, and CI", () => {
@@ -11,6 +33,10 @@ describe("code quality guardrails", () => {
 
     const dependencyCruiserConfig = readFileSync(
       new URL("../.dependency-cruiser.js", import.meta.url),
+      "utf8",
+    );
+    const architectureDoc = readFileSync(
+      new URL("../architecture.md", import.meta.url),
       "utf8",
     );
     const packageJson = JSON.parse(
@@ -35,12 +61,15 @@ describe("code quality guardrails", () => {
     expect(dependencyCruiserConfig).toContain("serverRuntime");
     expect(dependencyCruiserConfig).toContain("auth2");
     expect(dependencyCruiserConfig).toContain("auth2/http/routes");
+    expect(dependencyCruiserConfig).toContain("src/features/");
     expect(dependencyCruiserConfig).not.toContain("httpServer|stdioServer");
     expect(dependencyCruiserConfig).not.toContain("httpServer\\.ts");
     expect(dependencyCruiserConfig).not.toContain("server\\.ts");
     expect(dependencyCruiserConfig).not.toContain("oauthRuntime");
     expect(dependencyCruiserConfig).not.toContain("grantLifecycle");
     expect(dependencyCruiserConfig).not.toContain("grantPersistence");
+    expect(architectureDoc).toContain("src/features/");
+    expect(architectureDoc).toContain("Vertical Slice");
     expect(packageJson.devDependencies["dependency-cruiser"]).toBeTruthy();
     expect(packageJson.scripts["lint:deps"]).toBeTruthy();
     expect(workflow).toContain("Run dependency rules");
@@ -67,21 +96,9 @@ describe("code quality guardrails", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("../package.json", import.meta.url), "utf8"),
     );
-    const printedHttpTransportConfig = execFileSync(
-      "npx",
-      ["eslint", "--print-config", "src/httpTransport.ts"],
-      {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-      },
-    );
-    const printedServerRuntimeConfig = execFileSync(
-      "npx",
-      ["eslint", "--print-config", "src/serverRuntime.ts"],
-      {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-      },
+    const printedConfigConfig = printEslintConfig("src/config.ts");
+    const printedFeatureSliceConfig = printEslintConfig(
+      "src/features/transactions/SearchTransactionsTool.ts",
     );
     const workflow = readFileSync(
       new URL("../.github/workflows/test.yml", import.meta.url),
@@ -98,11 +115,13 @@ describe("code quality guardrails", () => {
     expect(packageJson.scripts["lint:repo"]).toContain("lint:repo:typed:core");
     expect(packageJson.scripts["lint:repo"]).toContain("lint:repo:typed:client-profiles");
     expect(packageJson.scripts["lint:repo:fast"]).toContain("--max-old-space-size=4096");
+    expect(packageJson.scripts["lint:repo:fast"]).toContain("src/features/**/*.ts");
     expect(packageJson.scripts["lint:repo:fast"]).toContain("src/tools/**/*.ts");
     expect(packageJson.scripts["lint:repo:fast"]).toContain("src/stdioServer.ts");
     expect(packageJson.scripts["lint:repo:fast"]).toContain("src/index.ts");
     expect(packageJson.scripts["lint:repo:fast"]).toContain("artifacts/**");
     expect(packageJson.scripts["lint:repo:typed:core"]).toContain("--max-old-space-size=4096");
+    expect(packageJson.scripts["lint:repo:typed:core"]).toContain("src/features/**/*.ts");
     expect(packageJson.scripts["lint:repo:typed:core"]).toContain("src/*.ts");
     expect(packageJson.scripts["lint:repo:typed:core"]).not.toContain("src/serverRuntime.ts");
     expect(packageJson.scripts["lint:repo:typed:core"]).not.toContain("src/httpTransport.ts");
@@ -121,16 +140,19 @@ describe("code quality guardrails", () => {
     expect(eslintConfig).toContain('"src/stdioServer.ts"');
     expect(eslintConfig).toContain('"src/index.ts"');
     expect(eslintTsconfig).toContain("\"./tsconfig.json\"");
+    expect(eslintTsconfig).toContain("\"src/features/**/*.ts\"");
     expect(eslintTsconfig).toContain("\"src/*.ts\"");
     expect(eslintClientProfilesTsconfig).toContain("\"src/clientProfiles/**/*.ts\"");
     expect(eslintTsconfig).toContain("\"**/*.contract.ts\"");
     expect(eslintConfig).not.toContain('files: ["src/serverRuntime.ts"]');
-    expect(printedHttpTransportConfig).toContain('"project": "./tsconfig.eslint.json"');
-    expect(printedHttpTransportConfig).toContain('"@typescript-eslint/no-unsafe-assignment"');
-    expect(printedHttpTransportConfig).toContain('"sonarjs/cognitive-complexity"');
-    expect(printedServerRuntimeConfig).toContain('"project": "./tsconfig.eslint.json"');
-    expect(printedServerRuntimeConfig).toContain('"@typescript-eslint/no-unsafe-assignment"');
-    expect(printedServerRuntimeConfig).toContain('"@typescript-eslint/explicit-function-return-type"');
+    expect(eslintConfig).toContain('files: ["src/{config,serverRuntime}.ts"]');
+    expect(eslintConfig).toContain("@typescript-eslint/explicit-function-return-type");
+    expect(printedConfigConfig).toContain('"project": "./tsconfig.eslint.json"');
+    expect(printedConfigConfig).toContain('"@typescript-eslint/no-unsafe-assignment"');
+    expect(printedConfigConfig).toContain('"sonarjs/cognitive-complexity"');
+    expect(printedFeatureSliceConfig).toContain('"project": "./tsconfig.eslint.json"');
+    expect(printedFeatureSliceConfig).toContain('"@typescript-eslint/no-unsafe-assignment"');
+    expect(printedFeatureSliceConfig).toContain('"sonarjs/cognitive-complexity"');
     expect(workflow).toContain("Run ESLint");
     expect(workflow).toContain("npm run lint");
   });
@@ -171,14 +193,7 @@ describe("code quality guardrails", () => {
       new URL("../eslint.config.mjs", import.meta.url),
       "utf8",
     );
-    const printedConfig = execFileSync(
-      "npx",
-      ["eslint", "--print-config", "src/config.ts"],
-      {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-      },
-    );
+    const printedConfig = printEslintConfig("src/config.ts");
 
     expect(eslintConfig).toContain("@typescript-eslint/consistent-type-assertions");
     expect(eslintConfig).toContain('"never"');

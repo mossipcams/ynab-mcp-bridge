@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createTransactionCollectionExecutor } from "./tools/transactionCollectionToolUtils.js";
+import { createTransactionCollectionExecutor } from "./features/transactions/transactionCollectionToolUtils.js";
 
 type ToolResult = {
   isError?: boolean;

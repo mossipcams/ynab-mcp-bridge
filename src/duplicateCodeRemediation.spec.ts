@@ -6,25 +6,25 @@ import { describe, expect, it } from "vitest";
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const collectionToolUtilsPath = path.join(projectRoot, "src", "tools", "collectionToolUtils.ts");
 const sharedCollectionTools = [
-  "ListAccountsTool.ts",
-  "ListPayeesTool.ts",
-  "ListPlanMonthsTool.ts",
-  "ListScheduledTransactionsTool.ts",
+  "features/accounts/ListAccountsTool.ts",
+  "features/payees/ListPayeesTool.ts",
+  "features/plans/ListPlanMonthsTool.ts",
+  "features/transactions/ListScheduledTransactionsTool.ts",
 ] as const;
-const transactionCollectionUtilsPath = path.join(projectRoot, "src", "tools", "transactionCollectionToolUtils.ts");
-const transactionLookupUtilsPath = path.join(projectRoot, "src", "tools", "transactionToolUtils.ts");
+const transactionCollectionUtilsPath = path.join(projectRoot, "src", "features", "transactions", "transactionCollectionToolUtils.ts");
+const transactionLookupUtilsPath = path.join(projectRoot, "src", "features", "transactions", "transactionToolUtils.ts");
 const sharedTransactionLookupTools = [
-  "GetTransactionsByAccountTool.ts",
-  "GetTransactionsByCategoryTool.ts",
-  "GetTransactionsByMonthTool.ts",
-  "GetTransactionsByPayeeTool.ts",
+  "features/transactions/GetTransactionsByAccountTool.ts",
+  "features/transactions/GetTransactionsByCategoryTool.ts",
+  "features/transactions/GetTransactionsByMonthTool.ts",
+  "features/transactions/GetTransactionsByPayeeTool.ts",
 ] as const;
 const sharedBudgetHealthTools = [
   "GetBudgetHealthSummaryTool.ts",
   "GetMonthlyReviewTool.ts",
 ] as const;
 const sharedTransactionBrowseTools = [
-  "SearchTransactionsTool.ts",
+  "features/transactions/SearchTransactionsTool.ts",
 ] as const;
 const supersededHttpModules = [
   "httpServerIngress.ts",
@@ -50,7 +50,7 @@ describe("duplicate code remediation", () => {
     expect(helperSource).toContain("export function projectRecord");
 
     for (const toolFile of sharedCollectionTools) {
-      const toolSource = readFileSync(path.join(projectRoot, "src", "tools", toolFile), "utf8");
+      const toolSource = readFileSync(path.join(projectRoot, "src", toolFile), "utf8");
 
       expect(toolSource).toContain("collectionToolUtils");
       expect(toolSource).toContain("hasPaginationControls(");
@@ -69,7 +69,7 @@ describe("duplicate code remediation", () => {
     expect(helperSource).toContain("export function createIdFilteredTransactionCollectionExecutor");
 
     for (const toolFile of sharedTransactionLookupTools) {
-      const toolSource = readFileSync(path.join(projectRoot, "src", "tools", toolFile), "utf8");
+      const toolSource = readFileSync(path.join(projectRoot, "src", toolFile), "utf8");
 
       expect(toolSource).toContain("transactionCollectionToolUtils");
       expect(toolSource).not.toContain("executeTransactionLookup(");
@@ -96,10 +96,10 @@ describe("duplicate code remediation", () => {
   it("centralizes transaction browse rendering behind shared transaction helpers", () => {
     const helperSource = readFileSync(transactionLookupUtilsPath, "utf8");
 
-    expect(helperSource).toContain('export { transactionFields, toDisplayTransactions } from "../transactionQueryEngine.js";');
+    expect(helperSource).toContain('export { transactionFields, toDisplayTransactions } from "./transactionQueryEngine.js";');
 
     for (const toolFile of sharedTransactionBrowseTools) {
-      const toolSource = readFileSync(path.join(projectRoot, "src", "tools", toolFile), "utf8");
+      const toolSource = readFileSync(path.join(projectRoot, "src", toolFile), "utf8");
 
       expect(toolSource).toContain("transactionFields");
       expect(toolSource).toContain("buildTransactionCollectionResult(");
@@ -108,18 +108,18 @@ describe("duplicate code remediation", () => {
   });
 
   it("routes active transaction browse filtering and ordering through transactionQueryEngine", () => {
-    const queryEngineSource = readFileSync(path.join(projectRoot, "src", "transactionQueryEngine.ts"), "utf8");
-    const searchToolSource = readFileSync(path.join(projectRoot, "src", "tools", "SearchTransactionsTool.ts"), "utf8");
+    const queryEngineSource = readFileSync(path.join(projectRoot, "src", "features", "transactions", "transactionQueryEngine.ts"), "utf8");
+    const searchToolSource = readFileSync(path.join(projectRoot, "src", "features", "transactions", "SearchTransactionsTool.ts"), "utf8");
     const transactionToolUtilsSource = readFileSync(transactionLookupUtilsPath, "utf8");
 
     expect(queryEngineSource).toContain("export function compareTransactions(");
     expect(queryEngineSource).toContain("export function matchesTransactionFilters(");
-    expect(searchToolSource).toContain('from "../transactionQueryEngine.js"');
+    expect(searchToolSource).toContain('from "./transactionQueryEngine.js"');
     expect(searchToolSource).toContain("matchesTransactionFilters(");
     expect(searchToolSource).toContain("compareTransactions(");
     expect(searchToolSource).not.toContain("function matchesFilters(");
     expect(searchToolSource).not.toContain("function compareTransactions(");
-    expect(transactionToolUtilsSource).toContain('export { transactionFields, toDisplayTransactions } from "../transactionQueryEngine.js";');
+    expect(transactionToolUtilsSource).toContain('export { transactionFields, toDisplayTransactions } from "./transactionQueryEngine.js";');
     expect(transactionToolUtilsSource).not.toContain("formatAmountMilliunits(");
   });
 
