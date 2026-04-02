@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import * as GetAccountTool from "./tools/GetAccountTool.js";
+import * as GetAccountTool from "./features/accounts/GetAccountTool.js";
 import * as GetCategoryTool from "./tools/GetCategoryTool.js";
-import * as GetMoneyMovementGroupsTool from "./tools/GetMoneyMovementGroupsTool.js";
-import * as GetMoneyMovementGroupsByMonthTool from "./tools/GetMoneyMovementGroupsByMonthTool.js";
-import * as GetMoneyMovementsTool from "./tools/GetMoneyMovementsTool.js";
-import * as GetMoneyMovementsByMonthTool from "./tools/GetMoneyMovementsByMonthTool.js";
+import * as GetMoneyMovementGroupsTool from "./features/moneyMovements/GetMoneyMovementGroupsTool.js";
+import * as GetMoneyMovementGroupsByMonthTool from "./features/moneyMovements/GetMoneyMovementGroupsByMonthTool.js";
+import * as GetMoneyMovementsTool from "./features/moneyMovements/GetMoneyMovementsTool.js";
+import * as GetMoneyMovementsByMonthTool from "./features/moneyMovements/GetMoneyMovementsByMonthTool.js";
 import * as GetMonthCategoryTool from "./tools/GetMonthCategoryTool.js";
-import * as GetPayeeLocationTool from "./tools/GetPayeeLocationTool.js";
-import * as GetPayeeLocationsByPayeeTool from "./tools/GetPayeeLocationsByPayeeTool.js";
-import * as GetPayeeTool from "./tools/GetPayeeTool.js";
+import * as GetPayeeLocationTool from "./features/payees/GetPayeeLocationTool.js";
+import * as GetPayeeLocationsByPayeeTool from "./features/payees/GetPayeeLocationsByPayeeTool.js";
+import * as GetPayeeTool from "./features/payees/GetPayeeTool.js";
 import * as GetScheduledTransactionTool from "./tools/GetScheduledTransactionTool.js";
 import * as GetTransactionTool from "./tools/GetTransactionTool.js";
 import * as GetTransactionsByAccountTool from "./tools/GetTransactionsByAccountTool.js";
@@ -17,9 +17,9 @@ import * as GetTransactionsByCategoryTool from "./tools/GetTransactionsByCategor
 import * as GetTransactionsByPayeeTool from "./tools/GetTransactionsByPayeeTool.js";
 import * as GetTransactionsByMonthTool from "./tools/GetTransactionsByMonthTool.js";
 import * as ListTransactionsTool from "./tools/ListTransactionsTool.js";
-import * as ListAccountsTool from "./tools/ListAccountsTool.js";
-import * as ListPayeeLocationsTool from "./tools/ListPayeeLocationsTool.js";
-import * as ListPayeesTool from "./tools/ListPayeesTool.js";
+import * as ListAccountsTool from "./features/accounts/ListAccountsTool.js";
+import * as ListPayeeLocationsTool from "./features/payees/ListPayeeLocationsTool.js";
+import * as ListPayeesTool from "./features/payees/ListPayeesTool.js";
 import * as ListPlanCategoriesTool from "./tools/ListPlanCategoriesTool.js";
 import * as ListScheduledTransactionsTool from "./tools/ListScheduledTransactionsTool.js";
 

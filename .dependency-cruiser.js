@@ -2,10 +2,12 @@
 const entryLayer = "^src/index\\.ts$";
 const transportLayer = "^src/((httpTransport|stdioServer)\\.ts|auth2/http/routes\\.ts)$";
 const compositionLayer = "^src/serverRuntime\\.ts$";
+const featureSliceLayer = "^src/features/.+\\.ts$";
 const domainLayer = "^src/(?!index\\.ts$|httpTransport\\.ts$|stdioServer\\.ts$|serverRuntime\\.ts$|auth2/http/routes\\.ts$).+\\.ts$";
 
 const config = {
   // Layers: entry, transport, composition, domain.
+  // The domain layer may be organized either as shared-kernel root modules or Vertical Slice modules under src/features/.
   // Selectors are expressed with dependency-cruiser from.path and to.path matchers.
   forbidden: [
     {
@@ -31,6 +33,7 @@ const config = {
           "^src/(index|authAdmissionPolicy|cloudflareCompatibility|config|headerUtils|httpTransport|localTokenService|logger|originPolicy|packageInfo|requestContext|runtimeConfig|runtimePlanToolUtils|serverRuntime|startupLogging|stdioServer|transactionQueryEngine|typeUtils|ynabApi|ynabConfig|ynabRateLimiter)\\.ts$",
           "^src/clientProfiles/(?!types\\.ts$).+\\.ts$",
           "^src/auth2/(config|core|http|logging|provider|store)/.+\\.ts$",
+          featureSliceLayer,
           "^src/tools/.+\\.ts$",
         ],
       },
@@ -76,6 +79,18 @@ const config = {
       severity: "error",
       from: {
         path: domainLayer,
+        pathNot: "\\.spec\\.ts$",
+      },
+      to: {
+        path: [entryLayer, transportLayer, compositionLayer],
+      },
+    },
+    {
+      name: "feature-slices-do-not-import-higher-layers",
+      comment: "Vertical Slice modules under src/features/ must stay inside the domain boundary.",
+      severity: "error",
+      from: {
+        path: featureSliceLayer,
         pathNot: "\\.spec\\.ts$",
       },
       to: {

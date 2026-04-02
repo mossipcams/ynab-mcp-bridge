@@ -2,12 +2,12 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import * as GetTransactionsByAccountTool from "./tools/GetTransactionsByAccountTool.js";
-import * as GetTransactionsByCategoryTool from "./tools/GetTransactionsByCategoryTool.js";
-import * as GetTransactionsByMonthTool from "./tools/GetTransactionsByMonthTool.js";
-import * as GetTransactionsByPayeeTool from "./tools/GetTransactionsByPayeeTool.js";
-import * as ListTransactionsTool from "./tools/ListTransactionsTool.js";
-import * as SearchTransactionsTool from "./tools/SearchTransactionsTool.js";
+import * as GetTransactionsByAccountTool from "./features/transactions/GetTransactionsByAccountTool.js";
+import * as GetTransactionsByCategoryTool from "./features/transactions/GetTransactionsByCategoryTool.js";
+import * as GetTransactionsByMonthTool from "./features/transactions/GetTransactionsByMonthTool.js";
+import * as GetTransactionsByPayeeTool from "./features/transactions/GetTransactionsByPayeeTool.js";
+import * as ListTransactionsTool from "./features/transactions/ListTransactionsTool.js";
+import * as SearchTransactionsTool from "./features/transactions/SearchTransactionsTool.js";
 
 type ToolResult = {
   content: Array<{
@@ -381,15 +381,15 @@ describe("transaction tool family", () => {
     expect(formattedAmounts).toBe(1);
   });
 
-  it("keeps the transaction query helper surface slim inside src/tools", () => {
-    const searchToolSource = readFileSync(new URL("./tools/SearchTransactionsTool.ts", import.meta.url), "utf8");
-    const transactionToolUtilsSource = readFileSync(new URL("./tools/transactionToolUtils.ts", import.meta.url), "utf8");
+  it("keeps the transaction query helper surface slim inside the transactions slice", () => {
+    const searchToolSource = readFileSync(new URL("./features/transactions/SearchTransactionsTool.ts", import.meta.url), "utf8");
+    const transactionToolUtilsSource = readFileSync(new URL("./features/transactions/transactionToolUtils.ts", import.meta.url), "utf8");
     const transactionQueryUtilsPath = new URL("./tools/transactionQueryUtils.ts", import.meta.url);
 
-    expect(searchToolSource).toContain('from "../transactionQueryEngine.js"');
+    expect(searchToolSource).toContain('from "./transactionQueryEngine.js"');
     expect(searchToolSource).not.toContain("function matchesFilters(");
     expect(searchToolSource).not.toContain("function compareTransactions(");
-    expect(transactionToolUtilsSource).toContain('export { transactionFields, toDisplayTransactions } from "../transactionQueryEngine.js";');
+    expect(transactionToolUtilsSource).toContain('export { transactionFields, toDisplayTransactions } from "./transactionQueryEngine.js";');
     expect(() => readFileSync(transactionQueryUtilsPath, "utf8")).toThrow();
   });
 });

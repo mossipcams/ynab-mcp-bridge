@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import * as GetPlanDetailsTool from "./tools/GetPlanDetailsTool.js";
-import * as GetPlanMonthTool from "./tools/GetPlanMonthTool.js";
-import * as GetPlanSettingsTool from "./tools/GetPlanSettingsTool.js";
-import * as ListPlanMonthsTool from "./tools/ListPlanMonthsTool.js";
-import * as ListPlansTool from "./tools/ListPlansTool.js";
+import * as GetPlanDetailsTool from "./features/plans/GetPlanDetailsTool.js";
+import * as GetPlanMonthTool from "./features/plans/GetPlanMonthTool.js";
+import * as GetPlanSettingsTool from "./features/plans/GetPlanSettingsTool.js";
+import * as ListPlanMonthsTool from "./features/plans/ListPlanMonthsTool.js";
+import * as ListPlansTool from "./features/plans/ListPlansTool.js";
 import { attachYnabApiRuntimeContext } from "./ynabApi.js";
 import { toPlanId } from "./ynabTypes.js";
 

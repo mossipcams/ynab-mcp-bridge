@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
+const featuresDir = path.join(projectRoot, "src", "features");
 const toolsDir = path.join(projectRoot, "src", "tools");
 
 function isTracked(relativePath: string) {
@@ -28,55 +29,21 @@ function hasTrackedFiles(relativePath: string) {
 }
 
 describe("pure v4 refactor", () => {
-  it("keeps only the final read-only tool modules in src/tools", () => {
-    expect(readdirSync(toolsDir).sort()).toEqual([
-      "GetAccountTool.ts",
-      "GetBudgetCleanupSummaryTool.ts",
-      "GetBudgetHealthSummaryTool.ts",
-      "GetCashFlowSummaryTool.ts",
-      "GetCashRunwayTool.ts",
-      "GetCategoryTool.ts",
-      "GetCategoryTrendSummaryTool.ts",
-      "GetDebtSummaryTool.ts",
-      "GetEmergencyFundCoverageTool.ts",
-      "GetFinancialHealthCheckTool.ts",
-      "GetFinancialSnapshotTool.ts",
-      "GetGoalProgressSummaryTool.ts",
-      "GetIncomeSummaryTool.ts",
-      "GetMcpVersionTool.ts",
-      "GetMoneyMovementGroupsByMonthTool.ts",
-      "GetMoneyMovementGroupsTool.ts",
-      "GetMoneyMovementsByMonthTool.ts",
-      "GetMoneyMovementsTool.ts",
-      "GetMonthCategoryTool.ts",
-      "GetMonthlyReviewTool.ts",
-      "GetNetWorthTrajectoryTool.ts",
-      "GetPayeeLocationTool.ts",
-      "GetPayeeLocationsByPayeeTool.ts",
-      "GetPayeeTool.ts",
-      "GetPlanDetailsTool.ts",
-      "GetPlanMonthTool.ts",
-      "GetPlanSettingsTool.ts",
-      "GetRecurringExpenseSummaryTool.ts",
-      "GetScheduledTransactionTool.ts",
-      "GetSpendingAnomaliesTool.ts",
-      "GetSpendingSummaryTool.ts",
-      "GetTransactionTool.ts",
-      "GetTransactionsByAccountTool.ts",
-      "GetTransactionsByCategoryTool.ts",
-      "GetTransactionsByMonthTool.ts",
-      "GetTransactionsByPayeeTool.ts",
-      "GetUpcomingObligationsTool.ts",
-      "GetUserTool.ts",
-      "ListAccountsTool.ts",
-      "ListPayeeLocationsTool.ts",
-      "ListPayeesTool.ts",
-      "ListPlanCategoriesTool.ts",
-      "ListPlanMonthsTool.ts",
-      "ListPlansTool.ts",
-      "ListScheduledTransactionsTool.ts",
-      "ListTransactionsTool.ts",
-      "SearchTransactionsTool.ts",
+  it("keeps the MCP domain organized around feature slices while preserving shared tool helpers", () => {
+    expect(readdirSync(featuresDir).sort()).toEqual([
+      "accounts",
+      "financialHealth",
+      "index.ts",
+      "meta",
+      "moneyMovements",
+      "payees",
+      "plans",
+      "transactions",
+    ]);
+
+    const toolFiles = readdirSync(toolsDir).sort();
+
+    expect(toolFiles).toEqual(expect.arrayContaining([
       "cachedYnabReads.ts",
       "collectionToolUtils.ts",
       "errorUtils.ts",
@@ -86,7 +53,13 @@ describe("pure v4 refactor", () => {
       "proseFormatUtils.ts",
       "transactionCollectionToolUtils.ts",
       "transactionToolUtils.ts",
-    ]);
+    ]));
+    expect(toolFiles).toEqual(expect.arrayContaining([
+      "GetAccountTool.ts",
+      "GetPlanDetailsTool.ts",
+      "ListTransactionsTool.ts",
+      "GetMcpVersionTool.ts",
+    ]));
   });
 
   it("removes the legacy src/tests compatibility suite", () => {

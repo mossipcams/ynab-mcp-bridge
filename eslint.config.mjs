@@ -12,6 +12,7 @@ const NON_TYPED_TS_IGNORES = [
 
 const TYPE_CHECKED_FILES = [
   "src/*.ts",
+  "src/features/**/*.ts",
   "src/clientProfiles/**/*.ts",
 ];
 
@@ -114,7 +115,7 @@ export default [
     },
   },
   {
-    files: ["src/*.ts"],
+    files: ["src/*.ts", "src/features/**/*.ts"],
     ignores: TYPE_CHECKED_IGNORES,
     languageOptions: {
       globals: {

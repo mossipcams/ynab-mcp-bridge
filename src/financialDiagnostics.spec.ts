@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import * as GetCashRunwayTool from "./tools/GetCashRunwayTool.js";
-import * as GetDebtSummaryTool from "./tools/GetDebtSummaryTool.js";
-import * as GetEmergencyFundCoverageTool from "./tools/GetEmergencyFundCoverageTool.js";
-import * as GetFinancialHealthCheckTool from "./tools/GetFinancialHealthCheckTool.js";
-import * as GetRecurringExpenseSummaryTool from "./tools/GetRecurringExpenseSummaryTool.js";
-import * as GetSpendingAnomaliesTool from "./tools/GetSpendingAnomaliesTool.js";
+import * as GetCashRunwayTool from "./features/financialHealth/GetCashRunwayTool.js";
+import * as GetDebtSummaryTool from "./features/financialHealth/GetDebtSummaryTool.js";
+import * as GetEmergencyFundCoverageTool from "./features/financialHealth/GetEmergencyFundCoverageTool.js";
+import * as GetFinancialHealthCheckTool from "./features/financialHealth/GetFinancialHealthCheckTool.js";
+import * as GetRecurringExpenseSummaryTool from "./features/financialHealth/GetRecurringExpenseSummaryTool.js";
+import * as GetSpendingAnomaliesTool from "./features/financialHealth/GetSpendingAnomaliesTool.js";
 
 function parseText(result: Awaited<ReturnType<typeof GetFinancialHealthCheckTool.execute>>) {
   return JSON.parse(result.content[0].text);

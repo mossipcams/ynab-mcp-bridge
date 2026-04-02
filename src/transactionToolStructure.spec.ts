@@ -12,10 +12,10 @@ const transactionToolFiles = [
 
 describe("transaction tool structure", () => {
   it("routes transaction collection tools through a shared wrapper helper", () => {
-    expect(existsSync(new URL("./tools/transactionCollectionToolUtils.ts", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("./features/transactions/transactionCollectionToolUtils.ts", import.meta.url))).toBe(true);
 
     for (const file of transactionToolFiles) {
-      const source = readFileSync(new URL(`./tools/${file}`, import.meta.url), "utf8");
+      const source = readFileSync(new URL(`./features/transactions/${file}`, import.meta.url), "utf8");
 
       expect(source).toContain("transactionCollectionToolUtils");
       expect(
