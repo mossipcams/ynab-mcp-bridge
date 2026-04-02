@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.25](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.24...ynab-mcp-bridge-v0.15.25) (2026-04-02)
+
+
+### Bug Fixes
+
+* remove mcp fast path ([6c81c31](https://github.com/mossipcams/ynab-mcp-bridge/commit/6c81c31a12e6b3c029501a591612fcad8d045b90))
+* remove mcp fast path seams ([9c86126](https://github.com/mossipcams/ynab-mcp-bridge/commit/9c861269306e060a280a90a3e46a69d469bd3ef5))
+
 ## [0.15.24](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.23...ynab-mcp-bridge-v0.15.24) (2026-04-01)
 
 
