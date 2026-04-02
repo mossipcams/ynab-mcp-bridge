@@ -132,6 +132,7 @@ describe("http transport authenticated tool dispatch", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("mcp-session-id")).toBeNull();
     expect(managedRequestCount).toBe(1);
   });
 
@@ -164,7 +165,52 @@ describe("http transport authenticated tool dispatch", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("mcp-session-id")).toBeNull();
     expect(managedRequestCount).toBe(1);
+  });
+
+  it("rejects repeated MCP session headers before creating a managed request", async () => {
+    let managedRequestCount = 0;
+    const server = await startOAuthServer(() => {
+      managedRequestCount += 1;
+    });
+    const tokens = await issueAccessToken(server.url);
+
+    const headers = new Headers({
+      Accept: "application/json, text/event-stream",
+      Authorization: `Bearer ${tokens.access_token}`,
+      "Content-Type": "application/json",
+      Origin: "https://claude.ai",
+      "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+    });
+    headers.append("Mcp-Session-Id", "session-one");
+    headers.append("Mcp-Session-Id", "session-two");
+
+    const response = await fetch(server.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "ynab_get_mcp_version",
+          arguments: {},
+        },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("mcp-session-id")).toBeNull();
+    await expect(response.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Bad Request: Mcp-Session-Id header must be a single value",
+      },
+      id: null,
+    });
+    expect(managedRequestCount).toBe(0);
   });
 
   it("still rejects invalid bearer tokens before tool execution begins", async () => {
@@ -225,6 +271,7 @@ describe("http transport authenticated tool dispatch", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("mcp-session-id")).toBeNull();
     await expect(response.json()).resolves.toMatchObject({
       jsonrpc: "2.0",
       id: 1,
