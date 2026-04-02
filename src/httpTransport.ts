@@ -8,7 +8,6 @@ import type { AddressInfo } from "node:net";
 
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
 import type { API } from "ynab";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import {
   hostHeaderValidation,
@@ -37,15 +36,10 @@ import {
   runWithRequestContext,
 } from "./requestContext.js";
 import {
-  createDirectToolCallExecutor,
   createServer,
-  createFastPathToolCallResults,
   type DiscoveryResourceUriMode,
   getDiscoveryResourceDocument,
   getDiscoveryResourceSummaries,
-  getInitializeResult,
-  getResourcesListResult,
-  getToolsListResult,
 } from "./serverRuntime.js";
 import { getRecordValueIfObject, getStringValue, isRecord } from "./typeUtils.js";
 import { createYnabApi } from "./ynabApi.js";
@@ -90,6 +84,7 @@ type ManagedRequestRuntime = {
 type ManagedRequestRuntimePool = {
   acquire: () => ManagedRequestRuntime;
   close: () => Promise<void>;
+  discoveryResources: ManagedRequest["discoveryResources"];
   release: (runtime: ManagedRequestRuntime) => void;
 };
 
@@ -108,18 +103,10 @@ type HttpDebugDetails = Record<string, unknown>;
 type InstallMcpPostRouteOptions = {
   app: express.Express;
   createManagedRequest: () => Promise<ManagedRequest>;
-  executeDirectToolCall?: (toolName: string, input: Record<string, unknown> | undefined) => Promise<CallToolResult>;
-  fastPathResponses: () => {
-    initializeResult: ReturnType<typeof getInitializeResult>;
-    resourcesListResult?: ReturnType<typeof getResourcesListResult>;
-    toolCallResults: Map<string, CallToolResult>;
-    toolsListResult: ReturnType<typeof getToolsListResult>;
-  } | undefined;
   getJsonRpcDebugDetails: (parsedBody: unknown) => Record<string, unknown>;
   getRequestAuthDebugOptions: (req: Pick<Request, "path" | "url">) => { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean };
   getRequestDebugDetails: (req: Request, options?: { authMode?: "http" | "stdio" | "oauth" | "none"; authRequired?: boolean }) => Record<string, unknown>;
   getRequestPath: (req: Pick<Request, "path" | "url">) => string;
-  getToolCallArguments: (parsedBody: unknown) => Record<string, unknown> | undefined;
   getToolCallName: (parsedBody: unknown) => string | undefined;
   logHttpDebug: (event: string, details: Record<string, unknown>) => void;
   path: string;
@@ -188,14 +175,6 @@ function writeJsonRpcError(res: Response, statusCode: number, code: number, mess
       message,
     },
     id: null,
-  });
-}
-
-function writeJsonRpcResult(res: Response, id: unknown, result: unknown) {
-  writeJson(res, 200, {
-    jsonrpc: "2.0",
-    id,
-    result,
   });
 }
 
@@ -336,19 +315,6 @@ function getToolCallName(parsedBody: unknown) {
   return params ? getStringValue(params, "name") : undefined;
 }
 
-function getToolCallArguments(parsedBody: unknown) {
-  if (!isRecord(parsedBody)) {
-    return undefined;
-  }
-
-  if (getStringValue(parsedBody, "method") !== "tools/call") {
-    return undefined;
-  }
-
-  const params = getRecordValueIfObject(parsedBody, "params");
-  return params ? getRecordValueIfObject(params, "arguments") : undefined;
-}
-
 function getResourceReadUri(parsedBody: unknown) {
   if (!isRecord(parsedBody)) {
     return undefined;
@@ -361,18 +327,6 @@ function getResourceReadUri(parsedBody: unknown) {
   const params = getRecordValueIfObject(parsedBody, "params");
 
   return params ? getStringValue(params, "uri") : undefined;
-}
-
-function getJsonRpcId(parsedBody: unknown) {
-  if (!isRecord(parsedBody) || !("id" in parsedBody)) {
-    return null;
-  }
-
-  return parsedBody["id"];
-}
-
-function isEmptyRecord(value: Record<string, unknown> | undefined) {
-  return value !== undefined && Object.keys(value).length === 0;
 }
 
 function captureResponseBody(res: Response) {
@@ -604,6 +558,7 @@ function createManagedRequestRuntimePool(
   createServerInstance: typeof createServer,
 ): ManagedRequestRuntimePool {
   const runtimes: ManagedRequestRuntime[] = [];
+  const discoveryResources = getDiscoveryResourceSummaries(options).map(({ name, uri }) => ({ name, uri }));
 
   return {
     acquire() {
@@ -629,18 +584,14 @@ function createManagedRequestRuntimePool(
         await runtime.mcpServer.close();
       }));
     },
+    discoveryResources,
   };
 }
 
 async function createManagedRequestFromRuntimePool(
   runtimePool: ManagedRequestRuntimePool,
-  options: {
-    discoveryResourceBaseUrl?: string;
-    discoveryResourceUriMode?: DiscoveryResourceUriMode;
-  },
 ) {
   const runtime = runtimePool.acquire();
-  const discoveryResources = getDiscoveryResourceSummaries(options);
   const transport = new StreamableHTTPServerTransport({
     enableJsonResponse: true,
   });
@@ -653,7 +604,7 @@ async function createManagedRequestFromRuntimePool(
   }
 
   return {
-    discoveryResources: discoveryResources.map(({ name, uri }) => ({ name, uri })),
+    discoveryResources: runtimePool.discoveryResources,
     transport,
     close: async () => {
       try {
@@ -729,13 +680,10 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
   const {
     app,
     createManagedRequest,
-    executeDirectToolCall,
-    fastPathResponses,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
     getRequestDebugDetails,
     getRequestPath,
-    getToolCallArguments,
     getToolCallName,
     logHttpDebug,
     path,
@@ -775,100 +723,6 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
 
     try {
       const authDebugOptions = getRequestAuthDebugOptions(req);
-      const fastPathCache = fastPathResponses();
-      const jsonRpcMethod = isRecord(parsedBody) ? getStringValue(parsedBody, "method") : undefined;
-      const isAuthlessResourcesListRequest = authDebugOptions.authMode === "none"
-        && !getSessionId(req)
-        && jsonRpcMethod === "resources/list";
-      const isSessionlessPublicBootstrapRequest = !getSessionId(req) &&
-        typeof jsonRpcMethod === "string" &&
-        (isPublicMcpBootstrapMethod(jsonRpcMethod) || isAuthlessResourcesListRequest) &&
-        (authDebugOptions.authMode === "none" || (authDebugOptions.authMode === "oauth" && !getRequestAuth(req)));
-
-      if (isSessionlessPublicBootstrapRequest && fastPathCache && typeof jsonRpcMethod === "string") {
-        if (jsonRpcMethod === "initialize") {
-          logHttpDebug("transport.handoff", {
-            ...getRequestDebugDetails(req, authDebugOptions),
-            ...getJsonRpcDebugDetails(parsedBody),
-            cleanup: false,
-          });
-          writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.initializeResult);
-          return;
-        }
-
-        if (jsonRpcMethod === "tools/list") {
-          logHttpDebug("transport.handoff", {
-            ...getRequestDebugDetails(req, authDebugOptions),
-            ...getJsonRpcDebugDetails(parsedBody),
-            cleanup: false,
-          });
-          writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.toolsListResult);
-          return;
-        }
-
-        if (jsonRpcMethod === "notifications/initialized") {
-          logHttpDebug("transport.handoff", {
-            ...getRequestDebugDetails(req, authDebugOptions),
-            ...getJsonRpcDebugDetails(parsedBody),
-            cleanup: false,
-          });
-          res.status(202).end();
-          return;
-        }
-
-        if (jsonRpcMethod === "resources/list" && fastPathCache.resourcesListResult) {
-          logHttpDebug("transport.handoff", {
-            ...getRequestDebugDetails(req, authDebugOptions),
-            ...getJsonRpcDebugDetails(parsedBody),
-            cleanup: false,
-          });
-          logHttpDebug("resource.list.advertised", {
-            ...getRequestDebugDetails(req, authDebugOptions),
-            ...getJsonRpcDebugDetails(parsedBody),
-            resourceCount: fastPathCache.resourcesListResult.resources.length,
-            resourceUris: fastPathCache.resourcesListResult.resources.map((resource) => resource.uri),
-          });
-          writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathCache.resourcesListResult);
-          return;
-        }
-
-      }
-
-      if (authDebugOptions.authMode === "none" && !getSessionId(req) && fastPathCache && jsonRpcMethod === "tools/call") {
-        const toolName = getToolCallName(parsedBody);
-        const toolArguments = getToolCallArguments(parsedBody);
-        const fastPathResult = toolName ? fastPathCache.toolCallResults.get(toolName) : undefined;
-
-        if (fastPathResult && isEmptyRecord(toolArguments)) {
-          writeJsonRpcResult(res, getJsonRpcId(parsedBody), fastPathResult);
-          return;
-        }
-      }
-
-      if (
-        authDebugOptions.authMode === "oauth" &&
-        !getSessionId(req) &&
-        executeDirectToolCall &&
-        jsonRpcMethod === "tools/call" &&
-        req.headers.authorization?.startsWith("Bearer ")
-      ) {
-        const toolName = getToolCallName(parsedBody);
-        const toolArguments = getToolCallArguments(parsedBody);
-        const toolCallParams = isRecord(parsedBody)
-          ? getRecordValueIfObject(parsedBody, "params")
-          : undefined;
-
-        if (toolName && !("task" in (toolCallParams ?? {}))) {
-          logHttpDebug("transport.handoff", {
-            ...getRequestDebugDetails(req, authDebugOptions),
-            ...getJsonRpcDebugDetails(parsedBody),
-            cleanup: false,
-            directToolDispatch: true,
-          });
-          writeJsonRpcResult(res, getJsonRpcId(parsedBody), await executeDirectToolCall(toolName, toolArguments));
-          return;
-        }
-      }
 
       const resolution = await resolveRequest(
         req,
@@ -968,7 +822,6 @@ export async function startHttpServer(
   const port = options.port ?? 3000;
   const ynab = assertYnabConfig(options.ynab);
   const sharedApi = dependencies.createApi?.(ynab) ?? createYnabApi(ynab);
-  const directToolCallExecutor = createDirectToolCallExecutor(ynab, sharedApi);
 
   if (auth.mode === "oauth") {
     allowedOrigins.add(new URL(auth.publicUrl).origin);
@@ -992,14 +845,6 @@ export async function startHttpServer(
   const urlencodedParser = express.urlencoded({ extended: false });
   let discoveryResourceBaseUrl: string | undefined;
   let discoveryResourceUriMode: DiscoveryResourceUriMode | undefined;
-  let fastPathCache:
-    | {
-        initializeResult: ReturnType<typeof getInitializeResult>;
-        resourcesListResult?: ReturnType<typeof getResourcesListResult>;
-        toolCallResults: Map<string, CallToolResult>;
-        toolsListResult: ReturnType<typeof getToolsListResult>;
-      }
-    | undefined;
   let runtimePool: ManagedRequestRuntimePool | undefined;
   let resolveStartupReady!: () => void;
   let rejectStartupReady!: (error: unknown) => void;
@@ -1051,10 +896,6 @@ export async function startHttpServer(
       return;
     }
 
-    next();
-  });
-
-  app.use((req, res, next) => {
     next();
   });
 
@@ -1167,23 +1008,15 @@ export async function startHttpServer(
         throw new Error("Managed request runtime pool is not initialized.");
       }
 
-      return createManagedRequestFromRuntimePool(
-        runtimePool,
-        discoveryResourceBaseUrl
-          ? { discoveryResourceBaseUrl, ...(discoveryResourceUriMode ? { discoveryResourceUriMode } : {}) }
-          : {},
-      );
+      return createManagedRequestFromRuntimePool(runtimePool);
     },
-    fastPathResponses: () => fastPathCache,
     getJsonRpcDebugDetails,
     getRequestAuthDebugOptions,
     getRequestDebugDetails,
     getRequestPath,
-    getToolCallArguments,
     getToolCallName,
     logHttpDebug,
     path,
-    executeDirectToolCall: directToolCallExecutor.executeToolCall,
     resolveRequest: async (req, createRequest) => {
       const resolution = await resolveRequest(req, createRequest);
 
@@ -1268,12 +1101,6 @@ export async function startHttpServer(
     const discoveryRuntimeOptions = {
       discoveryResourceBaseUrl,
       ...(discoveryResourceUriMode ? { discoveryResourceUriMode } : {}),
-    };
-    fastPathCache = {
-      toolCallResults: await createFastPathToolCallResults(),
-      initializeResult: getInitializeResult(),
-      toolsListResult: getToolsListResult(),
-      resourcesListResult: getResourcesListResult(discoveryRuntimeOptions),
     };
     runtimePool = createManagedRequestRuntimePool(
       ynab,

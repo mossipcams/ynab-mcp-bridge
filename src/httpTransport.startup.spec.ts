@@ -1,50 +1,19 @@
 import { createServer as createNodeHttpServer } from "node:http";
 
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-let fastPathDelayMs = 0;
-
-vi.mock("./serverRuntime.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./serverRuntime.js")>();
-
-  return {
-    ...actual,
-    createFastPathToolCallResults: vi.fn(async () => {
-      if (fastPathDelayMs > 0) {
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, fastPathDelayMs);
-        });
-      }
-
-      return await actual.createFastPathToolCallResults();
-    }),
-  };
-});
+import { startHttpServer } from "./httpTransport.js";
 
 describe("startHttpServer startup sequencing", () => {
   const cleanups: Array<() => Promise<void>> = [];
-  const originalEnv = process.env;
   const ynab = {
     apiToken: "test-token",
   } as const;
 
-  beforeEach(() => {
-    fastPathDelayMs = 0;
-    process.env = { ...originalEnv };
-  });
-
   afterEach(async () => {
-    process.env = originalEnv;
-    fastPathDelayMs = 0;
-    vi.resetModules();
-
     while (cleanups.length > 0) {
-      const cleanup = cleanups.pop();
-
-      if (cleanup) {
-        await cleanup();
-      }
+      await cleanups.pop()?.();
     }
   });
 
@@ -110,6 +79,7 @@ describe("startHttpServer startup sequencing", () => {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+
         if (!message.includes("fetch failed")) {
           throw error;
         }
@@ -123,10 +93,8 @@ describe("startHttpServer startup sequencing", () => {
     throw new Error("Timed out waiting for HTTP server to accept startup request.");
   }
 
-  it("does not fail early MCP POSTs while startup initialization is still pending", async () => {
-    fastPathDelayMs = 150;
+  it("accepts initialize requests as soon as the server is ready to receive MCP POSTs", async () => {
     const port = await getFreePort();
-    const { startHttpServer } = await import("./httpTransport.js");
     const serverPromise = startHttpServer({
       ynab,
       allowedOrigins: ["https://claude.ai"],
