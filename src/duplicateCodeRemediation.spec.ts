@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
-const collectionToolUtilsPath = path.join(projectRoot, "src", "tools", "collectionToolUtils.ts");
+const collectionToolUtilsPath = path.join(projectRoot, "src", "collectionToolUtils.ts");
 const sharedCollectionTools = [
   "features/accounts/ListAccountsTool.ts",
   "features/payees/ListPayeesTool.ts",
@@ -20,8 +20,8 @@ const sharedTransactionLookupTools = [
   "features/transactions/GetTransactionsByPayeeTool.ts",
 ] as const;
 const sharedBudgetHealthTools = [
-  "GetBudgetHealthSummaryTool.ts",
-  "GetMonthlyReviewTool.ts",
+  "features/financialHealth/GetBudgetHealthSummaryTool.ts",
+  "features/financialHealth/GetMonthlyReviewTool.ts",
 ] as const;
 const sharedTransactionBrowseTools = [
   "features/transactions/SearchTransactionsTool.ts",
@@ -79,12 +79,12 @@ describe("duplicate code remediation", () => {
   });
 
   it("centralizes month budget-health shaping behind a shared helper", () => {
-    const helperSource = readFileSync(path.join(projectRoot, "src", "tools", "financeToolUtils.ts"), "utf8");
+    const helperSource = readFileSync(path.join(projectRoot, "src", "financeToolUtils.ts"), "utf8");
 
     expect(helperSource).toContain("export function buildBudgetHealthMonthSummary");
 
     for (const toolFile of sharedBudgetHealthTools) {
-      const toolSource = readFileSync(path.join(projectRoot, "src", "tools", toolFile), "utf8");
+      const toolSource = readFileSync(path.join(projectRoot, "src", toolFile), "utf8");
 
       expect(toolSource).toContain("buildBudgetHealthMonthSummary(");
       expect(toolSource).not.toContain("categories.filter((category) => category.balance < 0)");

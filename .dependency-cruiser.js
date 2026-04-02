@@ -30,7 +30,7 @@ const config = {
       from: {
         orphan: true,
         path: [
-          "^src/(index|authAdmissionPolicy|cloudflareCompatibility|config|headerUtils|httpTransport|localTokenService|logger|originPolicy|packageInfo|requestContext|runtimeConfig|runtimePlanToolUtils|serverRuntime|startupLogging|stdioServer|transactionQueryEngine|typeUtils|ynabApi|ynabConfig|ynabRateLimiter)\\.ts$",
+          "^src/(cachedYnabReads|collectionToolUtils|errorUtils|financeToolUtils|index|authAdmissionPolicy|cloudflareCompatibility|config|headerUtils|httpTransport|localTokenService|logger|originPolicy|packageInfo|planToolUtils|requestContext|runtimeConfig|runtimePlanToolUtils|serverRuntime|startupLogging|stdioServer|transactionQueryEngine|typeUtils|ynabApi|ynabConfig|ynabRateLimiter)\\.ts$",
           "^src/clientProfiles/(?!types\\.ts$).+\\.ts$",
           "^src/auth2/(config|core|http|logging|provider|store)/.+\\.ts$",
           featureSliceLayer,
@@ -95,6 +95,18 @@ const config = {
       },
       to: {
         path: [entryLayer, transportLayer, compositionLayer],
+      },
+    },
+    {
+      name: "production-code-does-not-import-compatibility-tools",
+      comment: "Compatibility shims under src/tools/ are not valid production dependencies.",
+      severity: "error",
+      from: {
+        path: "^src/",
+        pathNot: ["^src/tools/", "\\.spec\\.ts$"],
+      },
+      to: {
+        path: "^src/tools/.+\\.ts$",
       },
     },
   ],

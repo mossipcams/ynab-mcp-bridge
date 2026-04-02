@@ -9,8 +9,8 @@
     "progress"
   ],
   "mutate": [
-    "src/tools/collectionToolUtils.ts",
-    "src/transactionQueryEngine.ts"
+    "src/collectionToolUtils.ts",
+    "src/features/transactions/transactionQueryEngine.ts"
   ],
   "vitest": {
     "configFile": "vitest.mutation.config.ts",

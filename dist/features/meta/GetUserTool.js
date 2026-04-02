@@ -1,4 +1,4 @@
-import { toErrorResult, toTextResult } from "../../tools/planToolUtils.js";
+import { toErrorResult, toTextResult } from "../../planToolUtils.js";
 export const name = "ynab_get_user";
 export const description = "Gets the authenticated YNAB user.";
 export const inputSchema = {};

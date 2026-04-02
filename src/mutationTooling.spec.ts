@@ -30,8 +30,8 @@ describe("mutation tooling", () => {
     expect(strykerConfig.testRunner).toBe("vitest");
     expect(strykerConfig.plugins).toContain("@stryker-mutator/vitest-runner");
     expect(strykerConfig.mutate).toEqual([
-      "src/tools/collectionToolUtils.ts",
-      "src/transactionQueryEngine.ts",
+      "src/collectionToolUtils.ts",
+      "src/features/transactions/transactionQueryEngine.ts",
     ]);
     expect(strykerConfig.vitest).toEqual({
       configFile: "vitest.mutation.config.ts",

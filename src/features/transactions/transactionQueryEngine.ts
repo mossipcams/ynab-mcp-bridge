@@ -4,7 +4,7 @@ import {
   hasProjectionControls,
   paginateEntries,
   projectRecord,
-} from "../../tools/collectionToolUtils.js";
+} from "../../collectionToolUtils.js";
 
 export const transactionFields = [
   "date",

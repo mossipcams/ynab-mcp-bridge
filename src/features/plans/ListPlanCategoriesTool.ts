@@ -1,9 +1,9 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { getCachedCategories } from "../../tools/cachedYnabReads.js";
-import { compactObject } from "../../tools/financeToolUtils.js";
-import { hasPaginationControls, hasProjectionControls, paginateEntries } from "../../tools/collectionToolUtils.js";
+import { getCachedCategories } from "../../cachedYnabReads.js";
+import { compactObject } from "../../financeToolUtils.js";
+import { hasPaginationControls, hasProjectionControls, paginateEntries } from "../../collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
 
 export const name = "ynab_list_categories";

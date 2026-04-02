@@ -6,8 +6,8 @@ import {
   hasProjectionControls,
   paginateEntries,
   projectRecord,
-} from "../../tools/collectionToolUtils.js";
-import { getCachedPlanMonths } from "../../tools/cachedYnabReads.js";
+} from "../../collectionToolUtils.js";
+import { getCachedPlanMonths } from "../../cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
 
 export const name = "ynab_list_plan_months";

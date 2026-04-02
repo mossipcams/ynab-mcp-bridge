@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { compactObject } from "../../tools/financeToolUtils.js";
+import { compactObject } from "../../financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
 export const name = "ynab_get_plan";
 export const description = "Gets a single YNAB plan. Returns a compact summary by default, with an explicit full-view opt-in for detailed budgeting data.";

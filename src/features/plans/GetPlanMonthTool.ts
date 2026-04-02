@@ -1,8 +1,8 @@
 import { z } from "zod";
 import * as ynab from "ynab";
 
-import { getCachedPlanMonth } from "../../tools/cachedYnabReads.js";
-import { compactObject } from "../../tools/financeToolUtils.js";
+import { getCachedPlanMonth } from "../../cachedYnabReads.js";
+import { compactObject } from "../../financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
 
 export const name = "ynab_get_plan_month";

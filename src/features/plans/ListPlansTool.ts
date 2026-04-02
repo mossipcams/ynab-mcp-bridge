@@ -1,6 +1,6 @@
 import * as ynab from "ynab";
 
-import { toErrorResult, toTextResult } from "../../tools/planToolUtils.js";
+import { toErrorResult, toTextResult } from "../../planToolUtils.js";
 
 export const name = "ynab_list_plans";
 export const description = "Lists all available YNAB plans and identifies the default plan when one exists.";

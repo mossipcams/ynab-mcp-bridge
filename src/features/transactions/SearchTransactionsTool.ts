@@ -3,8 +3,8 @@ import * as ynab from "ynab";
 
 import {
   formatAmountMilliunits,
-} from "../../tools/collectionToolUtils.js";
-import { compactObject } from "../../tools/financeToolUtils.js";
+} from "../../collectionToolUtils.js";
+import { compactObject } from "../../financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
 import {
   buildTransactionCollectionResult,

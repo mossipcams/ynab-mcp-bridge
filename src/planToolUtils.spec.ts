@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./tools/planToolUtils.js";
+import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
 describe("plan tool response helpers", () => {
   it("serializes payloads as compact JSON by default", () => {
@@ -161,7 +161,7 @@ describe("plan tool response helpers", () => {
   });
 
   it("keeps configured-plan lookup explicit instead of importing ynab runtime context", async () => {
-    const source = readFileSync(new URL("./tools/planToolUtils.ts", import.meta.url), "utf8");
+    const source = readFileSync(new URL("./planToolUtils.ts", import.meta.url), "utf8");
 
     expect(source).not.toContain("../ynabApi.js");
     expect(source).toContain("configuredPlanId");

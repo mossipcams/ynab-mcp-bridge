@@ -9,7 +9,7 @@
 3. `src/httpTransport.ts` assembles the Express app, origin/auth enforcement, MCP POST handling, and auth2 HTTP route wiring.
 4. `src/stdioServer.ts` starts the local stdio transport path.
 5. `src/serverRuntime.ts` builds the MCP server, registers tools, and exposes discovery resources.
-6. Tool modules call shared YNAB access and shaping helpers to serve read-only responses.
+6. Feature slice tool modules call shared-kernel helpers to serve read-only responses.
 
 ## Layer Model
 
@@ -24,8 +24,9 @@ These boundaries are enforced in `.dependency-cruiser.js`. Domain modules must n
 
 The MCP domain may be organized into Vertical Slice modules under `src/features/` while keeping the existing outer shell unchanged.
 
-- `src/features/**`: feature-local MCP domain slices such as transactions, plans, payees, and financial health
-- root-level shared kernel modules under `src/`: shared domain helpers that are still used across multiple slices
+- `src/features/**`: canonical feature-local MCP domain slices such as transactions, plans, payees, and financial health
+- root-level shared kernel modules under `src/`: canonical shared domain helpers used across multiple slices
+- `src/tools/**`: compatibility-only re-export shims for legacy imports; not a home for new production logic
 
 Vertical Slice modules are still domain modules. They must not import entry, transport, or composition modules, and they must not bypass the frozen `auth2` seams.
 
@@ -47,9 +48,10 @@ Auth2 may depend on shared kernel modules such as `src/config.ts`, `src/logger.t
 
 - `src/httpTransport.ts`: HTTP app assembly, request validation, and MCP transport handoff
 - `src/serverRuntime.ts`: server creation, tool registry, discovery resources, and metadata
-- `src/tools/*.ts`: user-visible MCP tools
-- `src/features/**`: preferred long-term home for grouped MCP capabilities and their nearby helpers
-- `src/tools/*Utils.ts`, `src/transactionQueryEngine.ts`, `src/ynabApi.ts`: shared read/query logic
+- `src/features/**`: canonical home for grouped MCP capabilities and their nearby helpers
+- `src/*.ts` shared-kernel helpers such as `cachedYnabReads.ts`, `collectionToolUtils.ts`, `financeToolUtils.ts`, and `planToolUtils.ts`
+- `src/tools/*.ts`: compatibility-only shims that re-export canonical feature or shared-kernel modules
+- `src/transactionQueryEngine.ts`, `src/ynabApi.ts`: shared read/query logic and compatibility seams
 - `src/clientProfiles/*` and `src/requestContext.ts`: client detection and request-scoped metadata
 
 All MCP POST traffic now uses the managed MCP transport handoff path after transport-level auth and origin checks succeed. Bootstrap metadata and `tools/call` requests share the same HTTP execution path.
@@ -57,8 +59,9 @@ All MCP POST traffic now uses the managed MCP transport handoff path after trans
 ## Contributor Rules
 
 - Keep transport concerns in transport modules. Do not move request parsing, origin handling, or auth route wiring into tool modules.
-- Keep `src/serverRuntime.ts` as registry and discovery glue. Tool-specific branching belongs in tools or shared helpers.
+- Keep `src/serverRuntime.ts` as registry and discovery glue. Tool-specific branching belongs in feature slices or shared helpers.
 - Prefer new MCP capability work under `src/features/` when it naturally belongs to a single slice; keep only genuinely shared helpers at the `src/` root.
+- Treat `src/tools/**` as compatibility-only. Do not add new production logic there.
 - Read environment and CLI flags only in bootstrap/config modules.
 - Treat auth2 as the canonical OAuth path. Do not revive retired `oauthRuntime`-style modules.
 - Review this `architecture.md` before starting implementation work so new changes follow the current seams.

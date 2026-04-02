@@ -6,7 +6,7 @@ import {
   hasProjectionControls,
   paginateEntries,
   projectRecord,
-} from "../../tools/collectionToolUtils.js";
+} from "../../collectionToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
 
 export const name = "ynab_list_payees";
