@@ -227,6 +227,7 @@ function captureResponseBody(res) {
         return originalWrite(chunk);
     }
     function capturedEnd(chunkOrCallback, encodingOrCallback, callback) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Express response typings widen the end chunk parameter, but it is only forwarded or converted to a Buffer below.
         const chunk = typeof chunkOrCallback === "function"
             ? undefined
             : chunkOrCallback;
@@ -262,7 +263,8 @@ function captureResponseBody(res) {
                 return undefined;
             }
             try {
-                const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+                const payloadText = Buffer.concat(chunks).toString("utf8");
+                const payload = JSON.parse(payloadText);
                 if (!isRecord(payload)) {
                     return undefined;
                 }
@@ -300,6 +302,46 @@ function getBodyStringValue(body, key) {
         return undefined;
     }
     return getStringValue(body, key);
+}
+function logManagedResourceRequestDetails(context) {
+    const { authDebugOptions, getJsonRpcDebugDetails, getRequestAuthDebugOptions, getRequestDebugDetails, logHttpDebug, parsedBody, req, resolution, } = context;
+    if (isRecord(parsedBody) && getStringValue(parsedBody, "method") === "resources/list") {
+        logHttpDebug("resource.list.advertised", {
+            ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
+            ...getJsonRpcDebugDetails(parsedBody),
+            resourceCount: resolution.managedRequest.discoveryResources.length,
+            resourceUris: resolution.managedRequest.discoveryResources.map((resource) => resource.uri),
+        });
+    }
+    const resourceReadUri = getResourceReadUri(parsedBody);
+    if (!resourceReadUri) {
+        return;
+    }
+    logHttpDebug("resource.read.requested", {
+        ...getRequestDebugDetails(req, authDebugOptions),
+        ...getJsonRpcDebugDetails(parsedBody),
+        resourceUri: resourceReadUri,
+    });
+}
+async function logManagedToolDispatchOutcome(context) {
+    const { authDebugOptions, getJsonRpcDebugDetails, getRequestDebugDetails, getToolCallName, hasToolCallStarted, logHttpDebug, parsedBody, req, responseCapture, } = context;
+    const toolName = getToolCallName(parsedBody);
+    if (!toolName || hasToolCallStarted()) {
+        return;
+    }
+    await responseCapture?.waitForSettledResponse();
+    const errorMessage = responseCapture?.readJsonRpcErrorMessage();
+    const logDetails = {
+        ...getRequestDebugDetails(req, authDebugOptions),
+        ...getJsonRpcDebugDetails(parsedBody),
+        errorMessage,
+        toolName,
+    };
+    if (typeof errorMessage === "string" && errorMessage.includes("Input validation error")) {
+        logHttpDebug("tool.call.validation_failed", logDetails);
+        return;
+    }
+    logHttpDebug("tool.dispatch.absent", logDetails);
 }
 function hasMultipleSessionHeaderValues(req) {
     const sessionId = req.headers["mcp-session-id"];
@@ -473,48 +515,34 @@ export function installMcpPostRoute(options) {
                 void cleanup();
             });
             const responseCapture = getToolCallName(parsedBody) ? captureResponseBody(res) : undefined;
-            const resourceReadUri = getResourceReadUri(parsedBody);
             logHttpDebug("transport.handoff", {
                 ...getRequestDebugDetails(req, authDebugOptions),
                 ...getJsonRpcDebugDetails(parsedBody),
                 cleanup: Boolean(resolution.cleanup),
             });
-            if (isRecord(parsedBody) && getStringValue(parsedBody, "method") === "resources/list") {
-                logHttpDebug("resource.list.advertised", {
-                    ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-                    ...getJsonRpcDebugDetails(parsedBody),
-                    resourceCount: resolution.managedRequest.discoveryResources.length,
-                    resourceUris: resolution.managedRequest.discoveryResources.map((resource) => resource.uri),
-                });
-            }
-            if (resourceReadUri) {
-                logHttpDebug("resource.read.requested", {
-                    ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
-                    ...getJsonRpcDebugDetails(parsedBody),
-                    resourceUri: resourceReadUri,
-                });
-            }
+            logManagedResourceRequestDetails({
+                authDebugOptions,
+                getJsonRpcDebugDetails,
+                getRequestAuthDebugOptions,
+                getRequestDebugDetails,
+                logHttpDebug,
+                parsedBody,
+                req,
+                resolution,
+            });
             await resolution.managedRequest.transport.handleRequest(req, res, parsedBody);
-            const toolName = getToolCallName(parsedBody);
-            if (toolName && !hasToolCallStarted()) {
-                await responseCapture?.waitForSettledResponse();
-                const errorMessage = responseCapture?.readJsonRpcErrorMessage();
-                if (typeof errorMessage === "string" && errorMessage.includes("Input validation error")) {
-                    logHttpDebug("tool.call.validation_failed", {
-                        ...getRequestDebugDetails(req, authDebugOptions),
-                        ...getJsonRpcDebugDetails(parsedBody),
-                        errorMessage,
-                        toolName,
-                    });
-                    return;
-                }
-                logHttpDebug("tool.dispatch.absent", {
-                    ...getRequestDebugDetails(req, authDebugOptions),
-                    ...getJsonRpcDebugDetails(parsedBody),
-                    errorMessage,
-                    toolName,
-                });
-            }
+            await logManagedToolDispatchOutcome({
+                authDebugOptions,
+                getJsonRpcDebugDetails,
+                getRequestAuthDebugOptions,
+                getRequestDebugDetails,
+                getToolCallName,
+                hasToolCallStarted,
+                logHttpDebug,
+                parsedBody,
+                req,
+                responseCapture,
+            });
         }
         catch (error) {
             await cleanup();
@@ -522,29 +550,37 @@ export function installMcpPostRoute(options) {
         }
     });
 }
+function createAllowedOrigins(auth, configuredAllowedOrigins) {
+    const allowedOrigins = new Set((configuredAllowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
+    if (auth.mode === "oauth") {
+        allowedOrigins.add(new URL(auth.publicUrl).origin);
+    }
+    return allowedOrigins;
+}
+function validateHttpServerAuthConfiguration(auth, auth2Config) {
+    if (auth.mode !== "oauth") {
+        return;
+    }
+    validateCloudflareAccessOAuthSettings({
+        authorizationUrl: auth.authorizationUrl,
+        issuer: auth.issuer,
+        jwksUrl: auth.jwksUrl,
+        tokenUrl: auth.tokenUrl,
+    });
+    if (!auth2Config) {
+        throw new Error("OAuth HTTP mode requires auth2Config.");
+    }
+}
 export async function startHttpServer(options, dependencies = {}) {
     const allowedHosts = options.allowedHosts ?? [];
     const auth = options.auth ?? { deployment: "authless", mode: "none" };
-    const allowedOrigins = new Set((options.allowedOrigins ?? []).map((origin) => normalizeOrigin(origin)));
+    const allowedOrigins = createAllowedOrigins(auth, options.allowedOrigins);
     const host = options.host ?? "127.0.0.1";
     const path = options.path ?? "/mcp";
     const port = options.port ?? 3000;
     const ynab = assertYnabConfig(options.ynab);
     const sharedApi = dependencies.createApi?.(ynab) ?? createYnabApi(ynab);
-    if (auth.mode === "oauth") {
-        allowedOrigins.add(new URL(auth.publicUrl).origin);
-    }
-    if (auth.mode === "oauth") {
-        validateCloudflareAccessOAuthSettings({
-            authorizationUrl: auth.authorizationUrl,
-            issuer: auth.issuer,
-            jwksUrl: auth.jwksUrl,
-            tokenUrl: auth.tokenUrl,
-        });
-        if (!options.auth2Config) {
-            throw new Error("OAuth HTTP mode requires auth2Config.");
-        }
-    }
+    validateHttpServerAuthConfiguration(auth, options.auth2Config);
     const app = express();
     const jsonParser = express.json();
     const urlencodedParser = express.urlencoded({ extended: false });

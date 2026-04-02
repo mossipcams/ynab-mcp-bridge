@@ -17,9 +17,7 @@ const TYPE_CHECKED_FILES = [
 
 const TYPE_CHECKED_IGNORES = [
   ...NON_TYPED_TS_IGNORES,
-  "src/httpTransport.ts",
   "src/index.ts",
-  "src/serverRuntime.ts",
   "src/stdioServer.ts",
 ];
 

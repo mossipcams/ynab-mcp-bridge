@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 
 import { setLoggerDestinationForTests } from "./logger.js";
@@ -17,6 +16,55 @@ import * as GetMcpVersionTool from "./tools/GetMcpVersionTool.js";
 
 describe("createServer", () => {
   const originalEnv = process.env;
+  const expectedToolNames = [
+    "ynab_get_mcp_version",
+    "ynab_get_user",
+    "ynab_list_plans",
+    "ynab_get_plan",
+    "ynab_get_plan_settings",
+    "ynab_get_plan_month",
+    "ynab_list_plan_months",
+    "ynab_list_categories",
+    "ynab_get_category",
+    "ynab_get_month_category",
+    "ynab_list_transactions",
+    "ynab_search_transactions",
+    "ynab_get_transactions_by_month",
+    "ynab_get_transaction",
+    "ynab_get_transactions_by_account",
+    "ynab_get_transactions_by_category",
+    "ynab_get_transactions_by_payee",
+    "ynab_list_scheduled_transactions",
+    "ynab_get_scheduled_transaction",
+    "ynab_list_accounts",
+    "ynab_get_account",
+    "ynab_list_payees",
+    "ynab_get_payee",
+    "ynab_list_payee_locations",
+    "ynab_get_payee_location",
+    "ynab_get_payee_locations_by_payee",
+    "ynab_get_money_movements",
+    "ynab_get_money_movements_by_month",
+    "ynab_get_money_movement_groups",
+    "ynab_get_money_movement_groups_by_month",
+    "ynab_get_monthly_review",
+    "ynab_get_net_worth_trajectory",
+    "ynab_get_financial_snapshot",
+    "ynab_get_financial_health_check",
+    "ynab_get_spending_summary",
+    "ynab_get_spending_anomalies",
+    "ynab_get_cash_flow_summary",
+    "ynab_get_cash_runway",
+    "ynab_get_budget_health_summary",
+    "ynab_get_upcoming_obligations",
+    "ynab_get_goal_progress_summary",
+    "ynab_get_budget_cleanup_summary",
+    "ynab_get_income_summary",
+    "ynab_get_emergency_fund_coverage",
+    "ynab_get_debt_summary",
+    "ynab_get_recurring_expense_summary",
+    "ynab_get_category_trend_summary",
+  ] as const;
 
   function createBufferedDestination() {
     const destination = new PassThrough();
@@ -39,6 +87,38 @@ describe("createServer", () => {
     };
   }
 
+  function createRegisteredHandlers(
+    api: unknown = {},
+    config: Parameters<typeof attachYnabApiRuntimeContext>[1] = {
+      apiToken: "test-token",
+    },
+  ) {
+    const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
+
+    registerServerTools(
+      {
+        registerTool: ((name: string, _metadata: unknown, handler: (input: unknown) => Promise<unknown>) => {
+          handlers.set(name, handler);
+          return {};
+        }) as never,
+      },
+      attachYnabApiRuntimeContext(api, config) as never,
+    );
+
+    return handlers;
+  }
+
+  function getToolDocument(
+    toolName: string,
+    options: Parameters<typeof getDiscoveryResourceSummaries>[0] = {},
+  ) {
+    const summary = getDiscoveryResourceSummaries(options).find((resource) => resource.name === toolName);
+
+    expect(summary).toBeDefined();
+
+    return getDiscoveryResourceDocument(toolName, summary!.uri, options);
+  }
+
   beforeEach(() => {
     process.env = { ...originalEnv };
   });
@@ -49,63 +129,10 @@ describe("createServer", () => {
   });
 
   it("registers the rebuilt read-only YNAB toolset", () => {
-    const server = createServer({
-      apiToken: "test-token",
-    });
-    const registeredTools = Object.keys((server as any)._registeredTools);
+    const registeredTools = getToolsListResult().tools.map((tool) => tool.name);
 
     expect(registeredTools).toHaveLength(47);
-    expect(registeredTools).toEqual(
-      expect.arrayContaining([
-        "ynab_get_mcp_version",
-        "ynab_get_user",
-        "ynab_list_plans",
-        "ynab_get_plan",
-        "ynab_get_plan_settings",
-        "ynab_get_plan_month",
-        "ynab_list_plan_months",
-        "ynab_list_categories",
-        "ynab_get_category",
-        "ynab_get_month_category",
-        "ynab_list_transactions",
-        "ynab_search_transactions",
-        "ynab_get_transactions_by_month",
-        "ynab_get_transaction",
-        "ynab_get_transactions_by_account",
-        "ynab_get_transactions_by_category",
-        "ynab_get_transactions_by_payee",
-        "ynab_list_scheduled_transactions",
-        "ynab_get_scheduled_transaction",
-        "ynab_list_accounts",
-        "ynab_get_account",
-        "ynab_list_payees",
-        "ynab_get_payee",
-        "ynab_list_payee_locations",
-        "ynab_get_payee_location",
-        "ynab_get_payee_locations_by_payee",
-        "ynab_get_money_movements",
-        "ynab_get_money_movements_by_month",
-        "ynab_get_money_movement_groups",
-        "ynab_get_money_movement_groups_by_month",
-        "ynab_get_monthly_review",
-        "ynab_get_net_worth_trajectory",
-        "ynab_get_financial_snapshot",
-        "ynab_get_financial_health_check",
-        "ynab_get_spending_summary",
-        "ynab_get_spending_anomalies",
-        "ynab_get_cash_flow_summary",
-        "ynab_get_cash_runway",
-        "ynab_get_budget_health_summary",
-        "ynab_get_upcoming_obligations",
-        "ynab_get_goal_progress_summary",
-        "ynab_get_budget_cleanup_summary",
-        "ynab_get_income_summary",
-        "ynab_get_emergency_fund_coverage",
-        "ynab_get_debt_summary",
-        "ynab_get_recurring_expense_summary",
-        "ynab_get_category_trend_summary",
-      ]),
-    );
+    expect(registeredTools).toEqual(expect.arrayContaining(expectedToolNames));
   });
 
   it("advertises discovery resources for callable YNAB tools", () => {
@@ -119,7 +146,7 @@ describe("createServer", () => {
       },
     }));
 
-    const registeredResources = Object.values((server as any)._registeredResources) as Array<{ name: string }>;
+    const registeredResources = getDiscoveryResourceSummaries();
 
     expect(registeredResources.length).toBeGreaterThan(0);
     expect(registeredResources.map((resource) => resource.name)).toEqual(expect.arrayContaining([
@@ -128,29 +155,10 @@ describe("createServer", () => {
     ]));
   });
 
-  it("serializes readable discovery metadata for affected YNAB tools", async () => {
-    const server = createServer({
-      apiToken: "test-token",
-    });
-    const registeredResources = (server as any)._registeredResources as Record<string, {
-      metadata: { mimeType?: string };
-      name: string;
-      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
-    }>;
+  it("serializes readable discovery metadata for affected YNAB tools", () => {
+    const categoryPayload = getToolDocument("ynab_list_categories");
+    const accountPayload = getToolDocument("ynab_list_accounts");
 
-    const categoryEntry = Object.entries(registeredResources).find(([, resource]) => resource.name === "ynab_list_categories");
-    const accountEntry = Object.entries(registeredResources).find(([, resource]) => resource.name === "ynab_list_accounts");
-
-    expect(categoryEntry).toBeDefined();
-    expect(accountEntry).toBeDefined();
-
-    const [categoryUri, categoryResource] = categoryEntry!;
-    const [accountUri, accountResource] = accountEntry!;
-    const categoryPayload = JSON.parse((await categoryResource.readCallback(new URL(categoryUri), {})).contents[0].text);
-    const accountPayload = JSON.parse((await accountResource.readCallback(new URL(accountUri), {})).contents[0].text);
-
-    expect(categoryResource.metadata.mimeType).toBe("application/json");
-    expect(accountResource.metadata.mimeType).toBe("application/json");
     expect(categoryPayload).toEqual(expect.objectContaining({
       annotations: expect.objectContaining({
         readOnlyHint: true,
@@ -181,32 +189,21 @@ describe("createServer", () => {
     expect(JSON.stringify(searchDocument["inputSchema"])).not.toContain("\"_def\"");
   });
 
-  it("registers a compatibility URI alias for each discovery resource without changing its metadata contract", async () => {
-    const server = createServer(
-      {
-        apiToken: "test-token",
-      },
-      undefined,
-      {
-        discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
-      },
-    );
-    const registeredResources = (server as any)._registeredResources as Record<string, {
-      name: string;
-      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
-    }>;
+  it("registers a compatibility URI alias for each discovery resource without changing its metadata contract", () => {
+    const options = {
+      discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
+    };
+    const categoryEntries = getDiscoveryResourceSummaries(options)
+      .filter((resource) => resource.name === "ynab_list_categories");
 
-    const categoryEntries = Object.entries(registeredResources)
-      .filter(([, resource]) => resource.name === "ynab_list_categories");
-
-    expect(categoryEntries.map(([uri]) => uri)).toEqual(expect.arrayContaining([
+    expect(categoryEntries.map((resource) => resource.uri)).toEqual(expect.arrayContaining([
       "ynab-tool://ynab_list_categories",
       "https://mcp.example.com/mcp/resources/ynab_list_categories",
     ]));
 
-    const payloads = await Promise.all(categoryEntries.map(async ([uri, resource]) => (
-      JSON.parse((await resource.readCallback(new URL(uri), {})).contents[0].text) as Record<string, unknown>
-    )));
+    const payloads = categoryEntries.map((resource) => (
+      getDiscoveryResourceDocument("ynab_list_categories", resource.uri, options) as Record<string, unknown>
+    ));
 
     expect(payloads).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -226,37 +223,27 @@ describe("createServer", () => {
     })))).toHaveLength(1);
   });
 
-  it("can advertise compatibility discovery URLs without duplicate aliases", async () => {
+  it("can advertise compatibility discovery URLs without duplicate aliases", () => {
     const options = {
       discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
       discoveryResourceUriMode: "compatibility-only" as const,
     };
-    const server = createServer(
-      {
-        apiToken: "test-token",
-      },
-      undefined,
-      options,
-    );
     const summaries = getDiscoveryResourceSummaries(options);
-    const registeredResources = (server as any)._registeredResources as Record<string, {
-      name: string;
-      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
-    }>;
 
     expect(new Set(summaries.map((summary) => summary.name)).size).toBe(47);
     expect(summaries).toHaveLength(47);
     expect(summaries.every((summary) => summary.uri.startsWith("https://mcp.example.com/mcp/resources/"))).toBe(true);
 
-    const categoryEntries = Object.entries(registeredResources)
-      .filter(([, resource]) => resource.name === "ynab_list_categories");
+    const categoryEntries = summaries.filter((summary) => summary.name === "ynab_list_categories");
 
-    expect(categoryEntries.map(([uri]) => uri)).toEqual([
+    expect(categoryEntries.map((summary) => summary.uri)).toEqual([
       "https://mcp.example.com/mcp/resources/ynab_list_categories",
     ]);
 
-    const directPayload = JSON.parse(
-      (await categoryEntries[0]![1].readCallback(new URL(categoryEntries[0]![0]), {})).contents[0].text,
+    const directPayload = getDiscoveryResourceDocument(
+      "ynab_list_categories",
+      categoryEntries[0]!.uri,
+      options,
     ) as Record<string, unknown>;
     const canonicalPayload = getDiscoveryResourceDocument(
       "ynab_list_categories",
@@ -274,21 +261,7 @@ describe("createServer", () => {
     }));
   });
 
-  it("adds explicit required-argument guidance for strict-input discovery tools", async () => {
-    const server = createServer(
-      {
-        apiToken: "test-token",
-      },
-      undefined,
-      {
-        discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
-      },
-    );
-    const registeredResources = (server as any)._registeredResources as Record<string, {
-      name: string;
-      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
-    }>;
-
+  it("adds explicit required-argument guidance for strict-input discovery tools", () => {
     const strictToolNames = [
       "ynab_get_month_category",
       "ynab_get_net_worth_trajectory",
@@ -296,13 +269,7 @@ describe("createServer", () => {
     ] as const;
 
     for (const toolName of strictToolNames) {
-      const entry = Object.entries(registeredResources)
-        .find(([, resource]) => resource.name === toolName);
-
-      expect(entry).toBeDefined();
-
-      const [uri, resource] = entry!;
-      const payload = JSON.parse((await resource.readCallback(new URL(uri), {})).contents[0].text) as Record<string, unknown>;
+      const payload = getToolDocument(toolName);
 
       expect(payload).toEqual(expect.objectContaining({
         toolName,
@@ -312,12 +279,7 @@ describe("createServer", () => {
       }));
     }
 
-    const monthCategoryEntry = Object.entries(registeredResources)
-      .find(([, resource]) => resource.name === "ynab_get_month_category");
-    const [monthCategoryUri, monthCategoryResource] = monthCategoryEntry!;
-    const monthCategoryPayload = JSON.parse(
-      (await monthCategoryResource.readCallback(new URL(monthCategoryUri), {})).contents[0].text,
-    ) as Record<string, unknown>;
+    const monthCategoryPayload = getToolDocument("ynab_get_month_category");
 
     expect(monthCategoryPayload.requiredArguments).toEqual(["month", "categoryId"]);
     expect(monthCategoryPayload.argumentExamples).toEqual(expect.objectContaining({
@@ -345,34 +307,10 @@ describe("createServer", () => {
     expect(firstDocument).toBe(secondDocument);
   });
 
-  it("uses concrete date and id examples for the remaining flaky discovery tools", async () => {
-    const server = createServer(
-      {
-        apiToken: "test-token",
-      },
-      undefined,
-      {
-        discoveryResourceBaseUrl: "https://mcp.example.com/mcp/resources/",
-      },
-    );
-    const registeredResources = (server as any)._registeredResources as Record<string, {
-      name: string;
-      readCallback: (uri: URL, extra: unknown) => Promise<{ contents: Array<{ text: string }> }>;
-    }>;
-
-    async function readResourcePayload(toolName: string) {
-      const entry = Object.entries(registeredResources)
-        .find(([, resource]) => resource.name === toolName);
-
-      expect(entry).toBeDefined();
-
-      const [uri, resource] = entry!;
-      return JSON.parse((await resource.readCallback(new URL(uri), {})).contents[0].text) as Record<string, unknown>;
-    }
-
-    const monthCategoryPayload = await readResourcePayload("ynab_get_month_category");
-    const netWorthPayload = await readResourcePayload("ynab_get_net_worth_trajectory");
-    const payeeLocationPayload = await readResourcePayload("ynab_get_payee_location");
+  it("uses concrete date and id examples for the remaining flaky discovery tools", () => {
+    const monthCategoryPayload = getToolDocument("ynab_get_month_category");
+    const netWorthPayload = getToolDocument("ynab_get_net_worth_trajectory");
+    const payeeLocationPayload = getToolDocument("ynab_get_payee_location");
 
     expect(monthCategoryPayload.invocationExample).toEqual({
       month: "2026-03-01",
@@ -605,13 +543,15 @@ describe("createServer", () => {
     });
   });
 
-  it("keeps the tool registry owned by serverRuntime while preserving the shared builder shape", () => {
-    const serverRuntimeSource = readFileSync(new URL("./serverRuntime.ts", import.meta.url), "utf8");
+  it("keeps the tool registry names aligned between the reusable builder and the exported catalog", () => {
+    const builtTool = defineTool("Get MCP Version", GetMcpVersionTool);
+    const exportedTool = getToolsListResult().tools.find((tool) => tool.name === builtTool.name);
 
-    expect(serverRuntimeSource).toContain("function defineTool");
-    expect(serverRuntimeSource).toContain('defineTool("Get MCP Version", GetMcpVersionTool)');
-    expect(serverRuntimeSource).toContain('defineTool("Get Account", GetAccountTool)');
-    expect(serverRuntimeSource).not.toContain("name: GetMcpVersionTool.name");
+    expect(exportedTool).toEqual(expect.objectContaining({
+      description: builtTool.description,
+      name: builtTool.name,
+      title: builtTool.title,
+    }));
   });
 
   it("requires explicit config instead of reading the API token from environment", () => {
@@ -649,12 +589,11 @@ describe("createServer", () => {
       },
     };
 
-    const server = createServer({
+    const handlers = createRegisteredHandlers(api, {
       apiToken: "test-token",
       planId: "plan-1",
-    }, api as any);
-
-    const result = await (server as any)._registeredTools.ynab_get_plan.handler({});
+    });
+    const result = await handlers.get("ynab_get_plan")?.({});
 
     expect(JSON.parse(result.content[0].text)).toEqual({
       plan: {

@@ -67,6 +67,22 @@ describe("code quality guardrails", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("../package.json", import.meta.url), "utf8"),
     );
+    const printedHttpTransportConfig = execFileSync(
+      "npx",
+      ["eslint", "--print-config", "src/httpTransport.ts"],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+      },
+    );
+    const printedServerRuntimeConfig = execFileSync(
+      "npx",
+      ["eslint", "--print-config", "src/serverRuntime.ts"],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+      },
+    );
     const workflow = readFileSync(
       new URL("../.github/workflows/test.yml", import.meta.url),
       "utf8",
@@ -83,14 +99,15 @@ describe("code quality guardrails", () => {
     expect(packageJson.scripts["lint:repo"]).toContain("lint:repo:typed:client-profiles");
     expect(packageJson.scripts["lint:repo:fast"]).toContain("--max-old-space-size=4096");
     expect(packageJson.scripts["lint:repo:fast"]).toContain("src/tools/**/*.ts");
-    expect(packageJson.scripts["lint:repo:fast"]).toContain("src/serverRuntime.ts");
-    expect(packageJson.scripts["lint:repo:fast"]).toContain("src/httpTransport.ts");
     expect(packageJson.scripts["lint:repo:fast"]).toContain("src/stdioServer.ts");
     expect(packageJson.scripts["lint:repo:fast"]).toContain("src/index.ts");
     expect(packageJson.scripts["lint:repo:fast"]).toContain("artifacts/**");
     expect(packageJson.scripts["lint:repo:typed:core"]).toContain("--max-old-space-size=4096");
     expect(packageJson.scripts["lint:repo:typed:core"]).toContain("src/*.ts");
-    expect(packageJson.scripts["lint:repo:typed:core"]).toContain("src/serverRuntime.ts");
+    expect(packageJson.scripts["lint:repo:typed:core"]).not.toContain("src/serverRuntime.ts");
+    expect(packageJson.scripts["lint:repo:typed:core"]).not.toContain("src/httpTransport.ts");
+    expect(packageJson.scripts["lint:repo:typed:core"]).not.toContain("--ignore-pattern 'src/serverRuntime.ts'");
+    expect(packageJson.scripts["lint:repo:typed:core"]).not.toContain("--ignore-pattern 'src/httpTransport.ts'");
     expect(packageJson.scripts["lint:repo:typed:client-profiles"]).toContain("--max-old-space-size=4096");
     expect(packageJson.scripts["lint:repo:typed:client-profiles"]).toContain("src/clientProfiles/**/*.ts");
     expect(packageJson.scripts["lint:specs"]).toContain("--max-old-space-size=8192");
@@ -101,16 +118,19 @@ describe("code quality guardrails", () => {
     expect(eslintConfig).toContain('project: "./tsconfig.eslint.clientProfiles.json"');
     expect(eslintConfig).not.toContain("projectService");
     expect(eslintConfig).toContain('"artifacts/**"');
-    expect(eslintConfig).toContain('"src/serverRuntime.ts"');
-    expect(eslintConfig).toContain('"src/httpTransport.ts"');
     expect(eslintConfig).toContain('"src/stdioServer.ts"');
     expect(eslintConfig).toContain('"src/index.ts"');
     expect(eslintTsconfig).toContain("\"./tsconfig.json\"");
     expect(eslintTsconfig).toContain("\"src/*.ts\"");
-    expect(eslintTsconfig).toContain("\"src/serverRuntime.ts\"");
     expect(eslintClientProfilesTsconfig).toContain("\"src/clientProfiles/**/*.ts\"");
     expect(eslintTsconfig).toContain("\"**/*.contract.ts\"");
     expect(eslintConfig).not.toContain('files: ["src/serverRuntime.ts"]');
+    expect(printedHttpTransportConfig).toContain('"project": "./tsconfig.eslint.json"');
+    expect(printedHttpTransportConfig).toContain('"@typescript-eslint/no-unsafe-assignment"');
+    expect(printedHttpTransportConfig).toContain('"sonarjs/cognitive-complexity"');
+    expect(printedServerRuntimeConfig).toContain('"project": "./tsconfig.eslint.json"');
+    expect(printedServerRuntimeConfig).toContain('"@typescript-eslint/no-unsafe-assignment"');
+    expect(printedServerRuntimeConfig).toContain('"@typescript-eslint/explicit-function-return-type"');
     expect(workflow).toContain("Run ESLint");
     expect(workflow).toContain("npm run lint");
   });
