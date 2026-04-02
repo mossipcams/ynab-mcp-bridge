@@ -7,7 +7,7 @@ import {
   hasProjectionControls,
   paginateEntries,
   projectRecord,
-} from "./tools/collectionToolUtils.js";
+} from "./collectionToolUtils.js";
 
 describe("collection tool utils", () => {
   it("projects requested fields and omits ids when requested", () => {

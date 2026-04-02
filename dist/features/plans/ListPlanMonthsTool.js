@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "../../tools/collectionToolUtils.js";
-import { getCachedPlanMonths } from "../../tools/cachedYnabReads.js";
+import { hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "../../collectionToolUtils.js";
+import { getCachedPlanMonths } from "../../cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
 export const name = "ynab_list_plan_months";
 export const description = "Lists plan month summaries for budgeting analysis with optional compact projections and pagination.";

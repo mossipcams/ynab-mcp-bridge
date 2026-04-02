@@ -7,8 +7,8 @@ import {
   hasProjectionControls,
   paginateEntries,
   projectRecord,
-} from "../../tools/collectionToolUtils.js";
-import { getCachedAccounts } from "../../tools/cachedYnabReads.js";
+} from "../../collectionToolUtils.js";
+import { getCachedAccounts } from "../../cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
 
 export const name = "ynab_list_accounts";

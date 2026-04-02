@@ -12,6 +12,7 @@
     "dist/**",
     "node_modules/**",
     "src/auth2/harness/**",
+    "src/tools/**",
     "tasks/**",
     "package-lock.json"
   ]

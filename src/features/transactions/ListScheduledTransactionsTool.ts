@@ -7,8 +7,8 @@ import {
   hasProjectionControls,
   paginateEntries,
   projectRecord,
-} from "../../tools/collectionToolUtils.js";
-import { getCachedScheduledTransactions } from "../../tools/cachedYnabReads.js";
+} from "../../collectionToolUtils.js";
+import { getCachedScheduledTransactions } from "../../cachedYnabReads.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
 
 export const name = "ynab_list_scheduled_transactions";

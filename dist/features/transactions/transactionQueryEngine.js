@@ -1,4 +1,4 @@
-import { formatAmountMilliunits, hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "../../tools/collectionToolUtils.js";
+import { formatAmountMilliunits, hasPaginationControls, hasProjectionControls, paginateEntries, projectRecord, } from "../../collectionToolUtils.js";
 export const transactionFields = [
     "date",
     "amount",

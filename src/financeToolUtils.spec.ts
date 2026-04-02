@@ -15,7 +15,7 @@ import {
   listMonthsInRange,
   toTopRollups,
   toSpentMilliunits,
-} from "./tools/financeToolUtils.js";
+} from "./financeToolUtils.js";
 
 describe("finance tool utils", () => {
   it("formats milliunits as decimal currency strings", () => {

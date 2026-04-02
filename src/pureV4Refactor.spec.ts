@@ -29,7 +29,7 @@ function hasTrackedFiles(relativePath: string) {
 }
 
 describe("pure v4 refactor", () => {
-  it("keeps the MCP domain organized around feature slices while preserving shared tool helpers", () => {
+  it("keeps the MCP domain organized around feature slices with root shared-kernel helpers and compatibility shims", () => {
     expect(readdirSync(featuresDir).sort()).toEqual([
       "accounts",
       "financialHealth",
@@ -42,7 +42,15 @@ describe("pure v4 refactor", () => {
     ]);
 
     const toolFiles = readdirSync(toolsDir).sort();
+    const rootFiles = readdirSync(path.join(projectRoot, "src")).sort();
 
+    expect(rootFiles).toEqual(expect.arrayContaining([
+      "cachedYnabReads.ts",
+      "collectionToolUtils.ts",
+      "errorUtils.ts",
+      "financeToolUtils.ts",
+      "planToolUtils.ts",
+    ]));
     expect(toolFiles).toEqual(expect.arrayContaining([
       "cachedYnabReads.ts",
       "collectionToolUtils.ts",
@@ -56,6 +64,7 @@ describe("pure v4 refactor", () => {
     ]));
     expect(toolFiles).toEqual(expect.arrayContaining([
       "GetAccountTool.ts",
+      "GetBudgetHealthSummaryTool.ts",
       "GetPlanDetailsTool.ts",
       "ListTransactionsTool.ts",
       "GetMcpVersionTool.ts",

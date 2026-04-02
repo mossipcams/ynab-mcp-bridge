@@ -14,7 +14,7 @@ import {
   recentMonths,
   spreadPercent,
   totalDebtMilliunits,
-} from "./tools/financialDiagnosticsUtils.js";
+} from "./features/financialHealth/financialDiagnosticsUtils.js";
 
 describe("financial diagnostics utils", () => {
   it("calculates liquid cash, debt, and net worth from active accounts", () => {
