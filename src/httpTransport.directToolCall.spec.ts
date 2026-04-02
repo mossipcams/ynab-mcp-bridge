@@ -5,7 +5,7 @@ import { parseAuthConfig } from "./auth2/config/schema.js";
 import { startHttpServer } from "./httpTransport.js";
 import { createCloudflareOAuthAuth, createCodeChallenge, startUpstreamOAuthServer } from "./oauthTestHelpers.js";
 
-describe("http transport direct authenticated tool dispatch", () => {
+describe("http transport authenticated tool dispatch", () => {
   const cleanups: Array<() => Promise<void>> = [];
   const ynab = {
     apiToken: "test-token",
@@ -104,7 +104,7 @@ describe("http transport direct authenticated tool dispatch", () => {
     return server;
   }
 
-  it("bypasses managed request creation for authenticated sessionless tool calls", async () => {
+  it("routes authenticated sessionless tool calls through the managed transport path", async () => {
     let managedRequestCount = 0;
     const server = await startOAuthServer(() => {
       managedRequestCount += 1;
@@ -132,7 +132,7 @@ describe("http transport direct authenticated tool dispatch", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(managedRequestCount).toBe(0);
+    expect(managedRequestCount).toBe(1);
   });
 
   it("keeps session-bound tool calls on the managed transport path", async () => {
@@ -167,7 +167,7 @@ describe("http transport direct authenticated tool dispatch", () => {
     expect(managedRequestCount).toBe(1);
   });
 
-  it("still rejects invalid bearer tokens before any direct dispatch", async () => {
+  it("still rejects invalid bearer tokens before tool execution begins", async () => {
     let managedRequestCount = 0;
     const server = await startOAuthServer(() => {
       managedRequestCount += 1;
@@ -197,7 +197,7 @@ describe("http transport direct authenticated tool dispatch", () => {
     expect(managedRequestCount).toBe(0);
   });
 
-  it("returns validation failures through the direct path without creating a managed request", async () => {
+  it("returns validation failures through the managed path for authenticated sessionless tool calls", async () => {
     let managedRequestCount = 0;
     const server = await startOAuthServer(() => {
       managedRequestCount += 1;
@@ -238,6 +238,6 @@ describe("http transport direct authenticated tool dispatch", () => {
         ],
       },
     });
-    expect(managedRequestCount).toBe(0);
+    expect(managedRequestCount).toBe(1);
   });
 });

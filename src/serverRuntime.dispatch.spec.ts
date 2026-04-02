@@ -1,61 +1,39 @@
 import { describe, expect, it } from "vitest";
 
-import { createDirectToolCallExecutor } from "./serverRuntime.js";
+import {
+  getDiscoveryResourceDocument,
+  getDiscoveryResourceSummaries,
+  getToolsListResult,
+} from "./serverRuntime.js";
 
-describe("direct tool dispatch", () => {
-  it("executes registered tools directly", async () => {
-    const executor = createDirectToolCallExecutor({
-      apiToken: "test-token",
-    });
+describe("server runtime tool metadata parity", () => {
+  it("keeps canonical discovery summaries aligned with tools/list output", () => {
+    const tools = getToolsListResult().tools;
+    const canonicalSummaries = getDiscoveryResourceSummaries()
+      .filter((resource) => resource.uri.startsWith("ynab-tool://"));
 
-    const result = await executor.executeToolCall("ynab_get_mcp_version", {});
-
-    expect(result).toMatchObject({
-      content: [
-        {
-          type: "text",
-        },
-      ],
-    });
-    expect(JSON.parse(result.content[0]!.text)).toMatchObject({
-      name: "ynab-mcp-bridge",
-      version: expect.any(String),
-    });
+    expect(canonicalSummaries.map((resource) => resource.name).sort()).toEqual(
+      tools.map((tool) => tool.name).sort(),
+    );
   });
 
-  it("returns the same tool error shape for unknown tools", async () => {
-    const executor = createDirectToolCallExecutor({
-      apiToken: "test-token",
-    });
+  it("builds discovery documents from the same tool metadata exposed in tools/list", () => {
+    const tool = getToolsListResult().tools.find((entry) => entry.name === "ynab_get_mcp_version");
 
-    const result = await executor.executeToolCall("ynab_missing_tool", {});
+    expect(tool).toBeDefined();
 
-    expect(result).toEqual({
-      content: [
-        {
-          text: "Tool ynab_missing_tool not found",
-          type: "text",
-        },
-      ],
-      isError: true,
-    });
-  });
+    const document = getDiscoveryResourceDocument(
+      "ynab_get_mcp_version",
+      "ynab-tool://ynab_get_mcp_version",
+    );
 
-  it("returns validation errors before dispatching the tool", async () => {
-    const executor = createDirectToolCallExecutor({
-      apiToken: "test-token",
-    });
-
-    const result = await executor.executeToolCall("ynab_get_month_category", {});
-
-    expect(result).toMatchObject({
-      content: [
-        {
-          text: expect.stringContaining("Input validation error"),
-          type: "text",
-        },
-      ],
-      isError: true,
+    expect(document).toMatchObject({
+      annotations: tool?.annotations,
+      description: tool?.description,
+      inputSchema: tool?.inputSchema,
+      title: tool?.title,
+      toolName: tool?.name,
+      uri: "ynab-tool://ynab_get_mcp_version",
     });
   });
 });

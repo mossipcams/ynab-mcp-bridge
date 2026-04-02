@@ -649,11 +649,11 @@ describe("startHttpServer", () => {
     expect(findLogCall(consoleErrorSpy, "transport.handoff", (details) => (
       details.correlationId === correlationId &&
       details.jsonRpcMethod === "tools/call"
-    ))).toBeFalsy();
+    ))).toBeTruthy();
     expect(findMcpLogCall(consoleErrorSpy, "tool.call.started", (details) => (
       details.correlationId === correlationId &&
       details.toolName === "ynab_get_mcp_version"
-    ))).toBeFalsy();
+    ))).toBeTruthy();
     expect(findLogCall(consoleErrorSpy, "resource.read.requested", (details) => (
       details.correlationId === correlationId
     ))).toBeFalsy();
@@ -818,7 +818,7 @@ describe("startHttpServer", () => {
       details.jsonRpcMethod === "initialize" &&
       details.userAgent === "chatgpt" &&
       details.sessionId === undefined &&
-      details.cleanup === false
+      details.cleanup === true
     ))).toBeTruthy();
     expect(findProfileLogCall(consoleErrorSpy, "profile.detected")).toBeUndefined();
   });
@@ -1562,7 +1562,7 @@ describe("startHttpServer", () => {
     await expect(response.text()).resolves.toContain("\"ynab_get_mcp_version\"");
   });
 
-  it("creates a managed request for each sessionless MCP POST that misses the authless fast path", async () => {
+  it("creates a managed request for each sessionless MCP POST request", async () => {
     let managedRequestCount = 0;
     const httpServer = await (startHttpServer as any)({
       ynab,
@@ -1742,7 +1742,7 @@ describe("startHttpServer", () => {
     expect(createServerSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("serves sessionless authless initialize requests without acquiring a managed runtime", async () => {
+  it("routes sessionless authless initialize requests through the managed runtime", async () => {
     const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
       createServer(...args)
     ));
@@ -1778,7 +1778,7 @@ describe("startHttpServer", () => {
           protocolVersion: LATEST_PROTOCOL_VERSION,
           capabilities: {},
           clientInfo: {
-            name: "fast-path-client",
+            name: "managed-bootstrap-client",
             version: "1.0.0",
           },
         },
@@ -1805,11 +1805,11 @@ describe("startHttpServer", () => {
         },
       },
     });
-    expect(managedRequestCount).toBe(0);
-    expect(createServerSpy).not.toHaveBeenCalled();
+    expect(managedRequestCount).toBe(1);
+    expect(createServerSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("serves sessionless authless list requests without acquiring a managed runtime", async () => {
+  it("routes sessionless authless list requests through the managed runtime", async () => {
     const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
       createServer(...args)
     ));
@@ -1887,11 +1887,11 @@ describe("startHttpServer", () => {
         ]),
       },
     });
-    expect(managedRequestCount).toBe(0);
-    expect(createServerSpy).not.toHaveBeenCalled();
+    expect(managedRequestCount).toBe(2);
+    expect(createServerSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("serves sessionless authless ynab_get_mcp_version calls without acquiring a managed runtime", async () => {
+  it("routes sessionless authless ynab_get_mcp_version calls through the managed runtime", async () => {
     const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
       createServer(...args)
     ));
@@ -1941,11 +1941,11 @@ describe("startHttpServer", () => {
         }],
       },
     });
-    expect(managedRequestCount).toBe(0);
-    expect(createServerSpy).not.toHaveBeenCalled();
+    expect(managedRequestCount).toBe(1);
+    expect(createServerSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("skips redundant success-path logs for fast-path authless tool calls", async () => {
+  it("logs managed transport handoff for authless tool calls", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const httpServer = await startHttpServer({
       ynab,
@@ -1983,13 +1983,13 @@ describe("startHttpServer", () => {
       details.path === "/mcp" &&
       details.method === "POST" &&
       details.jsonRpcMethod === "tools/call"
-    ))).toBeFalsy();
+    ))).toBeTruthy();
     expect(findMcpLogCall(consoleErrorSpy, "tool.call.started", (details) => (
       details.toolName === "ynab_get_mcp_version"
-    ))).toBeFalsy();
+    ))).toBeTruthy();
     expect(findMcpLogCall(consoleErrorSpy, "tool.call.succeeded", (details) => (
       details.toolName === "ynab_get_mcp_version"
-    ))).toBeFalsy();
+    ))).toBeTruthy();
   });
 
   it("returns 405 for GET requests after initialization", async () => {
@@ -3174,7 +3174,7 @@ describe("startHttpServer", () => {
     ))).toBeTruthy();
   });
 
-  it("serves sessionless oauth bootstrap requests without acquiring a managed runtime", async () => {
+  it("routes sessionless oauth bootstrap requests through the managed runtime", async () => {
     const createServerSpy = vi.fn((...args: Parameters<typeof createServer>) => (
       createServer(...args)
     ));
@@ -3215,7 +3215,7 @@ describe("startHttpServer", () => {
           protocolVersion: LATEST_PROTOCOL_VERSION,
           capabilities: {},
           clientInfo: {
-            name: "fast-path-client",
+            name: "managed-bootstrap-client",
             version: "1.0.0",
           },
         },
@@ -3230,8 +3230,8 @@ describe("startHttpServer", () => {
         protocolVersion: LATEST_PROTOCOL_VERSION,
       },
     });
-    expect(managedRequestCount).toBe(0);
-    expect(createServerSpy).not.toHaveBeenCalled();
+    expect(managedRequestCount).toBe(1);
+    expect(createServerSpy).toHaveBeenCalledTimes(1);
   });
 
   it("returns a bearer challenge for unauthenticated GET requests to the MCP endpoint in oauth mode", async () => {
