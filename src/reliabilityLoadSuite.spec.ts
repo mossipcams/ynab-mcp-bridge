@@ -25,6 +25,13 @@ describe("reliability load suite", () => {
     });
   });
 
+  it("rejects value flags when the next token is another flag instead of a value", () => {
+    expect(() => parseReliabilityLoadArgs([
+      "--url",
+      "--dry-run",
+    ])).toThrow("Expected --url to be followed by a value.");
+  });
+
   it("builds a dedicated load-suite plan from the selected profile", () => {
     const plan = buildLoadSuitePlan({
       dryRun: false,
@@ -96,5 +103,42 @@ describe("reliability load suite", () => {
 
     expect(failingExitCode).toBe(1);
     expect(runExternal).toHaveBeenCalledOnce();
+  });
+
+  it("reports invalid load-suite flags through the CLI error surface", async () => {
+    const lines: string[] = [];
+
+    const exitCode = await executeReliabilityLoadCli([
+      "--profile",
+      "smoke",
+    ], {
+      writeLine: (line) => {
+        lines.push(line);
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(lines).toEqual([
+      "status=error message=The dedicated load suite only supports baseline, stress, spike, and soak.",
+    ]);
+  });
+
+  it("returns a failing exit code when the external runner rejects", async () => {
+    const lines: string[] = [];
+
+    const exitCode = await executeReliabilityLoadCli([
+      "--profile",
+      "baseline",
+    ], {
+      runExternal: vi.fn().mockRejectedValue(new Error("k6 missing")),
+      writeLine: (line) => {
+        lines.push(line);
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(lines).toEqual([
+      "status=error message=k6 missing",
+    ]);
   });
 });

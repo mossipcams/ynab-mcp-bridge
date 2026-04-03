@@ -250,7 +250,7 @@ function getMeasuredToolCalls(toolCalls) {
         }];
 }
 function parseReliabilityHttpValueFlag(parsed, argument, value) {
-    if (!value) {
+    if (!value || value.startsWith("--")) {
         throw new Error(`Expected ${argument} to be followed by a value.`);
     }
     if (argument === "--profile") {
@@ -306,7 +306,12 @@ function isReliabilityArtifact(value) {
     if (!isObjectRecord(value)) {
         return false;
     }
-    return isObjectRecord(value["profile"]) && isObjectRecord(value["summary"]);
+    if (!isObjectRecord(value["profile"]) || !isObjectRecord(value["summary"]) || !isObjectRecord(value["target"])) {
+        return false;
+    }
+    const target = value["target"];
+    return ((target["mode"] === "local" || target["mode"] === "url") &&
+        typeof target["url"] === "string");
 }
 async function readBaselineArtifact(path) {
     const parsed = JSON.parse(await readFile(path, "utf8"));
@@ -330,12 +335,16 @@ export async function runMeasuredHttpSequence(baseUrl, index, options = {}) {
         if (!initializeResult.ok) {
             return results;
         }
-        results.push(await measureOperation("tools/list", async () => {
+        const listToolsResult = await measureOperation("tools/list", async () => {
             const listedTools = await client.listTools();
             if (!listedTools.tools.some((tool) => tool.name === "ynab_get_mcp_version")) {
                 throw new Error("Expected ynab_get_mcp_version to be registered.");
             }
-        }));
+        });
+        results.push(listToolsResult);
+        if (!listToolsResult.ok) {
+            return results;
+        }
         for (const toolCall of toolCalls) {
             results.push(await measureOperation(`tools/call:${toolCall.name}`, async () => {
                 const response = await client.callTool({

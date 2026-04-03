@@ -20,7 +20,9 @@
   "exclude": [
     "node_modules",
     "src/oauthTestHelpers.ts",
+    "src/auth2/harness",
     "src/tests",
+    "**/*.contract.ts",
     "**/*.test.ts",
     "**/*.spec.ts"
   ]
