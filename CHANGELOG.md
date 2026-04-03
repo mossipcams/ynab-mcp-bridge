@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.16.0...ynab-mcp-bridge-v0.17.0) (2026-04-02)
+
+
+### Features
+
+* organize MCP tools into feature slices ([#251](https://github.com/mossipcams/ynab-mcp-bridge/issues/251)) ([8575f73](https://github.com/mossipcams/ynab-mcp-bridge/commit/8575f73842c1ffaf71be7765b2f0e1158ff33de9))
+
 ## [0.16.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.25...ynab-mcp-bridge-v0.16.0) (2026-04-02)
 
 

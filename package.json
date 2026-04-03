@@ -1,6 +1,6 @@
 {
   "name": "ynab-mcp-bridge",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "ynab-mcp-bridge MCP server",
   "author": "Matt",
   "repository": {
