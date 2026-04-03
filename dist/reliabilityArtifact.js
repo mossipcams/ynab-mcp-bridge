@@ -21,7 +21,8 @@ export function compareReliabilityArtifacts(input) {
     if (input.baseline.profile.name !== input.current.profile.name) {
         throw new Error("Cannot compare reliability artifacts from different profiles.");
     }
-    if (input.baseline.target.url !== input.current.target.url) {
+    if (input.baseline.target.mode !== input.current.target.mode ||
+        input.baseline.target.url !== input.current.target.url) {
         throw new Error("Cannot compare reliability artifacts for different targets.");
     }
     const regressions = [];

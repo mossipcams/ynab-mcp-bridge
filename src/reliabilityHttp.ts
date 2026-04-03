@@ -396,7 +396,7 @@ function parseReliabilityHttpValueFlag(
   argument: string,
   value: string | undefined,
 ) {
-  if (!value) {
+  if (!value || value.startsWith("--")) {
     throw new Error(`Expected ${argument} to be followed by a value.`);
   }
 
@@ -470,7 +470,16 @@ function isReliabilityArtifact(value: unknown): value is ReliabilityArtifact {
     return false;
   }
 
-  return isObjectRecord(value["profile"]) && isObjectRecord(value["summary"]);
+  if (!isObjectRecord(value["profile"]) || !isObjectRecord(value["summary"]) || !isObjectRecord(value["target"])) {
+    return false;
+  }
+
+  const target = value["target"];
+
+  return (
+    (target["mode"] === "local" || target["mode"] === "url") &&
+    typeof target["url"] === "string"
+  );
 }
 
 async function readBaselineArtifact(path: string) {
@@ -505,13 +514,18 @@ export async function runMeasuredHttpSequence(
       return results;
     }
 
-    results.push(await measureOperation("tools/list", async () => {
+    const listToolsResult = await measureOperation("tools/list", async () => {
       const listedTools = await client.listTools();
 
       if (!listedTools.tools.some((tool) => tool.name === "ynab_get_mcp_version")) {
         throw new Error("Expected ynab_get_mcp_version to be registered.");
       }
-    }));
+    });
+    results.push(listToolsResult);
+
+    if (!listToolsResult.ok) {
+      return results;
+    }
 
     for (const toolCall of toolCalls) {
       results.push(await measureOperation(`tools/call:${toolCall.name}`, async () => {

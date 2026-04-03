@@ -47,13 +47,13 @@ describe("http server structure", () => {
 
     expect(invalidSessionResponse.status).toBe(400);
     await expect(invalidSessionResponse.json()).resolves.toEqual({
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "Bad Request: Mcp-Session-Id header must be a single value",
-      },
-      id: null,
-    });
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Bad Request: Mcp-Session-Id header must be a single non-empty value",
+        },
+        id: null,
+      });
 
     const initializeResponse = await fetch(httpServer.url, {
       method: "POST",
@@ -80,6 +80,82 @@ describe("http server structure", () => {
 
     expect(initializeResponse.status).toBe(200);
     expect(initializeResponse.headers.get("mcp-session-id")).toBeNull();
+  });
+
+  it("rejects an empty MCP session header value as malformed input", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "Mcp-Session-Id": "   ",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Bad Request: Mcp-Session-Id header must be a single non-empty value",
+      },
+      id: null,
+    });
+  });
+
+  it("rejects comma-delimited MCP session header values with empty segments", async () => {
+    const httpServer = await startHttpServer({
+      ynab,
+      allowedOrigins: ["https://claude.ai"],
+      host: "127.0.0.1",
+      port: 0,
+      path: "/mcp",
+    });
+    cleanups.push(() => httpServer.close());
+
+    const response = await fetch(httpServer.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        Origin: "https://claude.ai",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+        "Mcp-Session-Id": "session-1,",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/list",
+        params: {},
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Bad Request: Mcp-Session-Id header must be a single non-empty value",
+      },
+      id: null,
+    });
   });
 
   it("serves direct discovery resources without legacy alias rewrite behavior", async () => {

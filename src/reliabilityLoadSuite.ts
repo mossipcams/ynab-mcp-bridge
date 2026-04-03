@@ -32,7 +32,7 @@ function getErrorMessage(error: unknown) {
 }
 
 function requireFlagValue(flag: string, value: string | undefined) {
-  if (!value) {
+  if (!value || value.startsWith("--")) {
     throw new Error(`Expected ${flag} to be followed by a value.`);
   }
 
