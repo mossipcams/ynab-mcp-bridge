@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.17.0...ynab-mcp-bridge-v0.17.1) (2026-04-08)
+
+
+### Bug Fixes
+
+* harden weak tests and close defect findings ([1107344](https://github.com/mossipcams/ynab-mcp-bridge/commit/11073445b43c8cc578bdd0895df28155b8859e47))
+
 ## [0.17.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.16.0...ynab-mcp-bridge-v0.17.0) (2026-04-03)
 
 
