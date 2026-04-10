@@ -9,7 +9,7 @@ function getErrorMessage(error) {
     return String(error);
 }
 function requireFlagValue(flag, value) {
-    if (!value) {
+    if (!value || value.startsWith("--")) {
         throw new Error(`Expected ${flag} to be followed by a value.`);
     }
     return value;

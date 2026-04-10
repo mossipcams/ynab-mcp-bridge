@@ -168,6 +168,18 @@ describe("reliability artifacts", () => {
         url: "http://127.0.0.1:4100/mcp",
       },
     });
+    const mismatchedTargetMode = createReliabilityArtifact({
+      completedAt: "2026-03-24T12:05:00.000Z",
+      profile: getReliabilityProfile("baseline"),
+      results: [
+        { ok: true, operation: "initialize", latencyMs: 120 },
+      ],
+      startedAt: "2026-03-24T12:00:00.000Z",
+      target: {
+        mode: "local",
+        url: "http://127.0.0.1:3000/mcp",
+      },
+    });
 
     expect(() => compareReliabilityArtifacts({
       baseline,
@@ -182,6 +194,16 @@ describe("reliability artifacts", () => {
     expect(() => compareReliabilityArtifacts({
       baseline,
       current: mismatchedTarget,
+      tolerances: {
+        maxErrorRateIncrease: 0.05,
+        maxP95LatencyIncreaseMs: 250,
+        maxP99LatencyIncreaseMs: 250,
+      },
+    })).toThrow("Cannot compare reliability artifacts for different targets.");
+
+    expect(() => compareReliabilityArtifacts({
+      baseline,
+      current: mismatchedTargetMode,
       tolerances: {
         maxErrorRateIncrease: 0.05,
         maxP95LatencyIncreaseMs: 250,

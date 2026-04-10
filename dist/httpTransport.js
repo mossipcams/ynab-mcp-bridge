@@ -97,14 +97,11 @@ function getSessionId(req) {
     if (typeof sessionId !== "string") {
         return undefined;
     }
-    const values = sessionId
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean);
-    if (values.length !== 1) {
+    const rawValue = sessionId.trim();
+    if (!rawValue || rawValue.includes(",")) {
         return undefined;
     }
-    return values[0];
+    return rawValue;
 }
 function getNormalizedUserAgent(req) {
     const userAgent = getFirstHeaderValue(req.headers["user-agent"]);
@@ -343,18 +340,19 @@ async function logManagedToolDispatchOutcome(context) {
     }
     logHttpDebug("tool.dispatch.absent", logDetails);
 }
-function hasMultipleSessionHeaderValues(req) {
+function hasInvalidSessionHeaderValue(req) {
     const sessionId = req.headers["mcp-session-id"];
     if (Array.isArray(sessionId)) {
-        return sessionId.length > 1 || sessionId.some((value) => value.includes(","));
+        return sessionId.length !== 1 ||
+            typeof sessionId[0] !== "string" ||
+            !sessionId[0].trim() ||
+            sessionId[0].includes(",");
     }
     if (typeof sessionId !== "string") {
         return false;
     }
-    return sessionId
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean).length > 1;
+    const rawValue = sessionId.trim();
+    return !rawValue || rawValue.includes(",");
 }
 function isJsonParseError(error) {
     return error instanceof SyntaxError || (typeof error === "object" &&
@@ -423,7 +421,7 @@ async function createManagedRequestFromRuntimePool(runtimePool) {
     };
 }
 async function resolveRequest(req, createRequest) {
-    if (hasMultipleSessionHeaderValues(req)) {
+    if (hasInvalidSessionHeaderValue(req)) {
         return {
             status: "invalid-session-header",
         };
@@ -438,7 +436,7 @@ async function resolveRequest(req, createRequest) {
 function writeRequestResolution(res, resolution) {
     switch (resolution.status) {
         case "invalid-session-header":
-            writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single value");
+            writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single non-empty value");
             return;
     }
 }
@@ -481,7 +479,7 @@ export function installMcpPostRoute(options) {
             return;
         }
         const parsedBody = req.body;
-        if (hasMultipleSessionHeaderValues(req)) {
+        if (hasInvalidSessionHeaderValue(req)) {
             logHttpDebug("request.rejected", {
                 ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
                 reason: "invalid-session-header",

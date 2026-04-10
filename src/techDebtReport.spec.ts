@@ -50,4 +50,14 @@ describe("tech debt report implementation", () => {
     expect(reportModule.countTodoFixmeHackMatches).toBeTypeOf("function");
     expect(reportModule.countTodoFixmeHackMatches?.()).toBe(0);
   });
+
+  it("ignores Windows-style paths inside excluded directories", async () => {
+    const reportModule = await import(new URL("../scripts/tech-debt-report.mjs", import.meta.url).href) as {
+      isRepoOwnedCodePath?: (relativePath: string) => boolean;
+    };
+
+    expect(reportModule.isRepoOwnedCodePath).toBeTypeOf("function");
+    expect(reportModule.isRepoOwnedCodePath?.("dist\\index.js")).toBe(false);
+    expect(reportModule.isRepoOwnedCodePath?.("node_modules\\left-pad\\index.js")).toBe(false);
+  });
 });
