@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.17.1...ynab-mcp-bridge-v0.17.2) (2026-04-10)
+
+
+### Bug Fixes
+
+* restore release-please labeling lifecycle ([#260](https://github.com/mossipcams/ynab-mcp-bridge/issues/260)) ([6012a81](https://github.com/mossipcams/ynab-mcp-bridge/commit/6012a81485133dccae00b488905e48181005ceba))
+
 ## [0.17.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.17.0...ynab-mcp-bridge-v0.17.1) (2026-04-08)
 
 
