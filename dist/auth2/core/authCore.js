@@ -23,6 +23,16 @@ function resolveScopes(requestedScopes, allowedScopes) {
     }
     return scopes;
 }
+function getUpstreamAccessTokenTtlSec(upstreamTokens) {
+    if (typeof upstreamTokens["refresh_token"] === "string") {
+        return undefined;
+    }
+    const expiresIn = upstreamTokens["expires_in"];
+    if (typeof expiresIn !== "number" || !Number.isFinite(expiresIn) || expiresIn <= 0) {
+        return undefined;
+    }
+    return Math.floor(expiresIn);
+}
 async function resolveTokenExchangeOutcome(options, input) {
     const currentProps = input.currentProps ?? {};
     const callbackResult = options.tokenExchangeCallback
@@ -37,9 +47,13 @@ async function resolveTokenExchangeOutcome(options, input) {
         })
         : undefined;
     const grantProps = callbackResult?.newProps ?? currentProps;
+    const upstreamAccessTokenTtlSec = getUpstreamAccessTokenTtlSec(input.upstreamTokens);
+    const defaultAccessTokenTtlSec = upstreamAccessTokenTtlSec === undefined
+        ? input.defaultAccessTokenTtlSec
+        : Math.min(input.defaultAccessTokenTtlSec, upstreamAccessTokenTtlSec);
     return {
         accessTokenProps: callbackResult?.accessTokenProps ?? grantProps,
-        accessTokenTtlSec: callbackResult?.accessTokenTtlSec ?? input.defaultAccessTokenTtlSec,
+        accessTokenTtlSec: callbackResult?.accessTokenTtlSec ?? defaultAccessTokenTtlSec,
         grantProps,
         refreshTokenTtlSec: callbackResult?.refreshTokenTtlSec ?? input.defaultRefreshTokenTtlSec,
     };
@@ -206,7 +220,10 @@ export function createAuthCore(options) {
         });
         const accessToken = options.createId();
         const grantId = options.createId();
-        const refreshToken = options.createId();
+        const upstreamRefreshToken = typeof authorizationCode.upstreamTokens["refresh_token"] === "string"
+            ? authorizationCode.upstreamTokens["refresh_token"]
+            : undefined;
+        const refreshToken = upstreamRefreshToken ? options.createId() : undefined;
         const tokenExchangeOutcome = await resolveTokenExchangeOutcome(options, {
             clientId: authorizationCode.clientId,
             ...(authorizationCode.props === undefined ? {} : { currentProps: authorizationCode.props }),
@@ -237,25 +254,27 @@ export function createAuthCore(options) {
             subject: authorizationCode.subject,
             transactionId: authorizationCode.transactionId,
         });
-        options.store.saveRefreshToken({
-            active: true,
-            expiresAt: options.now() + tokenExchangeOutcome.refreshTokenTtlSec * 1000,
-            grantId,
-            refreshToken,
-        });
+        if (refreshToken) {
+            options.store.saveRefreshToken({
+                active: true,
+                expiresAt: options.now() + tokenExchangeOutcome.refreshTokenTtlSec * 1000,
+                grantId,
+                refreshToken,
+            });
+        }
         logAuthEvent("auth.token.exchange.succeeded", {
             accessTokenFingerprint: fingerprintAuthValue(accessToken),
             authorizationCodeFingerprint: fingerprintAuthValue(input.code),
             clientId: input.clientId,
-            refreshTokenFingerprint: fingerprintAuthValue(refreshToken),
             transactionId: authorizationCode.transactionId,
+            ...(refreshToken ? { refreshTokenFingerprint: fingerprintAuthValue(refreshToken) } : {}),
         });
         return {
             access_token: accessToken,
             expires_in: tokenExchangeOutcome.accessTokenTtlSec,
-            refresh_token: refreshToken,
             scope: authorizationCode.scopes.join(" "),
             token_type: "Bearer",
+            ...(refreshToken ? { refresh_token: refreshToken } : {}),
         };
     }
     async function exchangeRefreshToken(input) {
@@ -265,105 +284,115 @@ export function createAuthCore(options) {
             refreshTokenFingerprint: fingerprintAuthValue(input.refreshToken),
             requestedScopeCount: input.scopes?.length ?? 0,
         });
-        const refreshGrant = options.store.getRefreshToken(input.refreshToken);
-        if (!refreshGrant) {
-            throw new Error("Unknown refresh token.");
-        }
-        if (!refreshGrant.active) {
-            throw new Error("Refresh token is no longer active.");
-        }
-        if (refreshGrant.expiresAt <= options.now()) {
-            throw new Error("Refresh token has expired.");
-        }
-        const grant = options.store.getGrant(refreshGrant.grantId);
-        if (!grant || grant.clientId !== input.clientId) {
-            throw new Error("Unknown refresh token.");
-        }
-        const requestedScopes = input.scopes && input.scopes.length > 0
-            ? input.scopes
-            : grant.scopes;
-        for (const scope of requestedScopes) {
-            if (!grant.scopes.includes(scope)) {
-                throw new Error("Requested scope exceeds the original grant.");
+        try {
+            const refreshGrant = options.store.getRefreshToken(input.refreshToken);
+            if (!refreshGrant) {
+                throw new Error("Unknown refresh token.");
             }
-        }
-        const upstreamRefreshToken = typeof grant.upstreamTokens["refresh_token"] === "string"
-            ? grant.upstreamTokens["refresh_token"]
-            : undefined;
-        if (!upstreamRefreshToken) {
-            throw new Error("Refresh token is missing upstream credentials.");
-        }
-        if (!options.provider.exchangeRefreshToken) {
-            throw new Error("Provider refresh-token exchange is not configured.");
-        }
-        const refreshedUpstreamTokens = await options.provider.exchangeRefreshToken({
-            refreshToken: upstreamRefreshToken,
-        });
-        const accessToken = options.createId();
-        const nextRefreshToken = options.createId();
-        const mergedUpstreamTokens = {
-            ...grant.upstreamTokens,
-            ...refreshedUpstreamTokens,
-            refresh_token: typeof refreshedUpstreamTokens["refresh_token"] === "string"
-                ? refreshedUpstreamTokens["refresh_token"]
-                : upstreamRefreshToken,
-        };
-        const tokenExchangeOutcome = await resolveTokenExchangeOutcome(options, {
-            clientId: grant.clientId,
-            ...(grant.props === undefined ? {} : { currentProps: grant.props }),
-            defaultAccessTokenTtlSec: options.config.accessTokenTtlSec,
-            defaultRefreshTokenTtlSec: options.config.refreshTokenTtlSec,
-            grantType: "refresh_token",
-            scope: requestedScopes,
-            subject: grant.subject,
-            transactionId: grant.transactionId,
-            upstreamTokens: mergedUpstreamTokens,
-        });
-        options.store.updateGrant(grant.grantId, Object.keys(tokenExchangeOutcome.grantProps).length === 0
-            ? {
-                scopes: requestedScopes,
-                upstreamTokens: mergedUpstreamTokens,
+            if (!refreshGrant.active) {
+                throw new Error("Refresh token is no longer active.");
             }
-            : {
-                props: tokenExchangeOutcome.grantProps,
-                scopes: requestedScopes,
+            if (refreshGrant.expiresAt <= options.now()) {
+                throw new Error("Refresh token has expired.");
+            }
+            const grant = options.store.getGrant(refreshGrant.grantId);
+            if (!grant || grant.clientId !== input.clientId) {
+                throw new Error("Unknown refresh token.");
+            }
+            const requestedScopes = input.scopes && input.scopes.length > 0
+                ? input.scopes
+                : grant.scopes;
+            for (const scope of requestedScopes) {
+                if (!grant.scopes.includes(scope)) {
+                    throw new Error("Requested scope exceeds the original grant.");
+                }
+            }
+            const upstreamRefreshToken = typeof grant.upstreamTokens["refresh_token"] === "string"
+                ? grant.upstreamTokens["refresh_token"]
+                : undefined;
+            if (!upstreamRefreshToken) {
+                throw new Error("Refresh token is missing upstream credentials.");
+            }
+            if (!options.provider.exchangeRefreshToken) {
+                throw new Error("Provider refresh-token exchange is not configured.");
+            }
+            const refreshedUpstreamTokens = await options.provider.exchangeRefreshToken({
+                refreshToken: upstreamRefreshToken,
+            });
+            const accessToken = options.createId();
+            const nextRefreshToken = options.createId();
+            const mergedUpstreamTokens = {
+                ...grant.upstreamTokens,
+                ...refreshedUpstreamTokens,
+                refresh_token: typeof refreshedUpstreamTokens["refresh_token"] === "string"
+                    ? refreshedUpstreamTokens["refresh_token"]
+                    : upstreamRefreshToken,
+            };
+            const tokenExchangeOutcome = await resolveTokenExchangeOutcome(options, {
+                clientId: grant.clientId,
+                ...(grant.props === undefined ? {} : { currentProps: grant.props }),
+                defaultAccessTokenTtlSec: options.config.accessTokenTtlSec,
+                defaultRefreshTokenTtlSec: options.config.refreshTokenTtlSec,
+                grantType: "refresh_token",
+                scope: requestedScopes,
+                subject: grant.subject,
+                transactionId: grant.transactionId,
                 upstreamTokens: mergedUpstreamTokens,
             });
-        options.store.saveAccessToken({
-            accessToken,
-            clientId: grant.clientId,
-            expiresAt: options.now() + tokenExchangeOutcome.accessTokenTtlSec * 1000,
-            grantId: grant.grantId,
-            ...(Object.keys(tokenExchangeOutcome.accessTokenProps).length === 0 ? {} : { props: tokenExchangeOutcome.accessTokenProps }),
-            scopes: requestedScopes,
-            subject: grant.subject,
-            transactionId: grant.transactionId,
-        });
-        options.store.retireOtherRefreshTokens(grant.grantId, [input.refreshToken], options.now());
-        options.store.updateRefreshToken(input.refreshToken, {
-            active: true,
-            lastUsedAt: options.now(),
-        });
-        options.store.saveRefreshToken({
-            active: true,
-            expiresAt: options.now() + tokenExchangeOutcome.refreshTokenTtlSec * 1000,
-            grantId: grant.grantId,
-            refreshToken: nextRefreshToken,
-        });
-        logAuthEvent("auth.refresh.exchange.succeeded", {
-            accessTokenFingerprint: fingerprintAuthValue(accessToken),
-            clientId: input.clientId,
-            nextRefreshTokenFingerprint: fingerprintAuthValue(nextRefreshToken),
-            refreshTokenFingerprint: fingerprintAuthValue(input.refreshToken),
-            transactionId: grant.transactionId,
-        });
-        return {
-            access_token: accessToken,
-            expires_in: tokenExchangeOutcome.accessTokenTtlSec,
-            refresh_token: nextRefreshToken,
-            scope: requestedScopes.join(" "),
-            token_type: "Bearer",
-        };
+            options.store.updateGrant(grant.grantId, Object.keys(tokenExchangeOutcome.grantProps).length === 0
+                ? {
+                    scopes: requestedScopes,
+                    upstreamTokens: mergedUpstreamTokens,
+                }
+                : {
+                    props: tokenExchangeOutcome.grantProps,
+                    scopes: requestedScopes,
+                    upstreamTokens: mergedUpstreamTokens,
+                });
+            options.store.saveAccessToken({
+                accessToken,
+                clientId: grant.clientId,
+                expiresAt: options.now() + tokenExchangeOutcome.accessTokenTtlSec * 1000,
+                grantId: grant.grantId,
+                ...(Object.keys(tokenExchangeOutcome.accessTokenProps).length === 0 ? {} : { props: tokenExchangeOutcome.accessTokenProps }),
+                scopes: requestedScopes,
+                subject: grant.subject,
+                transactionId: grant.transactionId,
+            });
+            options.store.retireOtherRefreshTokens(grant.grantId, [input.refreshToken], options.now());
+            options.store.updateRefreshToken(input.refreshToken, {
+                active: true,
+                lastUsedAt: options.now(),
+            });
+            options.store.saveRefreshToken({
+                active: true,
+                expiresAt: options.now() + tokenExchangeOutcome.refreshTokenTtlSec * 1000,
+                grantId: grant.grantId,
+                refreshToken: nextRefreshToken,
+            });
+            logAuthEvent("auth.refresh.exchange.succeeded", {
+                accessTokenFingerprint: fingerprintAuthValue(accessToken),
+                clientId: input.clientId,
+                nextRefreshTokenFingerprint: fingerprintAuthValue(nextRefreshToken),
+                refreshTokenFingerprint: fingerprintAuthValue(input.refreshToken),
+                transactionId: grant.transactionId,
+            });
+            return {
+                access_token: accessToken,
+                expires_in: tokenExchangeOutcome.accessTokenTtlSec,
+                refresh_token: nextRefreshToken,
+                scope: requestedScopes.join(" "),
+                token_type: "Bearer",
+            };
+        }
+        catch (error) {
+            logAuthEvent("auth.refresh.exchange.failed", {
+                clientId: input.clientId,
+                errorMessage: error instanceof Error ? error.message : String(error),
+                refreshTokenFingerprint: fingerprintAuthValue(input.refreshToken),
+            });
+            throw error;
+        }
     }
     return {
         exchangeAuthorizationCode,
