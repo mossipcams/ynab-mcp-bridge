@@ -352,10 +352,7 @@ export function createAuthCore(options: CreateAuthCoreOptions) {
 
     const accessToken = options.createId();
     const grantId = options.createId();
-    const upstreamRefreshToken = typeof authorizationCode.upstreamTokens["refresh_token"] === "string"
-      ? authorizationCode.upstreamTokens["refresh_token"]
-      : undefined;
-    const refreshToken = upstreamRefreshToken ? options.createId() : undefined;
+    const refreshToken = options.createId();
     const tokenExchangeOutcome = await resolveTokenExchangeOutcome(options, {
       clientId: authorizationCode.clientId,
       ...(authorizationCode.props === undefined ? {} : { currentProps: authorizationCode.props }),
@@ -461,27 +458,27 @@ export function createAuthCore(options: CreateAuthCoreOptions) {
         ? grant.upstreamTokens["refresh_token"]
         : undefined;
 
-      if (!upstreamRefreshToken) {
-        throw new Error("Refresh token is missing upstream credentials.");
-      }
-
-      if (!options.provider.exchangeRefreshToken) {
-        throw new Error("Provider refresh-token exchange is not configured.");
-      }
-
-      const refreshedUpstreamTokens = await options.provider.exchangeRefreshToken({
-        refreshToken: upstreamRefreshToken,
-      });
-
       const accessToken = options.createId();
       const nextRefreshToken = options.createId();
-      const mergedUpstreamTokens = {
-        ...grant.upstreamTokens,
-        ...refreshedUpstreamTokens,
-        refresh_token: typeof refreshedUpstreamTokens["refresh_token"] === "string"
-          ? refreshedUpstreamTokens["refresh_token"]
-          : upstreamRefreshToken,
-      };
+      let mergedUpstreamTokens = grant.upstreamTokens;
+
+      if (upstreamRefreshToken) {
+        if (!options.provider.exchangeRefreshToken) {
+          throw new Error("Provider refresh-token exchange is not configured.");
+        }
+
+        const refreshedUpstreamTokens = await options.provider.exchangeRefreshToken({
+          refreshToken: upstreamRefreshToken,
+        });
+
+        mergedUpstreamTokens = {
+          ...grant.upstreamTokens,
+          ...refreshedUpstreamTokens,
+          refresh_token: typeof refreshedUpstreamTokens["refresh_token"] === "string"
+            ? refreshedUpstreamTokens["refresh_token"]
+            : upstreamRefreshToken,
+        };
+      }
       const tokenExchangeOutcome = await resolveTokenExchangeOutcome(options, {
         clientId: grant.clientId,
         ...(grant.props === undefined ? {} : { currentProps: grant.props }),

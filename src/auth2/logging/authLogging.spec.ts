@@ -177,7 +177,7 @@ describe("auth2 logging", () => {
     expect(loggedText).not.toContain("downstream-state-secret");
   });
 
-  it("emits a structured refresh failure event without leaking secret material", async () => {
+  it("emits a structured refresh success event without leaking secret material when upstream has no refresh token", async () => {
     const sink = createBufferedDestination();
     setLoggerDestinationForTests(sink.destination);
 
@@ -218,10 +218,10 @@ describe("auth2 logging", () => {
       },
     });
 
-    await expect(core.exchangeRefreshToken({
+    await core.exchangeRefreshToken({
       clientId: "client-a",
       refreshToken: "downstream-refresh-token-secret",
-    })).rejects.toThrow("Refresh token is missing upstream credentials.");
+    });
 
     expect(sink.readEntries()).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -230,10 +230,9 @@ describe("auth2 logging", () => {
         clientId: "client-a",
       }),
       expect.objectContaining({
-        event: "auth.refresh.exchange.failed",
+        event: "auth.refresh.exchange.succeeded",
         scope: "auth2",
         clientId: "client-a",
-        errorMessage: "Refresh token is missing upstream credentials.",
       }),
     ]));
 

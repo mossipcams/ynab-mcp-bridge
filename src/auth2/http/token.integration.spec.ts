@@ -182,7 +182,7 @@ describe("auth2 token route", () => {
     });
   });
 
-  it("omits refresh_token through /token when the upstream provider did not return one", async () => {
+  it("always includes refresh_token through /token even when the upstream provider did not return one", async () => {
     const upstream = await startUpstreamOAuthServerWithoutRefreshToken();
     const server = await startHttpServer({
       allowedOrigins: ["https://claude.ai"],
@@ -244,6 +244,7 @@ describe("auth2 token route", () => {
     await expect(response.json()).resolves.toEqual({
       access_token: expect.any(String),
       expires_in: 1800,
+      refresh_token: expect.any(String),
       scope: "openid profile",
       token_type: "Bearer",
     });

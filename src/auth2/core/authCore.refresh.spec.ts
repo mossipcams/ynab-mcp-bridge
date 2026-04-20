@@ -240,6 +240,62 @@ describe("auth core refresh flow", () => {
     })).rejects.toThrow("Refresh token has expired.");
   });
 
+  it("issues new tokens on refresh when upstream never provided a refresh token", async () => {
+    let nextId = 0;
+    const providerRefreshCalls: string[] = [];
+    const core = createAuthCore({
+      config: createConfig(),
+      createId: () => `generated-${++nextId}`,
+      now: () => 1_700_000_000_000,
+      provider: {
+        buildAuthorizationUrl(input) {
+          return `https://id.example.com/oauth/authorize?state=${encodeURIComponent(input.state)}`;
+        },
+        async exchangeAuthorizationCode() {
+          return {
+            access_token: "provider-access-token",
+            subject: "user-123",
+            token_type: "Bearer",
+          };
+        },
+        async exchangeRefreshToken(input) {
+          providerRefreshCalls.push(input.refreshToken);
+          return {
+            access_token: "provider-access-token-2",
+            subject: "user-123",
+            token_type: "Bearer",
+          };
+        },
+      },
+      store: createInMemoryAuthStore(),
+      upstreamPkce: {
+        createPair() {
+          return {
+            challenge: "upstream-challenge",
+            method: "S256",
+            verifier: "upstream-verifier",
+          };
+        },
+      },
+    });
+
+    const firstTokens = await issueRefreshToken(core);
+    const refreshed = await core.exchangeRefreshToken({
+      clientId: "client-a",
+      refreshToken: firstTokens.refresh_token,
+      scopes: ["openid"],
+    });
+
+    expect(providerRefreshCalls).toEqual([]);
+    expect(refreshed).toEqual({
+      access_token: "generated-7",
+      expires_in: 3600,
+      refresh_token: "generated-8",
+      scope: "openid",
+      token_type: "Bearer",
+    });
+  });
+
   it("rejects a scope expansion on refresh", async () => {
     let nextId = 0;
     const core = createAuthCore({
