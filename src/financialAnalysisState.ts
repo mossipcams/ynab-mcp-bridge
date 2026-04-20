@@ -65,7 +65,7 @@ function getAnalysisStateStore(api: ApiWithAnalysisStateStore): AnalysisStateSto
 }
 
 export function createAnalysisSession(
-  api: object,
+  api: ApiWithAnalysisStateStore,
   input: {
     kind: AnalysisSessionKind;
     payload: unknown;
@@ -73,7 +73,7 @@ export function createAnalysisSession(
   },
   options: CreateAnalysisSessionOptions = {},
 ): AnalysisSessionRecord {
-  const store = getAnalysisStateStore(api as ApiWithAnalysisStateStore);
+  const store = getAnalysisStateStore(api);
   const nowIso = getNowIsoString(options);
   const ttlMs = options.ttlMs ?? DEFAULT_ANALYSIS_TTL_MS;
   store.counter += 1;
@@ -92,11 +92,11 @@ export function createAnalysisSession(
 }
 
 export function getAnalysisSession(
-  api: object,
+  api: ApiWithAnalysisStateStore,
   token: string,
   options: GetAnalysisSessionOptions = {},
 ): AnalysisSessionRecord | undefined {
-  const store = getAnalysisStateStore(api as ApiWithAnalysisStateStore);
+  const store = getAnalysisStateStore(api);
   const session = store.sessions.get(token);
 
   if (!session) {

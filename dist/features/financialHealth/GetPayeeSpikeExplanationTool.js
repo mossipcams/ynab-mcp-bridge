@@ -34,6 +34,59 @@ function buildPeriodSummary(range, spentMilliunits, transactionCount) {
         transaction_count: transactionCount,
     };
 }
+function isRelevantPayeeTransaction(transaction, payeeId) {
+    return !transaction.deleted
+        && !transaction.transfer_account_id
+        && transaction.amount < 0
+        && transaction.payee_id === payeeId;
+}
+function applyPayeeTransactionToSummary(summary, transaction, periodA, periodB) {
+    summary.payeeName = transaction.payee_name ?? summary.payeeName;
+    const spendMilliunits = Math.abs(transaction.amount);
+    const inPeriodA = isWithinMonthRange(transaction.date, periodA.fromMonth, periodA.toMonth);
+    const inPeriodB = isWithinMonthRange(transaction.date, periodB.fromMonth, periodB.toMonth);
+    if (!inPeriodA && !inPeriodB) {
+        return;
+    }
+    if (inPeriodA) {
+        summary.periodASpentMilliunits += spendMilliunits;
+        summary.periodATransactionCount += 1;
+    }
+    if (inPeriodB) {
+        summary.periodBSpentMilliunits += spendMilliunits;
+        summary.periodBTransactionCount += 1;
+    }
+    addRollup(summary.categoryDrivers, transaction.category_id ?? "uncategorized", {
+        id: transaction.category_id ?? undefined,
+        name: transaction.category_name ?? "Uncategorized",
+        periodASpentMilliunits: inPeriodA ? spendMilliunits : 0,
+        periodBSpentMilliunits: inPeriodB ? spendMilliunits : 0,
+    });
+    addRollup(summary.accountDrivers, transaction.account_id ?? "unknown-account", {
+        id: transaction.account_id ?? undefined,
+        name: transaction.account_name ?? "Unknown Account",
+        periodASpentMilliunits: inPeriodA ? spendMilliunits : 0,
+        periodBSpentMilliunits: inPeriodB ? spendMilliunits : 0,
+    });
+}
+function summarizePayeeSpike(transactions, payeeId, periodA, periodB) {
+    const summary = {
+        accountDrivers: new Map(),
+        categoryDrivers: new Map(),
+        payeeName: "Unknown Payee",
+        periodASpentMilliunits: 0,
+        periodATransactionCount: 0,
+        periodBSpentMilliunits: 0,
+        periodBTransactionCount: 0,
+    };
+    for (const transaction of transactions) {
+        if (!isRelevantPayeeTransaction(transaction, payeeId)) {
+            continue;
+        }
+        applyPayeeTransactionToSummary(summary, transaction, periodA, periodB);
+    }
+    return summary;
+}
 export const name = "ynab_get_payee_spike_explanation";
 export const description = "Explains a payee spike across two periods with compact category and account drivers.";
 export const inputSchema = {
@@ -53,58 +106,22 @@ export async function execute(input, api) {
         const topN = input.topN ?? 5;
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const response = await api.transactions.getTransactions(planId, earliestMonth, undefined, undefined);
-            const categoryDrivers = new Map();
-            const accountDrivers = new Map();
-            let payeeName = "Unknown Payee";
-            let periodASpentMilliunits = 0;
-            let periodATransactionCount = 0;
-            let periodBSpentMilliunits = 0;
-            let periodBTransactionCount = 0;
-            for (const transaction of response.data.transactions) {
-                if (transaction.deleted || transaction.transfer_account_id || transaction.amount >= 0 || transaction.payee_id !== input.payeeId) {
-                    continue;
-                }
-                payeeName = transaction.payee_name ?? payeeName;
-                const spendMilliunits = Math.abs(transaction.amount);
-                const inPeriodA = isWithinMonthRange(transaction.date, periodA.fromMonth, periodA.toMonth);
-                const inPeriodB = isWithinMonthRange(transaction.date, periodB.fromMonth, periodB.toMonth);
-                if (!inPeriodA && !inPeriodB) {
-                    continue;
-                }
-                if (inPeriodA) {
-                    periodASpentMilliunits += spendMilliunits;
-                    periodATransactionCount += 1;
-                }
-                if (inPeriodB) {
-                    periodBSpentMilliunits += spendMilliunits;
-                    periodBTransactionCount += 1;
-                }
-                addRollup(categoryDrivers, transaction.category_id ?? "uncategorized", {
-                    id: transaction.category_id ?? undefined,
-                    name: transaction.category_name ?? "Uncategorized",
-                    periodASpentMilliunits: inPeriodA ? spendMilliunits : 0,
-                    periodBSpentMilliunits: inPeriodB ? spendMilliunits : 0,
-                });
-                addRollup(accountDrivers, transaction.account_id ?? "unknown-account", {
-                    id: transaction.account_id ?? undefined,
-                    name: transaction.account_name ?? "Unknown Account",
-                    periodASpentMilliunits: inPeriodA ? spendMilliunits : 0,
-                    periodBSpentMilliunits: inPeriodB ? spendMilliunits : 0,
-                });
-            }
-            const changeMilliunits = periodBSpentMilliunits - periodASpentMilliunits;
+            const summary = summarizePayeeSpike(response.data.transactions, input.payeeId, periodA, periodB);
+            const changeMilliunits = summary.periodBSpentMilliunits - summary.periodASpentMilliunits;
             return toTextResult({
                 payee_id: input.payeeId,
-                payee_name: payeeName,
-                period_a: buildPeriodSummary(periodA, periodASpentMilliunits, periodATransactionCount),
-                period_b: buildPeriodSummary(periodB, periodBSpentMilliunits, periodBTransactionCount),
+                payee_name: summary.payeeName,
+                period_a: buildPeriodSummary(periodA, summary.periodASpentMilliunits, summary.periodATransactionCount),
+                period_b: buildPeriodSummary(periodB, summary.periodBSpentMilliunits, summary.periodBTransactionCount),
                 change: compactObject({
                     amount: formatMilliunits(Math.abs(changeMilliunits)),
                     direction: directionFor(changeMilliunits),
-                    percent: periodASpentMilliunits === 0 ? undefined : ((changeMilliunits / periodASpentMilliunits) * 100).toFixed(2),
+                    percent: summary.periodASpentMilliunits === 0
+                        ? undefined
+                        : ((changeMilliunits / summary.periodASpentMilliunits) * 100).toFixed(2),
                 }),
-                top_category_drivers: buildDriverPayload(Array.from(categoryDrivers.values()), topN),
-                top_account_drivers: buildDriverPayload(Array.from(accountDrivers.values()), topN),
+                top_category_drivers: buildDriverPayload(Array.from(summary.categoryDrivers.values()), topN),
+                top_account_drivers: buildDriverPayload(Array.from(summary.accountDrivers.values()), topN),
             });
         });
     }

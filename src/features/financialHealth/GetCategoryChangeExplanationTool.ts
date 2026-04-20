@@ -16,7 +16,27 @@ type PeriodRange = {
   toMonth: string;
 };
 
+type CategoryChangeSummary = {
+  categoryName: string;
+  payeeDrivers: Map<string, Rollup>;
+  periodASpentMilliunits: number;
+  periodATransactionCount: number;
+  periodBSpentMilliunits: number;
+  periodBTransactionCount: number;
+};
+
 const directionFor = (value: number) => value >= 0 ? "increase" : "decrease";
+
+type CategoryTransaction = {
+  amount: number;
+  category_id?: string | null;
+  category_name?: string | null;
+  date: string;
+  deleted: boolean;
+  payee_id?: string | null;
+  payee_name?: string | null;
+  transfer_account_id?: string | null;
+};
 
 function addRollup(
   bucket: Map<string, Rollup>,
@@ -59,6 +79,71 @@ function buildPeriodSummary(range: PeriodRange, spentMilliunits: number, transac
   };
 }
 
+function isRelevantCategoryTransaction(transaction: CategoryTransaction, categoryId: string) {
+  return !transaction.deleted
+    && !transaction.transfer_account_id
+    && transaction.amount < 0
+    && transaction.category_id === categoryId;
+}
+
+function applyCategoryTransactionToSummary(
+  summary: CategoryChangeSummary,
+  transaction: CategoryTransaction,
+  periodA: PeriodRange,
+  periodB: PeriodRange,
+) {
+  summary.categoryName = transaction.category_name ?? summary.categoryName;
+  const spendMilliunits = Math.abs(transaction.amount);
+  const inPeriodA = isWithinMonthRange(transaction.date, periodA.fromMonth, periodA.toMonth);
+  const inPeriodB = isWithinMonthRange(transaction.date, periodB.fromMonth, periodB.toMonth);
+
+  if (!inPeriodA && !inPeriodB) {
+    return;
+  }
+
+  if (inPeriodA) {
+    summary.periodASpentMilliunits += spendMilliunits;
+    summary.periodATransactionCount += 1;
+  }
+
+  if (inPeriodB) {
+    summary.periodBSpentMilliunits += spendMilliunits;
+    summary.periodBTransactionCount += 1;
+  }
+
+  addRollup(summary.payeeDrivers, transaction.payee_id ?? "unknown-payee", {
+    id: transaction.payee_id ?? undefined,
+    name: transaction.payee_name ?? "Unknown Payee",
+    periodASpentMilliunits: inPeriodA ? spendMilliunits : 0,
+    periodBSpentMilliunits: inPeriodB ? spendMilliunits : 0,
+  });
+}
+
+function summarizeCategoryChange(
+  transactions: readonly CategoryTransaction[],
+  categoryId: string,
+  periodA: PeriodRange,
+  periodB: PeriodRange,
+): CategoryChangeSummary {
+  const summary: CategoryChangeSummary = {
+    categoryName: "Unknown Category",
+    payeeDrivers: new Map<string, Rollup>(),
+    periodASpentMilliunits: 0,
+    periodATransactionCount: 0,
+    periodBSpentMilliunits: 0,
+    periodBTransactionCount: 0,
+  };
+
+  for (const transaction of transactions) {
+    if (!isRelevantCategoryTransaction(transaction, categoryId)) {
+      continue;
+    }
+    applyCategoryTransactionToSummary(summary, transaction, periodA, periodB);
+  }
+
+  return summary;
+}
+
 export const name = "ynab_get_category_change_explanation";
 export const description = "Explains change for a single category across two periods with compact payee drivers.";
 export const inputSchema = {
@@ -91,58 +176,22 @@ export async function execute(
 
     return await withResolvedPlan(input.planId, api, async (planId) => {
       const response = await api.transactions.getTransactions(planId, earliestMonth, undefined, undefined);
-      const payeeDrivers = new Map<string, Rollup>();
-      let categoryName = "Unknown Category";
-      let periodASpentMilliunits = 0;
-      let periodATransactionCount = 0;
-      let periodBSpentMilliunits = 0;
-      let periodBTransactionCount = 0;
-
-      for (const transaction of response.data.transactions) {
-        if (transaction.deleted || transaction.transfer_account_id || transaction.amount >= 0 || transaction.category_id !== input.categoryId) {
-          continue;
-        }
-
-        categoryName = transaction.category_name ?? categoryName;
-        const spendMilliunits = Math.abs(transaction.amount);
-        const inPeriodA = isWithinMonthRange(transaction.date, periodA.fromMonth, periodA.toMonth);
-        const inPeriodB = isWithinMonthRange(transaction.date, periodB.fromMonth, periodB.toMonth);
-
-        if (!inPeriodA && !inPeriodB) {
-          continue;
-        }
-
-        if (inPeriodA) {
-          periodASpentMilliunits += spendMilliunits;
-          periodATransactionCount += 1;
-        }
-
-        if (inPeriodB) {
-          periodBSpentMilliunits += spendMilliunits;
-          periodBTransactionCount += 1;
-        }
-
-        addRollup(payeeDrivers, transaction.payee_id ?? "unknown-payee", {
-          id: transaction.payee_id ?? undefined,
-          name: transaction.payee_name ?? "Unknown Payee",
-          periodASpentMilliunits: inPeriodA ? spendMilliunits : 0,
-          periodBSpentMilliunits: inPeriodB ? spendMilliunits : 0,
-        });
-      }
-
-      const changeMilliunits = periodBSpentMilliunits - periodASpentMilliunits;
+      const summary = summarizeCategoryChange(response.data.transactions, input.categoryId, periodA, periodB);
+      const changeMilliunits = summary.periodBSpentMilliunits - summary.periodASpentMilliunits;
 
       return toTextResult({
         category_id: input.categoryId,
-        category_name: categoryName,
-        period_a: buildPeriodSummary(periodA, periodASpentMilliunits, periodATransactionCount),
-        period_b: buildPeriodSummary(periodB, periodBSpentMilliunits, periodBTransactionCount),
+        category_name: summary.categoryName,
+        period_a: buildPeriodSummary(periodA, summary.periodASpentMilliunits, summary.periodATransactionCount),
+        period_b: buildPeriodSummary(periodB, summary.periodBSpentMilliunits, summary.periodBTransactionCount),
         change: compactObject({
           amount: formatMilliunits(Math.abs(changeMilliunits)),
           direction: directionFor(changeMilliunits),
-          percent: periodASpentMilliunits === 0 ? undefined : ((changeMilliunits / periodASpentMilliunits) * 100).toFixed(2),
+          percent: summary.periodASpentMilliunits === 0
+            ? undefined
+            : ((changeMilliunits / summary.periodASpentMilliunits) * 100).toFixed(2),
         }),
-        top_payee_drivers: buildDriverPayload(Array.from(payeeDrivers.values()), topN),
+        top_payee_drivers: buildDriverPayload(Array.from(summary.payeeDrivers.values()), topN),
       });
     });
   } catch (error) {

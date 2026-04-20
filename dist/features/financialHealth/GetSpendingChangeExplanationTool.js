@@ -75,29 +75,112 @@ function buildPeriodSummary(range, spentMilliunits, transactionCount) {
 function getEarliestMonth(...months) {
     return months.slice().sort((left, right) => left.localeCompare(right))[0];
 }
+function isRecord(value) {
+    return typeof value === "object" && value !== null;
+}
+function isDriverPayload(value) {
+    return isRecord(value)
+        && typeof value["name"] === "string"
+        && typeof value["period_a_spent"] === "string"
+        && typeof value["period_b_spent"] === "string"
+        && typeof value["change"] === "string"
+        && (value["change_direction"] === "increase"
+            || value["change_direction"] === "decrease")
+        && (value["id"] === undefined
+            || typeof value["id"] === "string");
+}
+function isSpendingChangeAnalysisPayload(value) {
+    if (!isRecord(value)) {
+        return false;
+    }
+    return Array.isArray(value["topCategoryDrivers"])
+        && value["topCategoryDrivers"].every(isDriverPayload)
+        && Array.isArray(value["topPayeeDrivers"])
+        && value["topPayeeDrivers"].every(isDriverPayload);
+}
+function resolveRefinement(session, focusType, focusId) {
+    if (!session || session.kind !== "spending_change") {
+        throw new Error("Analysis token is invalid or has expired.");
+    }
+    if (!focusType || !focusId) {
+        throw new Error("Analysis token refinement requires focusType and focusId.");
+    }
+    if (!isSpendingChangeAnalysisPayload(session.payload)) {
+        throw new Error("Analysis token payload is invalid.");
+    }
+    const focusEntries = focusType === "category"
+        ? session.payload.topCategoryDrivers
+        : session.payload.topPayeeDrivers;
+    const focus = focusEntries.find((entry) => entry.id === focusId);
+    if (!focus) {
+        throw new Error(`No ${focusType} driver found for ${focusId}.`);
+    }
+    return {
+        focus,
+        focusId,
+        focusType,
+        sessionToken: session.token,
+    };
+}
+function isRelevantSpendingTransaction(transaction) {
+    return !transaction.deleted
+        && !transaction.transfer_account_id
+        && transaction.amount < 0;
+}
+function applySpendingTransactionToSummary(summary, transaction, periodA, periodB) {
+    const spendMilliunits = Math.abs(transaction.amount);
+    const inPeriodA = isWithinMonthRange(transaction.date, periodA.fromMonth, periodA.toMonth);
+    const inPeriodB = isWithinMonthRange(transaction.date, periodB.fromMonth, periodB.toMonth);
+    if (!inPeriodA && !inPeriodB) {
+        return;
+    }
+    if (inPeriodA) {
+        summary.periodASpentMilliunits += spendMilliunits;
+        summary.periodATransactionCount += 1;
+    }
+    if (inPeriodB) {
+        summary.periodBSpentMilliunits += spendMilliunits;
+        summary.periodBTransactionCount += 1;
+    }
+    addDriverRollup(summary.categoryDrivers, transaction.category_id ?? "uncategorized", {
+        id: transaction.category_id ?? undefined,
+        name: transaction.category_name ?? "Uncategorized",
+        periodASpentMilliunits: inPeriodA ? spendMilliunits : 0,
+        periodBSpentMilliunits: inPeriodB ? spendMilliunits : 0,
+    });
+    addDriverRollup(summary.payeeDrivers, transaction.payee_id ?? "unknown-payee", {
+        id: transaction.payee_id ?? undefined,
+        name: transaction.payee_name ?? "Unknown Payee",
+        periodASpentMilliunits: inPeriodA ? spendMilliunits : 0,
+        periodBSpentMilliunits: inPeriodB ? spendMilliunits : 0,
+    });
+}
+function summarizeSpendingChange(transactions, periodA, periodB) {
+    const summary = {
+        categoryDrivers: new Map(),
+        payeeDrivers: new Map(),
+        periodASpentMilliunits: 0,
+        periodATransactionCount: 0,
+        periodBSpentMilliunits: 0,
+        periodBTransactionCount: 0,
+    };
+    for (const transaction of transactions) {
+        if (!isRelevantSpendingTransaction(transaction)) {
+            continue;
+        }
+        applySpendingTransactionToSummary(summary, transaction, periodA, periodB);
+    }
+    return summary;
+}
 export async function execute(input, api) {
     try {
         if (input.analysisToken) {
-            const session = getAnalysisSession(api, input.analysisToken);
-            if (!session || session.kind !== "spending_change") {
-                throw new Error("Analysis token is invalid or has expired.");
-            }
-            if (!input.focusType || !input.focusId) {
-                throw new Error("Analysis token refinement requires focusType and focusId.");
-            }
-            const payload = session.payload;
-            const focusEntries = input.focusType === "category"
-                ? payload.topCategoryDrivers
-                : payload.topPayeeDrivers;
-            const focus = focusEntries.find((entry) => entry.id === input.focusId);
-            if (!focus) {
-                throw new Error(`No ${input.focusType} driver found for ${input.focusId}.`);
-            }
+            const refinement = resolveRefinement(getAnalysisSession(api, input.analysisToken), input.focusType, input.focusId);
             return toTextResult({
-                analysis_token: session.token,
-                focus_type: input.focusType,
-                focus_id: input.focusId,
-                focus: buildFocusPayload(focus),
+                analysis_token: refinement.sessionToken,
+                focus_type: refinement.focusType,
+                focus_id: refinement.focusId,
+                focus: buildFocusPayload(refinement.focus),
             });
         }
         const periodA = normalizeMonthRange(input.periodAFromMonth, input.periodAToMonth);
@@ -106,53 +189,13 @@ export async function execute(input, api) {
         const earliestMonth = getEarliestMonth(periodA.fromMonth, periodB.fromMonth);
         return await withResolvedPlan(input.planId, api, async (planId) => {
             const response = await api.transactions.getTransactions(planId, earliestMonth, undefined, undefined);
-            const categoryDrivers = new Map();
-            const payeeDrivers = new Map();
-            let periodASpentMilliunits = 0;
-            let periodATransactionCount = 0;
-            let periodBSpentMilliunits = 0;
-            let periodBTransactionCount = 0;
-            for (const transaction of response.data.transactions) {
-                if (transaction.deleted || transaction.transfer_account_id || transaction.amount >= 0) {
-                    continue;
-                }
-                const spendMilliunits = Math.abs(transaction.amount);
-                const inPeriodA = isWithinMonthRange(transaction.date, periodA.fromMonth, periodA.toMonth);
-                const inPeriodB = isWithinMonthRange(transaction.date, periodB.fromMonth, periodB.toMonth);
-                if (!inPeriodA && !inPeriodB) {
-                    continue;
-                }
-                if (inPeriodA) {
-                    periodASpentMilliunits += spendMilliunits;
-                    periodATransactionCount += 1;
-                }
-                if (inPeriodB) {
-                    periodBSpentMilliunits += spendMilliunits;
-                    periodBTransactionCount += 1;
-                }
-                const categoryId = transaction.category_id ?? "uncategorized";
-                const categoryName = transaction.category_name ?? "Uncategorized";
-                const payeeId = transaction.payee_id ?? "unknown-payee";
-                const payeeName = transaction.payee_name ?? "Unknown Payee";
-                addDriverRollup(categoryDrivers, categoryId, {
-                    id: transaction.category_id ?? undefined,
-                    name: categoryName,
-                    periodASpentMilliunits: inPeriodA ? spendMilliunits : 0,
-                    periodBSpentMilliunits: inPeriodB ? spendMilliunits : 0,
-                });
-                addDriverRollup(payeeDrivers, payeeId, {
-                    id: transaction.payee_id ?? undefined,
-                    name: payeeName,
-                    periodASpentMilliunits: inPeriodA ? spendMilliunits : 0,
-                    periodBSpentMilliunits: inPeriodB ? spendMilliunits : 0,
-                });
-            }
-            const changeMilliunits = periodBSpentMilliunits - periodASpentMilliunits;
-            const changePercent = periodASpentMilliunits === 0
+            const summary = summarizeSpendingChange(response.data.transactions, periodA, periodB);
+            const changeMilliunits = summary.periodBSpentMilliunits - summary.periodASpentMilliunits;
+            const changePercent = summary.periodASpentMilliunits === 0
                 ? undefined
-                : ((changeMilliunits / periodASpentMilliunits) * 100).toFixed(2);
-            const topCategoryDrivers = buildDriverPayload(Array.from(categoryDrivers.values()), topN);
-            const topPayeeDrivers = buildDriverPayload(Array.from(payeeDrivers.values()), topN);
+                : ((changeMilliunits / summary.periodASpentMilliunits) * 100).toFixed(2);
+            const topCategoryDrivers = buildDriverPayload(Array.from(summary.categoryDrivers.values()), topN);
+            const topPayeeDrivers = buildDriverPayload(Array.from(summary.payeeDrivers.values()), topN);
             const session = createAnalysisSession(api, {
                 kind: "spending_change",
                 planId,
@@ -163,8 +206,8 @@ export async function execute(input, api) {
             });
             return toTextResult({
                 analysis_token: session.token,
-                period_a: buildPeriodSummary(periodA, periodASpentMilliunits, periodATransactionCount),
-                period_b: buildPeriodSummary(periodB, periodBSpentMilliunits, periodBTransactionCount),
+                period_a: buildPeriodSummary(periodA, summary.periodASpentMilliunits, summary.periodATransactionCount),
+                period_b: buildPeriodSummary(periodB, summary.periodBSpentMilliunits, summary.periodBTransactionCount),
                 change: compactObject({
                     amount: formatMilliunits(Math.abs(changeMilliunits)),
                     direction: rollupDirection(changeMilliunits),

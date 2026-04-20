@@ -20,6 +20,29 @@ type SpendingAnomalyAnalysisPayload = {
   anomalies: AnomalyEntry[];
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isAnomalyEntry(value: unknown): value is AnomalyEntry {
+  return isRecord(value)
+    && typeof value["category_id"] === "string"
+    && typeof value["category_name"] === "string"
+    && typeof value["latest_spent"] === "string"
+    && typeof value["baseline_average"] === "string"
+    && typeof value["change_percent"] === "string";
+}
+
+function isSpendingAnomalyAnalysisPayload(value: unknown): value is SpendingAnomalyAnalysisPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return typeof value["latestMonth"] === "string"
+    && Array.isArray(value["anomalies"])
+    && value["anomalies"].every(isAnomalyEntry);
+}
+
 export const name = "ynab_get_updated_anomalies";
 export const description =
   "Returns only the added, removed, or changed anomalies relative to a prior anomaly analysis token.";
@@ -63,8 +86,11 @@ export async function execute(
     if (!previousSession || previousSession.kind !== "spending_anomalies") {
       throw new Error("Analysis token is invalid or has expired.");
     }
+    if (!isSpendingAnomalyAnalysisPayload(previousSession.payload)) {
+      throw new Error("Analysis token payload is invalid.");
+    }
 
-    const previousPayload = previousSession.payload as SpendingAnomalyAnalysisPayload;
+    const previousPayload = previousSession.payload;
     const baselineMonths = input.baselineMonths ?? 3;
     const topN = input.topN ?? 5;
     const thresholdMultiplier = input.thresholdMultiplier ?? 1.5;
@@ -97,8 +123,10 @@ export async function execute(
         minimumDifference,
         thresholdMultiplier,
         topN,
-      }) as AnomalyEntry[];
-      const previousById = new Map(previousPayload.anomalies.map((entry) => [entry.category_id, entry] as const));
+      });
+      const previousById = new Map<string, AnomalyEntry>(
+        previousPayload.anomalies.map((entry) => [entry.category_id, entry]),
+      );
       const currentIds = new Set(currentAnomalies.map((entry) => entry.category_id));
       const addedAnomalies = currentAnomalies.filter((entry) => !previousById.has(entry.category_id));
       const removedAnomalyIds = previousPayload.anomalies

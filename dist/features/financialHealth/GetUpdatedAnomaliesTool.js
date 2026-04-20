@@ -4,6 +4,25 @@ import { createAnalysisSession, getAnalysisSession } from "../../financialAnalys
 import { formatAmount, formatPercent, previousMonths } from "./financialDiagnosticsUtils.js";
 import { buildCategorySpentLookup, buildSpendingAnomalies, isCreditCardPaymentCategoryName } from "../../financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
+function isRecord(value) {
+    return typeof value === "object" && value !== null;
+}
+function isAnomalyEntry(value) {
+    return isRecord(value)
+        && typeof value["category_id"] === "string"
+        && typeof value["category_name"] === "string"
+        && typeof value["latest_spent"] === "string"
+        && typeof value["baseline_average"] === "string"
+        && typeof value["change_percent"] === "string";
+}
+function isSpendingAnomalyAnalysisPayload(value) {
+    if (!isRecord(value)) {
+        return false;
+    }
+    return typeof value["latestMonth"] === "string"
+        && Array.isArray(value["anomalies"])
+        && value["anomalies"].every(isAnomalyEntry);
+}
 export const name = "ynab_get_updated_anomalies";
 export const description = "Returns only the added, removed, or changed anomalies relative to a prior anomaly analysis token.";
 export const inputSchema = {
@@ -29,6 +48,9 @@ export async function execute(input, api) {
         const previousSession = getAnalysisSession(api, input.analysisToken);
         if (!previousSession || previousSession.kind !== "spending_anomalies") {
             throw new Error("Analysis token is invalid or has expired.");
+        }
+        if (!isSpendingAnomalyAnalysisPayload(previousSession.payload)) {
+            throw new Error("Analysis token payload is invalid.");
         }
         const previousPayload = previousSession.payload;
         const baselineMonths = input.baselineMonths ?? 3;
