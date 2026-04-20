@@ -1,26 +1,41 @@
 import { z } from "zod";
 import { getCachedPlanMonth } from "../../cachedYnabReads.js";
-import { createAnalysisSession } from "../../financialAnalysisState.js";
+import { createAnalysisSession, getAnalysisSession } from "../../financialAnalysisState.js";
 import { formatAmount, formatPercent, previousMonths } from "./financialDiagnosticsUtils.js";
 import { buildCategorySpentLookup, buildSpendingAnomalies, isCreditCardPaymentCategoryName } from "../../financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
-export const name = "ynab_get_spending_anomalies";
-export const description = "Flags category spending spikes in a month against a trailing monthly baseline.";
+export const name = "ynab_get_updated_anomalies";
+export const description = "Returns only the added, removed, or changed anomalies relative to a prior anomaly analysis token.";
 export const inputSchema = {
+    analysisToken: z.string().describe("Token returned by a prior spending anomalies analysis."),
     planId: z.string().optional().describe("The YNAB plan ID. Falls back to YNAB_PLAN_ID."),
-    latestMonth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Month to compare against the baseline."),
+    latestMonth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Month to compare against the prior anomaly analysis."),
     baselineMonths: z.number().int().min(1).max(12).default(3).describe("How many trailing months to use as the baseline."),
     topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of anomalies to include."),
     thresholdMultiplier: z.number().min(1).default(1.5).describe("Minimum multiple over the baseline average to flag."),
     minimumDifference: z.number().int().min(0).default(50000).describe("Minimum milliunit increase over baseline to flag."),
 };
+function getChangedAnomalies(current, previousById) {
+    return current.filter((entry) => {
+        const previous = previousById.get(entry.category_id);
+        return previous !== undefined
+            && (previous.latest_spent !== entry.latest_spent
+                || previous.baseline_average !== entry.baseline_average
+                || previous.change_percent !== entry.change_percent);
+    });
+}
 export async function execute(input, api) {
     try {
+        const previousSession = getAnalysisSession(api, input.analysisToken);
+        if (!previousSession || previousSession.kind !== "spending_anomalies") {
+            throw new Error("Analysis token is invalid or has expired.");
+        }
+        const previousPayload = previousSession.payload;
         const baselineMonths = input.baselineMonths ?? 3;
         const topN = input.topN ?? 5;
         const thresholdMultiplier = input.thresholdMultiplier ?? 1.5;
         const minimumDifference = input.minimumDifference ?? 50000;
-        return await withResolvedPlan(input.planId, api, async (planId) => {
+        return await withResolvedPlan(input.planId ?? previousSession.planId, api, async (planId) => {
             const baselineMonthIds = previousMonths(input.latestMonth, baselineMonths);
             const responses = await Promise.all([
                 ...baselineMonthIds.map((month) => getCachedPlanMonth(api, planId, month)),
@@ -35,7 +50,7 @@ export async function execute(input, api) {
             const latestCategories = latestResponse.data.month.categories.filter((category) => (!category.deleted
                 && !category.hidden
                 && !isCreditCardPaymentCategoryName(category.category_group_name)));
-            const anomalies = buildSpendingAnomalies({
+            const currentAnomalies = buildSpendingAnomalies({
                 baselineSpentLookups,
                 categories: latestCategories,
                 formatAmount,
@@ -44,20 +59,29 @@ export async function execute(input, api) {
                 thresholdMultiplier,
                 topN,
             });
+            const previousById = new Map(previousPayload.anomalies.map((entry) => [entry.category_id, entry]));
+            const currentIds = new Set(currentAnomalies.map((entry) => entry.category_id));
+            const addedAnomalies = currentAnomalies.filter((entry) => !previousById.has(entry.category_id));
+            const removedAnomalyIds = previousPayload.anomalies
+                .filter((entry) => !currentIds.has(entry.category_id))
+                .map((entry) => entry.category_id);
+            const changedAnomalies = getChangedAnomalies(currentAnomalies, previousById);
             const session = createAnalysisSession(api, {
                 kind: "spending_anomalies",
                 planId,
                 payload: {
                     latestMonth: input.latestMonth,
-                    anomalies,
+                    anomalies: currentAnomalies,
                 },
             });
             return toTextResult({
+                previous_analysis_token: input.analysisToken,
                 analysis_token: session.token,
                 latest_month: input.latestMonth,
-                baseline_month_count: baselineResponses.length,
-                anomaly_count: anomalies.length,
-                anomalies,
+                current_anomaly_count: currentAnomalies.length,
+                added_anomalies: addedAnomalies,
+                removed_anomaly_ids: removedAnomalyIds,
+                changed_anomalies: changedAnomalies,
             });
         });
     }

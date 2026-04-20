@@ -15,6 +15,25 @@ type TransactionCollectionOptions<TInput extends TransactionProjectionInput> = {
   normalizeInput?: (input: TInput) => TInput;
 };
 
+const defaultTransactionProjectionFields: Array<(typeof transactionFields)[number]> = [
+  "date",
+  "amount",
+  "payee_name",
+  "category_name",
+];
+const DEFAULT_TRANSACTION_LIMIT = 20;
+
+function applyDefaultTransactionProjection<TInput extends TransactionProjectionInput>(
+  input: TInput,
+): TInput {
+  return {
+    ...input,
+    limit: input.limit ?? DEFAULT_TRANSACTION_LIMIT,
+    includeIds: input.includeIds ?? false,
+    fields: input.fields?.length ? input.fields : defaultTransactionProjectionFields,
+  };
+}
+
 async function runTransactionCollectionTool<TInput extends TransactionProjectionInput>(
   input: TInput,
   api: ynab.API,
@@ -26,7 +45,8 @@ async function runTransactionCollectionTool<TInput extends TransactionProjection
   options: TransactionCollectionOptions<TInput> = {},
 ) {
   try {
-    const normalizedInput = options.normalizeInput ? options.normalizeInput(input) : input;
+    const baseInput = options.normalizeInput ? options.normalizeInput(input) : input;
+    const normalizedInput = applyDefaultTransactionProjection(baseInput);
     const transactions = await withResolvedPlan(
       normalizedInput.planId,
       api,

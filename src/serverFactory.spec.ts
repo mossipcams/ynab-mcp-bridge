@@ -8,6 +8,7 @@ import {
   defineTool,
   getDiscoveryResourceDocument,
   getDiscoveryResourceSummaries,
+  getResourcesListResult,
   getToolsListResult,
   registerServerTools,
 } from "./serverRuntime.js";
@@ -51,12 +52,16 @@ describe("createServer", () => {
     "ynab_get_net_worth_trajectory",
     "ynab_get_financial_snapshot",
     "ynab_get_financial_health_check",
+    "ynab_get_spending_change_explanation",
     "ynab_get_spending_summary",
     "ynab_get_spending_anomalies",
+    "ynab_get_updated_anomalies",
     "ynab_get_cash_flow_summary",
     "ynab_get_cash_runway",
+    "ynab_get_category_change_explanation",
     "ynab_get_budget_health_summary",
     "ynab_get_upcoming_obligations",
+    "ynab_get_payee_spike_explanation",
     "ynab_get_goal_progress_summary",
     "ynab_get_budget_cleanup_summary",
     "ynab_get_income_summary",
@@ -131,7 +136,7 @@ describe("createServer", () => {
   it("registers the rebuilt read-only YNAB toolset", () => {
     const registeredTools = getToolsListResult().tools.map((tool) => tool.name);
 
-    expect(registeredTools).toHaveLength(47);
+    expect(registeredTools).toHaveLength(51);
     expect(registeredTools).toEqual(expect.arrayContaining(expectedToolNames));
   });
 
@@ -152,6 +157,16 @@ describe("createServer", () => {
     expect(registeredResources.map((resource) => resource.name)).toEqual(expect.arrayContaining([
       "ynab_list_categories",
       "ynab_list_accounts",
+    ]));
+  });
+
+  it("includes a compact current financial snapshot data resource alongside tool discovery docs", () => {
+    const resources = getResourcesListResult().resources;
+
+    expect(resources.map((resource) => resource.name)).toEqual(expect.arrayContaining([
+      "ynab_current_financial_snapshot",
+      "ynab_current_budget_health",
+      "ynab_current_upcoming_obligations",
     ]));
   });
 
@@ -230,8 +245,8 @@ describe("createServer", () => {
     };
     const summaries = getDiscoveryResourceSummaries(options);
 
-    expect(new Set(summaries.map((summary) => summary.name)).size).toBe(47);
-    expect(summaries).toHaveLength(47);
+    expect(new Set(summaries.map((summary) => summary.name)).size).toBe(51);
+    expect(summaries).toHaveLength(51);
     expect(summaries.every((summary) => summary.uri.startsWith("https://mcp.example.com/mcp/resources/"))).toBe(true);
 
     const categoryEntries = summaries.filter((summary) => summary.name === "ynab_list_categories");
@@ -347,7 +362,7 @@ describe("createServer", () => {
       {} as any,
     );
 
-    expect(registeredToolNames).toHaveLength(47);
+    expect(registeredToolNames).toHaveLength(51);
     expect(registeredToolNames).toEqual([
       "ynab_get_mcp_version",
       "ynab_get_user",
@@ -383,12 +398,16 @@ describe("createServer", () => {
       "ynab_get_net_worth_trajectory",
       "ynab_get_financial_snapshot",
       "ynab_get_financial_health_check",
+      "ynab_get_spending_change_explanation",
       "ynab_get_spending_summary",
       "ynab_get_spending_anomalies",
+      "ynab_get_updated_anomalies",
       "ynab_get_cash_flow_summary",
       "ynab_get_cash_runway",
+      "ynab_get_category_change_explanation",
       "ynab_get_budget_health_summary",
       "ynab_get_upcoming_obligations",
+      "ynab_get_payee_spike_explanation",
       "ynab_get_goal_progress_summary",
       "ynab_get_budget_cleanup_summary",
       "ynab_get_income_summary",
@@ -397,7 +416,7 @@ describe("createServer", () => {
       "ynab_get_recurring_expense_summary",
       "ynab_get_category_trend_summary",
     ]);
-    expect(registerTool).toHaveBeenCalledTimes(47);
+    expect(registerTool).toHaveBeenCalledTimes(51);
     expect(registerTool).toHaveBeenCalledWith(
       "ynab_get_mcp_version",
       expect.objectContaining({

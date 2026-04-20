@@ -121,7 +121,7 @@ describe("AI tool optimization", () => {
 
     expect(baseline).toEqual({
       tool_catalog: {
-        tool_count: 47,
+        tool_count: 51,
         tools_list_bytes: expect.any(Number),
         tools_list_chars: expect.any(Number),
       },
@@ -144,11 +144,13 @@ describe("AI tool optimization", () => {
 
   it("trims repetitive schema and description text for high-value tools", () => {
     const toolsList = getToolsListResult();
+    const listTransactions = toolsList.tools.find((tool) => tool.name === "ynab_list_transactions");
     const searchTransactions = toolsList.tools.find((tool) => tool.name === "ynab_search_transactions");
     const financialHealthCheck = toolsList.tools.find((tool) => tool.name === "ynab_get_financial_health_check");
     const budgetHealth = toolsList.tools.find((tool) => tool.name === "ynab_get_budget_health_summary");
     const cashFlow = toolsList.tools.find((tool) => tool.name === "ynab_get_cash_flow_summary");
     const monthlyReview = toolsList.tools.find((tool) => tool.name === "ynab_get_monthly_review");
+    const spendingSummary = toolsList.tools.find((tool) => tool.name === "ynab_get_spending_summary");
     const upcomingObligations = toolsList.tools.find((tool) => tool.name === "ynab_get_upcoming_obligations");
 
     expect(searchTransactions?.inputSchema).toMatchObject({
@@ -164,8 +166,17 @@ describe("AI tool optimization", () => {
       properties: {
         planId: { description: "Plan ID (uses env default)" },
         month: { description: "Month (ISO or 'current')" },
+        format: { description: "Output format. Prefer compact for token efficiency; use prose only when a readable narrative is explicitly needed." },
       },
     });
+    expect(spendingSummary?.inputSchema).toMatchObject({
+      properties: {
+        format: { description: "Output format. Prefer compact for token efficiency; use prose only when a readable narrative is explicitly needed." },
+      },
+    });
+    expect(listTransactions?.description).toBe(
+      "Lists transactions for bounded row inspection after summaries or search narrow the scope. Defaults to a compact projected page; prefer ynab_search_transactions or financial summary tools first.",
+    );
     expect(budgetHealth?.description).toBe("Budget health summary with funds available, overspending, underfunding, and assigned vs spent.");
     expect(cashFlow?.description).toBe("Cash flow summary with inflow, outflow, net flow, and assigned vs spent.");
     expect(monthlyReview?.description).toBe("Monthly review with income, cash flow, budget health, top spending, and notable changes.");
@@ -176,12 +187,12 @@ describe("AI tool optimization", () => {
     const metrics = getRemoteBootstrapMetrics("https://mcp.example.com/mcp/resources/");
 
     expect(metrics).toEqual({
-      tool_count: 47,
+      tool_count: 51,
       tools_list_bytes: expect.any(Number),
-      remote_resources_count: 47,
+      remote_resources_count: 54,
       remote_resources_list_bytes: expect.any(Number),
       remote_bootstrap_bytes: expect.any(Number),
-      legacy_resources_count: 94,
+      legacy_resources_count: 105,
       legacy_resources_list_bytes: expect.any(Number),
       legacy_bootstrap_bytes: expect.any(Number),
     });
