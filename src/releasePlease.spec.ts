@@ -61,6 +61,8 @@ describe("release-please automation", () => {
     expect(workflow).toContain("googleapis/release-please-action@v4");
     expect(workflow).toContain("config-file: .release-please-config.json");
     expect(workflow).toContain("manifest-file: .release-please-manifest.json");
+    expect(workflow).toContain("issues: write");
+    expect(workflow).not.toContain("skip-labeling: true");
   });
 
   it("keeps the release-please workflow focused on creating releases without dispatching follow-up checks", () => {

@@ -26,10 +26,10 @@ export function getPackageInfo(): PackageInfo {
       throw new Error("package.json must contain string name and version fields");
     }
 
-    cachedPackageInfo = {
+    cachedPackageInfo = Object.freeze({
       name,
       version,
-    };
+    });
   }
 
   return cachedPackageInfo;

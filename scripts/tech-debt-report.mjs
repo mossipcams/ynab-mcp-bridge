@@ -51,7 +51,7 @@ function runJson(command, args) {
 }
 
 function normalizeRelativePath(relativePath) {
-  return relativePath.split(path.sep).join("/");
+  return relativePath.replaceAll("\\", "/");
 }
 
 export function isRepoOwnedCodePath(relativePath) {

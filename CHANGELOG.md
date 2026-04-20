@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.3](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.17.2...ynab-mcp-bridge-v0.17.3) (2026-04-17)
+
+
+### Bug Fixes
+
+* align oauth refresh behavior with upstream support ([631d85d](https://github.com/mossipcams/ynab-mcp-bridge/commit/631d85ddf7bef284e9e5c927abcb6c578a2bed94))
+* align ynab 4.1.0 dependency update ([c64a6fe](https://github.com/mossipcams/ynab-mcp-bridge/commit/c64a6fe275b2bca2247662395af1da5b95ccb941))
+
+
+### Reverts
+
+* roll back release 0.17.3 metadata ([79d3866](https://github.com/mossipcams/ynab-mcp-bridge/commit/79d3866a07bb0e600cfdc9d7c262b5f40c744383))
+
+## [0.17.2](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.17.1...ynab-mcp-bridge-v0.17.2) (2026-04-10)
+
+
+### Bug Fixes
+
+* restore release-please labeling lifecycle ([#260](https://github.com/mossipcams/ynab-mcp-bridge/issues/260)) ([6012a81](https://github.com/mossipcams/ynab-mcp-bridge/commit/6012a81485133dccae00b488905e48181005ceba))
+
+## [0.17.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.17.0...ynab-mcp-bridge-v0.17.1) (2026-04-08)
+
+
+### Bug Fixes
+
+* harden weak tests and close defect findings ([1107344](https://github.com/mossipcams/ynab-mcp-bridge/commit/11073445b43c8cc578bdd0895df28155b8859e47))
+
+## [0.17.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.16.0...ynab-mcp-bridge-v0.17.0) (2026-04-03)
+
+
+### Features
+
+* organize MCP tools into feature slices ([#251](https://github.com/mossipcams/ynab-mcp-bridge/issues/251)) ([8575f73](https://github.com/mossipcams/ynab-mcp-bridge/commit/8575f73842c1ffaf71be7765b2f0e1158ff33de9))
+
+
+### Bug Fixes
+
+* skip release-please labeling ([#253](https://github.com/mossipcams/ynab-mcp-bridge/issues/253)) ([1c88d8e](https://github.com/mossipcams/ynab-mcp-bridge/commit/1c88d8edf5f7df0a181d1801c0343fc2233d4e42))
+
 ## [0.16.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.15.25...ynab-mcp-bridge-v0.16.0) (2026-04-02)
 
 
