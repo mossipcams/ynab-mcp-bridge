@@ -44,7 +44,9 @@ export const inputSchema = {
   month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("Month (ISO or 'current')"),
   asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Anchor date (ISO)"),
   topN: z.number().int().min(1).max(10).default(5).describe("Top N results"),
-  format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
+  format: z.enum(["compact", "pretty", "prose"]).default("compact").describe(
+    "Output format. Prefer compact for token efficiency; use prose only when a readable narrative is explicitly needed.",
+  ),
 };
 
 function risk(code: string, severity: "high" | "medium" | "low", penalty: number): Risk {

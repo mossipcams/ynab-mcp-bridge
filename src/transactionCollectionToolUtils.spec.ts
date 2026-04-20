@@ -43,16 +43,16 @@ describe("transaction collection tool utils", () => {
 
     expect(result.isError).not.toBe(true);
     expect(readResult(result)).toEqual({
+      limit: 20,
+      offset: 0,
+      returned_count: 1,
+      has_more: false,
       transactions: [
         {
-          id: "txn-visible",
           date: "2026-03-05",
           amount: "-2.50",
           payee_name: "Grocer",
           category_name: "Groceries",
-          account_name: "Checking",
-          approved: true,
-          cleared: "cleared",
         },
       ],
       transaction_count: 1,

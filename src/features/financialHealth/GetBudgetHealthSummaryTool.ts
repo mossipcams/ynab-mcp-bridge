@@ -14,7 +14,9 @@ export const inputSchema = {
   planId: z.string().optional().describe("Plan ID (uses env default)"),
   month: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("Month (ISO or 'current')"),
   topN: z.number().int().min(1).max(10).default(5).describe("Top N results"),
-  format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
+  format: z.enum(["compact", "pretty", "prose"]).default("compact").describe(
+    "Output format. Prefer compact for token efficiency; use prose only when a readable narrative is explicitly needed.",
+  ),
 };
 
 export async function execute(

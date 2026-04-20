@@ -9,7 +9,7 @@ export const inputSchema = {
     planId: z.string().optional().describe("Plan ID (uses env default)"),
     asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Anchor date (ISO)"),
     topN: z.number().int().min(1).max(10).default(5).describe("Top N results"),
-    format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
+    format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format. Prefer compact for token efficiency; use prose only when a readable narrative is explicitly needed."),
 };
 const WINDOW_DAYS = [7, 14, 30];
 function getTodayIsoDate() {

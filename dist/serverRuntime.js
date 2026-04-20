@@ -8,6 +8,9 @@ import { normalizeObjectSchema, } from "@modelcontextprotocol/sdk/server/zod-com
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { assertYnabConfig } from "./config.js";
+import * as GetBudgetHealthSummaryTool from "./features/financialHealth/GetBudgetHealthSummaryTool.js";
+import * as GetFinancialSnapshotTool from "./features/financialHealth/GetFinancialSnapshotTool.js";
+import * as GetUpcomingObligationsTool from "./features/financialHealth/GetUpcomingObligationsTool.js";
 import { accountsToolCatalog, financialHealthToolCatalog, metaToolCatalog, moneyMovementsToolCatalog, payeesToolCatalog, plansToolCatalog, transactionsToolCatalog, } from "./features/index.js";
 import { logAppEvent } from "./logger.js";
 import { getPackageInfo } from "./packageInfo.js";
@@ -75,6 +78,15 @@ const discoveryInvocationGuidanceByToolName = {
 };
 function getToolDiscoveryUri(toolName) {
     return `ynab-tool://${toolName}`;
+}
+function getCurrentFinancialSnapshotResourceUri() {
+    return "ynab-summary://financial-snapshot/current";
+}
+function getCurrentBudgetHealthResourceUri() {
+    return "ynab-summary://budget-health/current";
+}
+function getCurrentUpcomingObligationsResourceUri() {
+    return "ynab-summary://upcoming-obligations/current";
 }
 function getDiscoveryResourceBaseUrl(baseUrl) {
     if (!baseUrl) {
@@ -182,6 +194,37 @@ function getDiscoveryCatalog(options = {}) {
 export function getDiscoveryResourceSummaries(options = {}) {
     return getDiscoveryCatalog(options).summaries;
 }
+function getDataResourceSummaries() {
+    return [
+        {
+            description: "Compact current financial snapshot resource for summary-first reads.",
+            name: "ynab_current_financial_snapshot",
+            read: async (api) => {
+                return await GetFinancialSnapshotTool.execute({ month: "current" }, api);
+            },
+            title: "Current Financial Snapshot",
+            uri: getCurrentFinancialSnapshotResourceUri(),
+        },
+        {
+            description: "Compact current budget health resource for summary-first reads.",
+            name: "ynab_current_budget_health",
+            read: async (api) => {
+                return await GetBudgetHealthSummaryTool.execute({ month: "current", format: "compact" }, api);
+            },
+            title: "Current Budget Health",
+            uri: getCurrentBudgetHealthResourceUri(),
+        },
+        {
+            description: "Compact current upcoming obligations resource for summary-first reads.",
+            name: "ynab_current_upcoming_obligations",
+            read: async (api) => {
+                return await GetUpcomingObligationsTool.execute({ format: "compact" }, api);
+            },
+            title: "Current Upcoming Obligations",
+            uri: getCurrentUpcomingObligationsResourceUri(),
+        },
+    ];
+}
 function getToolInputJsonSchema(inputSchema) {
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- MCP tool definitions provide raw Zod shapes or schemas consumed by the SDK helper.
     const schema = inputSchema;
@@ -257,7 +300,10 @@ export function getRemoteBootstrapMetrics(discoveryResourceBaseUrl) {
 }
 export function getResourcesListResult(options = {}) {
     return {
-        resources: getDiscoveryResourceSummaries(options).map((resource) => ({
+        resources: [
+            ...getDiscoveryResourceSummaries(options),
+            ...getDataResourceSummaries(),
+        ].map((resource) => ({
             uri: resource.uri,
             name: resource.name,
             title: resource.title,
@@ -321,7 +367,7 @@ export function registerServerTools(registrar, api) {
     }
     return registeredToolNames;
 }
-function registerServerResources(server, options = {}) {
+function registerServerResources(server, api, options = {}) {
     const registeredResourceUris = [];
     for (const { description, name, title, uri } of getDiscoveryResourceSummaries(options)) {
         server.registerResource(name, uri, {
@@ -363,6 +409,48 @@ function registerServerResources(server, options = {}) {
         });
         registeredResourceUris.push(uri);
     }
+    for (const { description, name, read, title, uri } of getDataResourceSummaries()) {
+        server.registerResource(name, uri, {
+            title,
+            description,
+            mimeType: "application/json",
+        }, async () => {
+            logAppEvent("mcp", "resource.read.started", {
+                ...getRequestLogFields(),
+                resourceName: name,
+                resourceUri: uri,
+            });
+            try {
+                const result = await read(api);
+                const textContent = result.content.find((content) => content.type === "text");
+                const text = textContent?.text ?? "{}";
+                logAppEvent("mcp", "resource.read.succeeded", {
+                    ...getRequestLogFields(),
+                    resourceName: name,
+                    resourceUri: uri,
+                });
+                return {
+                    contents: [
+                        {
+                            uri,
+                            mimeType: "application/json",
+                            text,
+                        },
+                    ],
+                };
+            }
+            catch (error) {
+                logAppEvent("mcp", "resource.read.failed", {
+                    ...getRequestLogFields(),
+                    error,
+                    resourceName: name,
+                    resourceUri: uri,
+                });
+                throw error;
+            }
+        });
+        registeredResourceUris.push(uri);
+    }
     return registeredResourceUris;
 }
 export function createServer(config, api = createYnabApi(config), options = {}) {
@@ -371,6 +459,6 @@ export function createServer(config, api = createYnabApi(config), options = {}) 
     const configuredApi = attachYnabApiRuntimeContext(api, normalizedConfig);
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- McpServer structurally satisfies the runtime registrar contract.
     registerServerTools(server, configuredApi);
-    registerServerResources(server, options);
+    registerServerResources(server, configuredApi, options);
     return server;
 }

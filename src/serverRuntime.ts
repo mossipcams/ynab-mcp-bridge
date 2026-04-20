@@ -14,6 +14,9 @@ import { LATEST_PROTOCOL_VERSION, type CallToolResult } from "@modelcontextproto
 import type { API } from "ynab";
 
 import { assertYnabConfig, type YnabConfig } from "./config.js";
+import * as GetBudgetHealthSummaryTool from "./features/financialHealth/GetBudgetHealthSummaryTool.js";
+import * as GetFinancialSnapshotTool from "./features/financialHealth/GetFinancialSnapshotTool.js";
+import * as GetUpcomingObligationsTool from "./features/financialHealth/GetUpcomingObligationsTool.js";
 import {
   accountsToolCatalog,
   financialHealthToolCatalog,
@@ -78,6 +81,15 @@ type DiscoveryResourceSummary = {
   description: string;
   mimeType?: string;
   name: string;
+  title: string;
+  uri: string;
+};
+
+type DataResourceSummary = {
+  description: string;
+  mimeType?: string;
+  name: string;
+  read: (api: API) => Promise<CallToolResult> | CallToolResult;
   title: string;
   uri: string;
 };
@@ -194,6 +206,18 @@ const discoveryInvocationGuidanceByToolName: Partial<Record<string, DiscoveryInv
 
 function getToolDiscoveryUri(toolName: string): string {
   return `ynab-tool://${toolName}`;
+}
+
+function getCurrentFinancialSnapshotResourceUri(): string {
+  return "ynab-summary://financial-snapshot/current";
+}
+
+function getCurrentBudgetHealthResourceUri(): string {
+  return "ynab-summary://budget-health/current";
+}
+
+function getCurrentUpcomingObligationsResourceUri(): string {
+  return "ynab-summary://upcoming-obligations/current";
 }
 
 function getDiscoveryResourceBaseUrl(baseUrl: string | undefined): string | undefined {
@@ -328,6 +352,38 @@ export function getDiscoveryResourceSummaries(options: ServerRuntimeOptions = {}
   return getDiscoveryCatalog(options).summaries;
 }
 
+function getDataResourceSummaries(): DataResourceSummary[] {
+  return [
+    {
+      description: "Compact current financial snapshot resource for summary-first reads.",
+      name: "ynab_current_financial_snapshot",
+      read: async (api) => {
+        return await GetFinancialSnapshotTool.execute({ month: "current" }, api);
+      },
+      title: "Current Financial Snapshot",
+      uri: getCurrentFinancialSnapshotResourceUri(),
+    },
+    {
+      description: "Compact current budget health resource for summary-first reads.",
+      name: "ynab_current_budget_health",
+      read: async (api) => {
+        return await GetBudgetHealthSummaryTool.execute({ month: "current", format: "compact" }, api);
+      },
+      title: "Current Budget Health",
+      uri: getCurrentBudgetHealthResourceUri(),
+    },
+    {
+      description: "Compact current upcoming obligations resource for summary-first reads.",
+      name: "ynab_current_upcoming_obligations",
+      read: async (api) => {
+        return await GetUpcomingObligationsTool.execute({ format: "compact" }, api);
+      },
+      title: "Current Upcoming Obligations",
+      uri: getCurrentUpcomingObligationsResourceUri(),
+    },
+  ];
+}
+
 function getToolInputJsonSchema(
   inputSchema: unknown,
 ): Record<string, unknown> {
@@ -432,7 +488,10 @@ export function getRemoteBootstrapMetrics(discoveryResourceBaseUrl: string): Rem
 
 export function getResourcesListResult(options: ServerRuntimeOptions = {}): ResourcesListResult {
   return {
-    resources: getDiscoveryResourceSummaries(options).map((resource) => ({
+    resources: [
+      ...getDiscoveryResourceSummaries(options),
+      ...getDataResourceSummaries(),
+    ].map((resource) => ({
       uri: resource.uri,
       name: resource.name,
       title: resource.title,
@@ -517,7 +576,7 @@ export function registerServerTools(registrar: ToolRegistrar, api: API): string[
   return registeredToolNames;
 }
 
-function registerServerResources(server: McpServer, options: ServerRuntimeOptions = {}): string[] {
+function registerServerResources(server: McpServer, api: API, options: ServerRuntimeOptions = {}): string[] {
   const registeredResourceUris: string[] = [];
 
   for (const { description, name, title, uri } of getDiscoveryResourceSummaries(options)) {
@@ -569,6 +628,57 @@ function registerServerResources(server: McpServer, options: ServerRuntimeOption
     registeredResourceUris.push(uri);
   }
 
+  for (const { description, name, read, title, uri } of getDataResourceSummaries()) {
+    server.registerResource(
+      name,
+      uri,
+      {
+        title,
+        description,
+        mimeType: "application/json",
+      },
+      async () => {
+        logAppEvent("mcp", "resource.read.started", {
+          ...getRequestLogFields(),
+          resourceName: name,
+          resourceUri: uri,
+        });
+
+        try {
+          const result = await read(api);
+          const textContent = result.content.find((content) => content.type === "text");
+          const text = textContent?.text ?? "{}";
+
+          logAppEvent("mcp", "resource.read.succeeded", {
+            ...getRequestLogFields(),
+            resourceName: name,
+            resourceUri: uri,
+          });
+
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: "application/json",
+                text,
+              },
+            ],
+          };
+        } catch (error) {
+          logAppEvent("mcp", "resource.read.failed", {
+            ...getRequestLogFields(),
+            error,
+            resourceName: name,
+            resourceUri: uri,
+          });
+          throw error;
+        }
+      },
+    );
+
+    registeredResourceUris.push(uri);
+  }
+
   return registeredResourceUris;
 }
 
@@ -583,7 +693,7 @@ export function createServer(
 
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- McpServer structurally satisfies the runtime registrar contract.
   registerServerTools(server as unknown as ToolRegistrar, configuredApi);
-  registerServerResources(server, options);
+  registerServerResources(server, configuredApi, options);
 
   return server;
 }

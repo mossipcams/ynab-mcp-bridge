@@ -9,7 +9,7 @@ export const inputSchema = {
     planId: z.string().optional().describe("Plan ID (uses env default)"),
     fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("Start month (ISO or 'current')"),
     toMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).optional().describe("End month (defaults to start)"),
-    format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
+    format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format. Prefer compact for token efficiency; use prose only when a readable narrative is explicitly needed."),
 };
 function toMonthKey(date) {
     return `${date.slice(0, 7)}-01`;
