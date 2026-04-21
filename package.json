@@ -48,7 +48,8 @@
     "test:ci": "mkdir -p artifacts/test-results && vitest run --reporter=default --reporter=junit --outputFile.junit=./artifacts/test-results/vitest-junit.xml",
     "test:watch": "vitest watch",
     "test:coverage": "vitest run --coverage",
-    "preflight": "npm run test:ci && npm run test:coverage && npm run lint:deps && npm run lint && npm run typecheck && npm run lint:unused && npm run build",
+    "pr:ci": "node ./scripts/local-ci.mjs",
+    "preflight": "npm run pr:ci",
     "test:mutation": "stryker run"
   },
   "dependencies": {
