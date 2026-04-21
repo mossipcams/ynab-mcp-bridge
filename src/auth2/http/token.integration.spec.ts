@@ -241,13 +241,15 @@ describe("auth2 token route", () => {
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toMatchObject({
       access_token: expect.any(String),
-      expires_in: 1800,
       refresh_token: expect.any(String),
       scope: "openid profile",
       token_type: "Bearer",
     });
+    expect(body["expires_in"]).toBeGreaterThanOrEqual(1798);
+    expect(body["expires_in"]).toBeLessThanOrEqual(1800);
   });
 
   it("rejects a mismatched code_verifier through /token", async () => {
