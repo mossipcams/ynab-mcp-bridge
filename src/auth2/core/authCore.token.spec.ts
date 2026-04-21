@@ -102,6 +102,54 @@ describe("auth core token exchange", () => {
     });
   });
 
+  it("always issues a downstream refresh token even when the upstream exchange did not return one", async () => {
+    let nextId = 0;
+    const core = createAuthCore({
+      config: createConfig(),
+      createId: () => `generated-${++nextId}`,
+      now: () => 1_700_000_000_000,
+      provider: {
+        buildAuthorizationUrl(input) {
+          return `https://id.example.com/oauth/authorize?state=${encodeURIComponent(input.state)}`;
+        },
+        async exchangeAuthorizationCode() {
+          return {
+            access_token: "provider-access-token",
+            expires_in: 1800,
+            subject: "user-123",
+            token_type: "Bearer",
+          };
+        },
+      },
+      store: createInMemoryAuthStore(),
+      upstreamPkce: {
+        createPair() {
+          return {
+            challenge: "upstream-challenge",
+            method: "S256",
+            verifier: "upstream-verifier",
+          };
+        },
+      },
+    });
+
+    const localAuthorizationCode = await createAuthorizationCode(core);
+    const tokens = await core.exchangeAuthorizationCode({
+      clientId: "client-a",
+      code: localAuthorizationCode,
+      codeVerifier: "challenge-verifier",
+      redirectUri: "https://claude.ai/oauth/callback",
+    });
+
+    expect(tokens).toEqual({
+      access_token: "generated-4",
+      expires_in: 1800,
+      refresh_token: "generated-6",
+      scope: "openid profile",
+      token_type: "Bearer",
+    });
+  });
+
   it("rejects a reused authorization code", async () => {
     let nextId = 0;
     const core = createAuthCore({

@@ -6,6 +6,7 @@ import * as GetEmergencyFundCoverageTool from "./features/financialHealth/GetEme
 import * as GetFinancialHealthCheckTool from "./features/financialHealth/GetFinancialHealthCheckTool.js";
 import * as GetRecurringExpenseSummaryTool from "./features/financialHealth/GetRecurringExpenseSummaryTool.js";
 import * as GetSpendingAnomaliesTool from "./features/financialHealth/GetSpendingAnomaliesTool.js";
+import * as GetUpdatedAnomaliesTool from "./features/financialHealth/GetUpdatedAnomaliesTool.js";
 
 function parseText(result: Awaited<ReturnType<typeof GetFinancialHealthCheckTool.execute>>) {
   return JSON.parse(result.content[0].text);
@@ -546,6 +547,7 @@ describe("financial diagnostics tools", () => {
     );
 
     expect(parseText(result as any)).toEqual({
+      analysis_token: expect.any(String),
       latest_month: "2026-03-01",
       baseline_month_count: 2,
       anomaly_count: 1,
@@ -558,6 +560,101 @@ describe("financial diagnostics tools", () => {
           change_percent: "136.36",
         },
       ],
+    });
+  });
+
+  it("returns only anomaly deltas relative to a prior anomaly analysis token", async () => {
+    const api = {
+      months: {
+        getPlanMonth: vi.fn(async (_planId: string, month: string) => {
+          if (month === "2026-01-01") {
+            return {
+              data: {
+                month: {
+                  month,
+                  categories: [
+                    { id: "cat-1", name: "Dining Out", deleted: false, hidden: false, activity: -100000 },
+                  ],
+                },
+              },
+            };
+          }
+
+          if (month === "2026-02-01") {
+            return {
+              data: {
+                month: {
+                  month,
+                  categories: [
+                    { id: "cat-1", name: "Dining Out", deleted: false, hidden: false, activity: -120000 },
+                    { id: "cat-2", name: "Transport", deleted: false, hidden: false, activity: -20000 },
+                  ],
+                },
+              },
+            };
+          }
+
+          if (month === "2026-03-01") {
+            return {
+              data: {
+                month: {
+                  month,
+                  categories: [
+                    { id: "cat-1", name: "Dining Out", deleted: false, hidden: false, activity: -260000 },
+                  ],
+                },
+              },
+            };
+          }
+
+          return {
+            data: {
+              month: {
+                month: "2026-04-01",
+                categories: [
+                  { id: "cat-1", name: "Dining Out", deleted: false, hidden: false, activity: -180000 },
+                  { id: "cat-2", name: "Transport", deleted: false, hidden: false, activity: -90000 },
+                ],
+              },
+            },
+          };
+        }),
+      },
+    };
+
+    const initial = parseText(await GetSpendingAnomaliesTool.execute(
+      { planId: "plan-1", latestMonth: "2026-03-01", baselineMonths: 2, topN: 5 },
+      api as any,
+    ) as any);
+
+    const updated = parseText(await GetUpdatedAnomaliesTool.execute(
+      {
+        analysisToken: initial.analysis_token,
+        latestMonth: "2026-04-01",
+        baselineMonths: 2,
+        topN: 5,
+      } as any,
+      api as any,
+    ) as any);
+
+    expect(updated).toEqual({
+      previous_analysis_token: initial.analysis_token,
+      analysis_token: expect.any(String),
+      latest_month: "2026-04-01",
+      current_anomaly_count: 1,
+      added_anomalies: [
+        {
+          category_id: "cat-2",
+          category_name: "Transport",
+          latest_spent: "90.00",
+          baseline_average: "10.00",
+          change_percent: "800.00",
+        },
+      ],
+      removed_anomaly_ids: [
+        "cat-1",
+      ],
+      changed_anomalies: [],
     });
   });
 

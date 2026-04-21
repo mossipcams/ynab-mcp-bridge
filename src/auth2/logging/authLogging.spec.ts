@@ -130,6 +130,10 @@ describe("auth2 logging", () => {
       redirectUri: "https://claude.ai/oauth/callback",
     });
 
+    if (typeof exchanged.refresh_token !== "string") {
+      throw new Error("Expected refresh_token from the authorization-code exchange.");
+    }
+
     await core.exchangeRefreshToken({
       clientId: "client-a",
       refreshToken: exchanged.refresh_token,
@@ -175,5 +179,69 @@ describe("auth2 logging", () => {
     expect(loggedText).not.toContain("generated-4");
     expect(loggedText).not.toContain("generated-5");
     expect(loggedText).not.toContain("downstream-state-secret");
+  });
+
+  it("emits a structured refresh success event without leaking secret material when upstream has no refresh token", async () => {
+    const sink = createBufferedDestination();
+    setLoggerDestinationForTests(sink.destination);
+
+    const store = createInMemoryAuthStore();
+    store.saveGrant({
+      clientId: "client-a",
+      grantId: "grant-a",
+      scopes: ["openid", "profile"],
+      subject: "user-123",
+      transactionId: "transaction-a",
+      upstreamTokens: {},
+    });
+    store.saveRefreshToken({
+      active: true,
+      expiresAt: 1_700_000_100_000,
+      grantId: "grant-a",
+      refreshToken: "downstream-refresh-token-secret",
+    });
+
+    const core = createAuthCore({
+      config: createConfig(),
+      createId: () => "unused-id",
+      now: () => 1_700_000_000_000,
+      provider: {
+        buildAuthorizationUrl(input) {
+          return `https://id.example.com/oauth/authorize?state=${encodeURIComponent(input.state)}`;
+        },
+      },
+      store,
+      upstreamPkce: {
+        createPair() {
+          return {
+            challenge: "upstream-challenge-secret",
+            method: "S256",
+            verifier: "upstream-verifier-secret",
+          };
+        },
+      },
+    });
+
+    await core.exchangeRefreshToken({
+      clientId: "client-a",
+      refreshToken: "downstream-refresh-token-secret",
+    });
+
+    expect(sink.readEntries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: "auth.refresh.exchange.started",
+        scope: "auth2",
+        clientId: "client-a",
+      }),
+      expect.objectContaining({
+        event: "auth.refresh.exchange.succeeded",
+        scope: "auth2",
+        clientId: "client-a",
+      }),
+    ]));
+
+    const loggedText = sink.readText();
+    expect(loggedText).not.toContain("downstream-refresh-token-secret");
+    expect(loggedText).not.toContain("upstream-verifier-secret");
   });
 });

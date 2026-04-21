@@ -2591,7 +2591,7 @@ describe("startHttpServer", () => {
       jsonrpc: "2.0",
       error: {
         code: -32000,
-        message: "Bad Request: Mcp-Session-Id header must be a single value",
+        message: "Bad Request: Mcp-Session-Id header must be a single non-empty value",
       },
       id: null,
     });
@@ -2746,7 +2746,7 @@ describe("startHttpServer", () => {
       jsonrpc: "2.0",
       error: {
         code: -32000,
-        message: "Bad Request: Mcp-Session-Id header must be a single value",
+        message: "Bad Request: Mcp-Session-Id header must be a single non-empty value",
       },
       id: null,
     });

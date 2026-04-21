@@ -168,34 +168,22 @@ describe("transaction tool family", () => {
 
     const expectedTransactions = [
       {
-        id: "txn-newest",
         date: "2024-04-01",
         amount: "4.00",
         payee_name: "Newest",
         category_name: "Dining",
-        account_name: "Checking",
-        approved: false,
-        cleared: "uncleared",
       },
       {
-        id: "txn-middle",
         date: "2024-03-05",
         amount: "3.00",
         payee_name: "Middle",
         category_name: "Fuel",
-        account_name: "Savings",
-        approved: true,
-        cleared: "cleared",
       },
       {
-        id: "txn-older",
         date: "2024-02-10",
         amount: "1.00",
         payee_name: "Older",
         category_name: "Groceries",
-        account_name: "Checking",
-        approved: true,
-        cleared: "cleared",
       },
     ];
 
@@ -220,6 +208,10 @@ describe("transaction tool family", () => {
       expect(result).toEqual({
         transactions: expectedTransactions,
         transaction_count: 3,
+        returned_count: 3,
+        offset: 0,
+        limit: 20,
+        has_more: false,
       });
     }
   });
@@ -290,7 +282,7 @@ describe("transaction tool family", () => {
     expect(result).toMatchObject({
       transactions: [
         expect.objectContaining({
-          id: "txn-1",
+          date: "2024-04-03",
           amount: "1.00",
         }),
       ],

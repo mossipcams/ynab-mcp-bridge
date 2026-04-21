@@ -223,16 +223,13 @@ function getSessionId(req: Pick<Request, "headers">) {
     return undefined;
   }
 
-  const values = sessionId
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const rawValue = sessionId.trim();
 
-  if (values.length !== 1) {
+  if (!rawValue || rawValue.includes(",")) {
     return undefined;
   }
 
-  return values[0];
+  return rawValue;
 }
 
 function getNormalizedUserAgent(req: Pick<Request, "headers">) {
@@ -613,21 +610,22 @@ async function logManagedToolDispatchOutcome(
   logHttpDebug("tool.dispatch.absent", logDetails);
 }
 
-function hasMultipleSessionHeaderValues(req: Pick<Request, "headers">) {
+function hasInvalidSessionHeaderValue(req: Pick<Request, "headers">) {
   const sessionId = req.headers["mcp-session-id"];
 
   if (Array.isArray(sessionId)) {
-    return sessionId.length > 1 || sessionId.some((value) => value.includes(","));
+    return sessionId.length !== 1 ||
+      typeof sessionId[0] !== "string" ||
+      !sessionId[0].trim() ||
+      sessionId[0].includes(",");
   }
 
   if (typeof sessionId !== "string") {
     return false;
   }
 
-  return sessionId
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean).length > 1;
+  const rawValue = sessionId.trim();
+  return !rawValue || rawValue.includes(",");
 }
 
 function isJsonParseError(error: unknown) {
@@ -721,7 +719,7 @@ async function resolveRequest(
   req: Request,
   createRequest: () => Promise<ManagedRequest>,
 ): Promise<RequestResolution> {
-  if (hasMultipleSessionHeaderValues(req)) {
+  if (hasInvalidSessionHeaderValue(req)) {
     return {
       status: "invalid-session-header",
     };
@@ -743,7 +741,7 @@ function writeRequestResolution(res: Response, resolution: Exclude<RequestResolu
 }>) {
   switch (resolution.status) {
     case "invalid-session-header":
-      writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single value");
+      writeJsonRpcError(res, 400, -32000, "Bad Request: Mcp-Session-Id header must be a single non-empty value");
       return;
   }
 }
@@ -809,7 +807,7 @@ export function installMcpPostRoute(options: InstallMcpPostRouteOptions) {
     }
 
     const parsedBody: unknown = req.body;
-    if (hasMultipleSessionHeaderValues(req)) {
+    if (hasInvalidSessionHeaderValue(req)) {
       logHttpDebug("request.rejected", {
         ...getRequestDebugDetails(req, getRequestAuthDebugOptions(req)),
         reason: "invalid-session-header",

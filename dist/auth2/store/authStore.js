@@ -123,6 +123,7 @@ function persistGrantRecord(secret, record) {
         scopes: record.scopes,
         subject: record.subject,
         transactionId: record.transactionId,
+        ...(record.upstreamAccessExpiresAt === undefined ? {} : { upstreamAccessExpiresAt: record.upstreamAccessExpiresAt }),
         upstreamTokensSealed: sealJson(secret, record.upstreamTokens),
     };
 }
@@ -134,6 +135,7 @@ function hydrateGrantRecord(secret, record) {
         scopes: record.scopes,
         subject: record.subject,
         transactionId: record.transactionId,
+        ...(record.upstreamAccessExpiresAt === undefined ? {} : { upstreamAccessExpiresAt: record.upstreamAccessExpiresAt }),
         upstreamTokens: unsealJson(secret, record.upstreamTokensSealed),
     };
 }

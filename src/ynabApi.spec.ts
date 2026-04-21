@@ -62,6 +62,78 @@ describe("createYnabApi rate limiting", () => {
     expect(fetchApi).toHaveBeenCalledTimes(2);
   });
 
+  it("falls back to the configured retry delay when retry-after is malformed", async () => {
+    const fetchApi = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 429,
+          headers: {
+            "retry-after": "not-a-valid-delay",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        }),
+      );
+    const api = createYnabApi("token-a", {
+      fetchApi,
+      rateLimiter: new SlidingWindowRateLimiter({
+        maxRequests: 200,
+        windowMs: 60 * 60 * 1000,
+      }),
+      retryDelayMs: 750,
+    }) as any;
+
+    let settled = false;
+    const request = api._configuration.fetchApi("https://api.ynab.com/v1/plans", {
+      method: "GET",
+    }).then((response: Response) => {
+      settled = true;
+      return response;
+    });
+
+    await vi.advanceTimersByTimeAsync(749);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const response = await request;
+
+    expect(response.status).toBe(200);
+    expect(fetchApi).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the final 429 response when the retry limit is exhausted", async () => {
+    const fetchApi = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 429 }))
+      .mockResolvedValueOnce(new Response(null, { status: 429 }));
+    const api = createYnabApi("token-a", {
+      fetchApi,
+      rateLimiter: new SlidingWindowRateLimiter({
+        maxRequests: 200,
+        windowMs: 60 * 60 * 1000,
+      }),
+      retryDelayMs: 100,
+      retryLimit: 1,
+    }) as any;
+
+    const request = api._configuration.fetchApi("https://api.ynab.com/v1/plans", {
+      method: "GET",
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+    const response = await request;
+
+    expect(response.status).toBe(429);
+    expect(fetchApi).toHaveBeenCalledTimes(2);
+  });
+
   it("attaches the explicit plan config to the API runtime context", () => {
     const api = createYnabApi({
       apiToken: " token-a ",

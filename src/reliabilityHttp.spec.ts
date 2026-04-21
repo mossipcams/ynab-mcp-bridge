@@ -67,6 +67,14 @@ describe("reliability http", () => {
     });
   });
 
+  it("rejects value flags when the next token is another flag instead of a value", () => {
+    expect(() => parseReliabilityHttpArgs([
+      "--url",
+      "--requests",
+      "2",
+    ])).toThrow("Expected --url to be followed by a value.");
+  });
+
   it("accepts an explicit ephemeral port and surfaces actionable baseline artifact read errors", async () => {
     expect(parseReliabilityHttpArgs([
       "--port",
@@ -120,6 +128,67 @@ describe("reliability http", () => {
     expect(exitCode).toBe(1);
     expect(lines.join("\n")).toContain("Failed to read baseline artifact");
     expect(lines.join("\n")).toContain("/tmp/does-not-exist-reliability-baseline.json");
+  });
+
+  it("treats malformed baseline artifact schema as a baseline read error", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "ynab-mcp-reliability-"));
+    const baselinePath = path.join(tempDir, "baseline.json");
+    cleanups.push(async () => {
+      await rm(tempDir, { force: true, recursive: true });
+    });
+
+    await writeFile(baselinePath, JSON.stringify({
+      profile: {
+        name: "smoke",
+      },
+      summary: {},
+    }, null, 2));
+
+    const lines: string[] = [];
+    const exitCode = await executeReliabilityHttpCli([
+      "--baseline-artifact",
+      baselinePath,
+    ], {
+      runScenario: vi.fn().mockResolvedValue({
+        results: [],
+        target: {
+          mode: "local",
+          url: "http://127.0.0.1:3000/mcp",
+        },
+        summary: {
+          passed: true,
+          maxErrorRate: 0,
+          errorRate: 0,
+          failureGroups: [],
+          totals: {
+            attempts: 0,
+            failed: 0,
+            succeeded: 0,
+          },
+          latencyMs: {
+            min: 0,
+            max: 0,
+            average: 0,
+            p50: 0,
+            p95: 0,
+            p99: 0,
+          },
+          thresholds: {
+            maxErrorRate: { actual: 0, passed: true, target: 0 },
+            maxP95LatencyMs: { actual: 0, passed: true, target: 250 },
+            maxP99LatencyMs: { actual: 0, passed: true, target: 500 },
+          },
+          failures: [],
+        },
+      }),
+      writeLine: (line) => {
+        lines.push(line);
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(lines.join("\n")).toContain("Failed to read baseline artifact");
+    expect(lines.join("\n")).toContain(baselinePath);
   });
 
   it("runs initialize, tools/list, and ynab_get_mcp_version against a local authless HTTP server", async () => {
@@ -232,6 +301,65 @@ describe("reliability http", () => {
       "tools/list",
       "tools/call:ynab_get_mcp_version",
       "tools/call:ynab_get_budget_health_summary",
+      "close",
+    ]);
+  });
+
+  it("stops the measured sequence after a failed tools/list validation", async () => {
+    const calls: string[] = [];
+    const fakeClient = {
+      async close() {
+        calls.push("close");
+      },
+      async connect(_transport: unknown) {
+        calls.push("connect");
+      },
+      async listTools() {
+        calls.push("tools/list");
+        return {
+          tools: [
+            { name: "ynab_get_budget_health_summary" },
+          ],
+        };
+      },
+      async callTool(input: { name: string }) {
+        calls.push(`tools/call:${input.name}`);
+
+        return {
+          content: [{
+            text: "{\"summary\":true}",
+            type: "text",
+          }],
+        };
+      },
+    };
+
+    const results = await runMeasuredHttpSequence("http://127.0.0.1:4100/mcp", 0, {
+      createClient: () => fakeClient as any,
+      createTransport: () => ({ transport: "fake" }),
+      toolCalls: [
+        {
+          name: "ynab_get_budget_health_summary",
+        },
+      ],
+    });
+
+    expect(results.map((entry) => ({
+      ok: entry.ok,
+      operation: entry.operation,
+    }))).toEqual([
+      {
+        ok: true,
+        operation: "initialize",
+      },
+      {
+        ok: false,
+        operation: "tools/list",
+      },
+    ]);
+    expect(calls).toEqual([
+      "connect",
+      "tools/list",
       "close",
     ]);
   });

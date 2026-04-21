@@ -509,17 +509,17 @@ describe("additional read-only tools", () => {
     expect(parseText(result)).toEqual({
       transactions: [
         {
-          id: "txn-1",
           date: "2026-03-01",
           amount: "-12.50",
           payee_name: "Grocer",
           category_name: "Food",
-          account_name: "Checking",
-          approved: true,
-          cleared: "cleared",
         },
       ],
       transaction_count: 1,
+      returned_count: 1,
+      offset: 0,
+      limit: 20,
+      has_more: false,
     });
   });
 
@@ -636,17 +636,17 @@ describe("additional read-only tools", () => {
     expect(parseText(result)).toEqual({
       transactions: [
         {
-          id: "txn-1",
           date: "2026-03-01",
           amount: "-12.50",
           payee_name: "Grocer",
           category_name: "Food",
-          account_name: "Checking",
-          approved: true,
-          cleared: "cleared",
         },
       ],
       transaction_count: 1,
+      returned_count: 1,
+      offset: 0,
+      limit: 20,
+      has_more: false,
     });
   });
 
@@ -732,17 +732,17 @@ describe("additional read-only tools", () => {
     expect(parseText(result)).toEqual({
       transactions: [
         {
-          id: "txn-1",
           date: "2026-03-01",
           amount: "-12.50",
           payee_name: "Grocer",
           category_name: "Food",
-          account_name: "Checking",
-          approved: true,
-          cleared: "cleared",
         },
       ],
       transaction_count: 1,
+      returned_count: 1,
+      offset: 0,
+      limit: 20,
+      has_more: false,
     });
   });
 
@@ -788,17 +788,17 @@ describe("additional read-only tools", () => {
     expect(parseText(result)).toEqual({
       transactions: [
         {
-          id: "txn-1",
           date: "2026-03-01",
           amount: "-12.50",
           payee_name: "Grocer",
           category_name: "Food",
-          account_name: "Checking",
-          approved: true,
-          cleared: "cleared",
         },
       ],
       transaction_count: 1,
+      returned_count: 1,
+      offset: 0,
+      limit: 20,
+      has_more: false,
     });
   });
 
@@ -844,17 +844,17 @@ describe("additional read-only tools", () => {
     expect(parseText(result)).toEqual({
       transactions: [
         {
-          id: "txn-1",
           date: "2026-03-01",
           amount: "-12.50",
           payee_name: "Grocer",
           category_name: "Food",
-          account_name: "Checking",
-          approved: true,
-          cleared: "cleared",
         },
       ],
       transaction_count: 1,
+      returned_count: 1,
+      offset: 0,
+      limit: 20,
+      has_more: false,
     });
   });
 

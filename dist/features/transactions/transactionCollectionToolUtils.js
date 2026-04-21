@@ -1,9 +1,25 @@
 import { z } from "zod";
 import { assertTransactionMonth, buildTransactionCollectionResult, compareTransactions, transactionFields, } from "./transactionQueryEngine.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
+const defaultTransactionProjectionFields = [
+    "date",
+    "amount",
+    "payee_name",
+    "category_name",
+];
+const DEFAULT_TRANSACTION_LIMIT = 20;
+function applyDefaultTransactionProjection(input) {
+    return {
+        ...input,
+        limit: input.limit ?? DEFAULT_TRANSACTION_LIMIT,
+        includeIds: input.includeIds ?? false,
+        fields: input.fields?.length ? input.fields : defaultTransactionProjectionFields,
+    };
+}
 async function runTransactionCollectionTool(input, api, fetchTransactions, options = {}) {
     try {
-        const normalizedInput = options.normalizeInput ? options.normalizeInput(input) : input;
+        const baseInput = options.normalizeInput ? options.normalizeInput(input) : input;
+        const normalizedInput = applyDefaultTransactionProjection(baseInput);
         const transactions = await withResolvedPlan(normalizedInput.planId, api, async (planId) => fetchTransactions(api, planId, normalizedInput));
         const sortedTransactions = Array.from(transactions)
             .filter((transaction) => !transaction.deleted)

@@ -10,7 +10,7 @@ export const inputSchema = {
     fromMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).default("current").describe("The first month in ISO format or the string 'current'."),
     toMonth: z.string().regex(/^(current|\d{4}-\d{2}-\d{2})$/).optional().describe("The last month in ISO format. Defaults to fromMonth."),
     topN: z.number().int().min(1).max(10).default(5).describe("Maximum number of top rollups to include."),
-    format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format."),
+    format: z.enum(["compact", "pretty", "prose"]).default("compact").describe("Output format. Prefer compact for token efficiency; use prose only when a readable narrative is explicitly needed."),
 };
 function buildCategoryGroupLookup(categoryGroups) {
     return new Map(categoryGroups.flatMap((group) => group.categories

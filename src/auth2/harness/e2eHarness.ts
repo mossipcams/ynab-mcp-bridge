@@ -79,6 +79,11 @@ export async function runClientFlowWithFakeProvider(input: {
     codeVerifier,
     redirectUri: input.redirectUri,
   });
+
+  if (!tokens.refresh_token) {
+    throw new Error("Expected refresh_token from the authorization-code exchange.");
+  }
+
   const refreshed = await core.exchangeRefreshToken({
     clientId: input.clientId,
     refreshToken: tokens.refresh_token,

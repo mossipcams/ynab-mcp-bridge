@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { toErrorResult, toProseResult, toTextResult, withResolvedPlan } from "./planToolUtils.js";
 
@@ -158,6 +158,45 @@ describe("plan tool response helpers", () => {
     });
 
     await expect(followUp).resolves.toBe("plan-a");
+  });
+
+  it("retries default-plan discovery after a shared lookup failure", async () => {
+    const getPlans = vi
+      .fn<() => Promise<{
+        data: {
+          plans: Array<{ id: string }>;
+          default_plan?: { id: string };
+        };
+      }>>()
+      .mockRejectedValueOnce(new Error("YNAB unavailable"))
+      .mockResolvedValueOnce({
+        data: {
+          plans: [{ id: "plan-a" }],
+          default_plan: { id: "plan-a" },
+        },
+      });
+    const api = {
+      plans: {
+        getPlans,
+      },
+    };
+
+    await expect(Promise.allSettled([
+      withResolvedPlan(undefined, api, async (planId) => planId),
+      withResolvedPlan(undefined, api, async (planId) => planId),
+    ])).resolves.toEqual([
+      {
+        status: "rejected",
+        reason: new Error("YNAB unavailable"),
+      },
+      {
+        status: "rejected",
+        reason: new Error("YNAB unavailable"),
+      },
+    ]);
+
+    await expect(withResolvedPlan(undefined, api, async (planId) => planId)).resolves.toBe("plan-a");
+    expect(getPlans).toHaveBeenCalledTimes(2);
   });
 
   it("keeps configured-plan lookup explicit instead of importing ynab runtime context", async () => {

@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
+import * as GetCategoryChangeExplanationTool from "./features/financialHealth/GetCategoryChangeExplanationTool.js";
 import { registerServerTools } from "./serverRuntime.js";
 import * as GetBudgetHealthSummaryTool from "./features/financialHealth/GetBudgetHealthSummaryTool.js";
 import * as GetCashFlowSummaryTool from "./features/financialHealth/GetCashFlowSummaryTool.js";
 import * as GetFinancialSnapshotTool from "./features/financialHealth/GetFinancialSnapshotTool.js";
 import * as GetMonthlyReviewTool from "./features/financialHealth/GetMonthlyReviewTool.js";
+import * as GetPayeeSpikeExplanationTool from "./features/financialHealth/GetPayeeSpikeExplanationTool.js";
+import * as GetSpendingChangeExplanationTool from "./features/financialHealth/GetSpendingChangeExplanationTool.js";
 import * as GetSpendingSummaryTool from "./features/financialHealth/GetSpendingSummaryTool.js";
 import * as ListAccountsTool from "./tools/ListAccountsTool.js";
 
@@ -924,6 +927,456 @@ describe("finance summary tools", () => {
       "Top Categories: Rent 220.00, Groceries 170.00",
       "Top Payees: Landlord 220.00, Trader Joe's 125.00",
     ].join("\n"));
+  });
+
+  it("explains spending change between two periods with compact category and payee drivers", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-02-02",
+                amount: -120000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-groceries",
+                category_name: "Groceries",
+                payee_id: "payee-market",
+                payee_name: "Market",
+              },
+              {
+                id: "tx-2",
+                date: "2026-02-10",
+                amount: -200000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-rent",
+                category_name: "Rent",
+                payee_id: "payee-landlord",
+                payee_name: "Landlord",
+              },
+              {
+                id: "tx-3",
+                date: "2026-03-05",
+                amount: -180000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-groceries",
+                category_name: "Groceries",
+                payee_id: "payee-market",
+                payee_name: "Market",
+              },
+              {
+                id: "tx-4",
+                date: "2026-03-08",
+                amount: -120000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-dining",
+                category_name: "Dining",
+                payee_id: "payee-restaurant",
+                payee_name: "Restaurant",
+              },
+              {
+                id: "tx-5",
+                date: "2026-03-12",
+                amount: -200000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-rent",
+                category_name: "Rent",
+                payee_id: "payee-landlord",
+                payee_name: "Landlord",
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetSpendingChangeExplanationTool.execute(
+      {
+        planId: "plan-1",
+        periodAFromMonth: "2026-02-01",
+        periodAToMonth: "2026-02-01",
+        periodBFromMonth: "2026-03-01",
+        periodBToMonth: "2026-03-01",
+        topN: 3,
+      },
+      api as any,
+    );
+
+    expect(api.transactions.getTransactions).toHaveBeenCalledWith("plan-1", "2026-02-01", undefined, undefined);
+    expect(parseText(result as any)).toEqual({
+      analysis_token: expect.any(String),
+      period_a: {
+        from_month: "2026-02-01",
+        to_month: "2026-02-01",
+        spent: "320.00",
+        transaction_count: 2,
+      },
+      period_b: {
+        from_month: "2026-03-01",
+        to_month: "2026-03-01",
+        spent: "500.00",
+        transaction_count: 3,
+      },
+      change: {
+        amount: "180.00",
+        direction: "increase",
+        percent: "56.25",
+      },
+      top_category_drivers: [
+        {
+          id: "cat-dining",
+          name: "Dining",
+          period_a_spent: "0.00",
+          period_b_spent: "120.00",
+          change: "120.00",
+          change_direction: "increase",
+        },
+        {
+          id: "cat-groceries",
+          name: "Groceries",
+          period_a_spent: "120.00",
+          period_b_spent: "180.00",
+          change: "60.00",
+          change_direction: "increase",
+        },
+      ],
+      top_payee_drivers: [
+        {
+          id: "payee-restaurant",
+          name: "Restaurant",
+          period_a_spent: "0.00",
+          period_b_spent: "120.00",
+          change: "120.00",
+          change_direction: "increase",
+        },
+        {
+          id: "payee-market",
+          name: "Market",
+          period_a_spent: "120.00",
+          period_b_spent: "180.00",
+          change: "60.00",
+          change_direction: "increase",
+        },
+      ],
+    });
+  });
+
+  it("supports token-based refinement for a single spending-change driver without refetching transactions", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-02-02",
+                amount: -120000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-groceries",
+                category_name: "Groceries",
+                payee_id: "payee-market",
+                payee_name: "Market",
+              },
+              {
+                id: "tx-2",
+                date: "2026-03-05",
+                amount: -180000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-groceries",
+                category_name: "Groceries",
+                payee_id: "payee-market",
+                payee_name: "Market",
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const initial = parseText(await GetSpendingChangeExplanationTool.execute(
+      {
+        planId: "plan-1",
+        periodAFromMonth: "2026-02-01",
+        periodAToMonth: "2026-02-01",
+        periodBFromMonth: "2026-03-01",
+        periodBToMonth: "2026-03-01",
+        topN: 3,
+      },
+      api as any,
+    ) as any);
+
+    const refined = parseText(await GetSpendingChangeExplanationTool.execute(
+      {
+        analysisToken: initial.analysis_token,
+        focusType: "category",
+        focusId: "cat-groceries",
+      } as any,
+      api as any,
+    ) as any);
+
+    expect(api.transactions.getTransactions).toHaveBeenCalledTimes(1);
+    expect(refined).toEqual({
+      analysis_token: initial.analysis_token,
+      focus_type: "category",
+      focus_id: "cat-groceries",
+      focus: {
+        id: "cat-groceries",
+        name: "Groceries",
+        period_a_spent: "120.00",
+        period_b_spent: "180.00",
+        change: "60.00",
+        change_direction: "increase",
+      },
+    });
+  });
+
+  it("explains category change with compact payee drivers", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-02-02",
+                amount: -70000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-groceries",
+                category_name: "Groceries",
+                payee_id: "payee-market",
+                payee_name: "Market",
+              },
+              {
+                id: "tx-2",
+                date: "2026-02-10",
+                amount: -50000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-groceries",
+                category_name: "Groceries",
+                payee_id: "payee-costco",
+                payee_name: "Costco",
+              },
+              {
+                id: "tx-3",
+                date: "2026-03-05",
+                amount: -140000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-groceries",
+                category_name: "Groceries",
+                payee_id: "payee-market",
+                payee_name: "Market",
+              },
+              {
+                id: "tx-4",
+                date: "2026-03-07",
+                amount: -20000,
+                deleted: false,
+                transfer_account_id: null,
+                category_id: "cat-groceries",
+                category_name: "Groceries",
+                payee_id: "payee-farmers",
+                payee_name: "Farmers Market",
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetCategoryChangeExplanationTool.execute(
+      {
+        planId: "plan-1",
+        categoryId: "cat-groceries",
+        periodAFromMonth: "2026-02-01",
+        periodAToMonth: "2026-02-01",
+        periodBFromMonth: "2026-03-01",
+        periodBToMonth: "2026-03-01",
+        topN: 3,
+      },
+      api as any,
+    );
+
+    expect(parseText(result as any)).toEqual({
+      category_id: "cat-groceries",
+      category_name: "Groceries",
+      period_a: {
+        from_month: "2026-02-01",
+        to_month: "2026-02-01",
+        spent: "120.00",
+        transaction_count: 2,
+      },
+      period_b: {
+        from_month: "2026-03-01",
+        to_month: "2026-03-01",
+        spent: "160.00",
+        transaction_count: 2,
+      },
+      change: {
+        amount: "40.00",
+        direction: "increase",
+        percent: "33.33",
+      },
+      top_payee_drivers: [
+        {
+          id: "payee-market",
+          name: "Market",
+          period_a_spent: "70.00",
+          period_b_spent: "140.00",
+          change: "70.00",
+          change_direction: "increase",
+        },
+        {
+          id: "payee-costco",
+          name: "Costco",
+          period_a_spent: "50.00",
+          period_b_spent: "0.00",
+          change: "50.00",
+          change_direction: "decrease",
+        },
+        {
+          id: "payee-farmers",
+          name: "Farmers Market",
+          period_a_spent: "0.00",
+          period_b_spent: "20.00",
+          change: "20.00",
+          change_direction: "increase",
+        },
+      ],
+    });
+  });
+
+  it("explains a payee spike with compact category and account drivers", async () => {
+    const api = {
+      transactions: {
+        getTransactions: vi.fn().mockResolvedValue({
+          data: {
+            transactions: [
+              {
+                id: "tx-1",
+                date: "2026-02-02",
+                amount: -30000,
+                deleted: false,
+                transfer_account_id: null,
+                payee_id: "payee-amzn",
+                payee_name: "Amazon",
+                category_id: "cat-home",
+                category_name: "Home",
+                account_id: "acct-checking",
+                account_name: "Checking",
+              },
+              {
+                id: "tx-2",
+                date: "2026-03-05",
+                amount: -150000,
+                deleted: false,
+                transfer_account_id: null,
+                payee_id: "payee-amzn",
+                payee_name: "Amazon",
+                category_id: "cat-home",
+                category_name: "Home",
+                account_id: "acct-checking",
+                account_name: "Checking",
+              },
+              {
+                id: "tx-3",
+                date: "2026-03-06",
+                amount: -50000,
+                deleted: false,
+                transfer_account_id: null,
+                payee_id: "payee-amzn",
+                payee_name: "Amazon",
+                category_id: "cat-tech",
+                category_name: "Tech",
+                account_id: "acct-card",
+                account_name: "Credit Card",
+              },
+            ],
+          },
+        }),
+      },
+    };
+
+    const result = await GetPayeeSpikeExplanationTool.execute(
+      {
+        planId: "plan-1",
+        payeeId: "payee-amzn",
+        periodAFromMonth: "2026-02-01",
+        periodAToMonth: "2026-02-01",
+        periodBFromMonth: "2026-03-01",
+        periodBToMonth: "2026-03-01",
+        topN: 3,
+      },
+      api as any,
+    );
+
+    expect(parseText(result as any)).toEqual({
+      payee_id: "payee-amzn",
+      payee_name: "Amazon",
+      period_a: {
+        from_month: "2026-02-01",
+        to_month: "2026-02-01",
+        spent: "30.00",
+        transaction_count: 1,
+      },
+      period_b: {
+        from_month: "2026-03-01",
+        to_month: "2026-03-01",
+        spent: "200.00",
+        transaction_count: 2,
+      },
+      change: {
+        amount: "170.00",
+        direction: "increase",
+        percent: "566.67",
+      },
+      top_category_drivers: [
+        {
+          id: "cat-home",
+          name: "Home",
+          period_a_spent: "30.00",
+          period_b_spent: "150.00",
+          change: "120.00",
+          change_direction: "increase",
+        },
+        {
+          id: "cat-tech",
+          name: "Tech",
+          period_a_spent: "0.00",
+          period_b_spent: "50.00",
+          change: "50.00",
+          change_direction: "increase",
+        },
+      ],
+      top_account_drivers: [
+        {
+          id: "acct-checking",
+          name: "Checking",
+          period_a_spent: "30.00",
+          period_b_spent: "150.00",
+          change: "120.00",
+          change_direction: "increase",
+        },
+        {
+          id: "acct-card",
+          name: "Credit Card",
+          period_a_spent: "0.00",
+          period_b_spent: "50.00",
+          change: "50.00",
+          change_direction: "increase",
+        },
+      ],
+    });
   });
 
   it("builds a compact cash flow summary with monthly trend buckets", async () => {

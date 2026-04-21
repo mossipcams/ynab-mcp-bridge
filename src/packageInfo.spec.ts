@@ -13,4 +13,24 @@ describe("packageInfo", () => {
       version: packageJson.version,
     });
   });
+
+  it("does not let callers mutate the cached package metadata", () => {
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    const packageInfo = getPackageInfo() as {
+      name: string;
+      version: string;
+    };
+
+    try {
+      packageInfo.version = "0.0.0-mutated";
+    } catch {
+      // Frozen objects may reject direct assignment in strict mode.
+    }
+
+    expect(getPackageVersion()).toBe(packageJson.version);
+    expect(getPackageInfo()).toMatchObject({
+      name: packageJson.name,
+      version: packageJson.version,
+    });
+  });
 });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getCachedPlanMonth } from "../../cachedYnabReads.js";
+import { createAnalysisSession } from "../../financialAnalysisState.js";
 import { formatAmount, formatPercent, previousMonths } from "./financialDiagnosticsUtils.js";
 import { buildCategorySpentLookup, buildSpendingAnomalies, isCreditCardPaymentCategoryName } from "../../financeToolUtils.js";
 import { toErrorResult, toTextResult, withResolvedPlan } from "../../runtimePlanToolUtils.js";
@@ -43,7 +44,16 @@ export async function execute(input, api) {
                 thresholdMultiplier,
                 topN,
             });
+            const session = createAnalysisSession(api, {
+                kind: "spending_anomalies",
+                planId,
+                payload: {
+                    latestMonth: input.latestMonth,
+                    anomalies,
+                },
+            });
             return toTextResult({
+                analysis_token: session.token,
                 latest_month: input.latestMonth,
                 baseline_month_count: baselineResponses.length,
                 anomaly_count: anomalies.length,
