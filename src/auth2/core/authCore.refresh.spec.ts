@@ -50,12 +50,18 @@ async function issueRefreshToken(core: ReturnType<typeof createAuthCore>) {
     state: "generated-2",
   });
 
-  return await core.exchangeAuthorizationCode({
+  const tokens = await core.exchangeAuthorizationCode({
     clientId: "client-a",
     code: "generated-3",
     codeVerifier,
     redirectUri: "https://claude.ai/oauth/callback",
   });
+
+  if (typeof tokens.refresh_token !== "string") {
+    throw new Error("Expected refresh_token from the authorization-code exchange.");
+  }
+
+  return tokens as typeof tokens & { refresh_token: string };
 }
 
 describe("auth core refresh flow", () => {
@@ -243,10 +249,11 @@ describe("auth core refresh flow", () => {
   it("issues new tokens on refresh when upstream never provided a refresh token", async () => {
     let nextId = 0;
     const providerRefreshCalls: string[] = [];
+    let currentTime = 1_700_000_000_000;
     const core = createAuthCore({
       config: createConfig(),
       createId: () => `generated-${++nextId}`,
-      now: () => 1_700_000_000_000,
+      now: () => currentTime,
       provider: {
         buildAuthorizationUrl(input) {
           return `https://id.example.com/oauth/authorize?state=${encodeURIComponent(input.state)}`;
@@ -254,6 +261,7 @@ describe("auth core refresh flow", () => {
         async exchangeAuthorizationCode() {
           return {
             access_token: "provider-access-token",
+            expires_in: 1800,
             subject: "user-123",
             token_type: "Bearer",
           };
@@ -289,11 +297,19 @@ describe("auth core refresh flow", () => {
     expect(providerRefreshCalls).toEqual([]);
     expect(refreshed).toEqual({
       access_token: "generated-7",
-      expires_in: 3600,
+      expires_in: 1800,
       refresh_token: "generated-8",
       scope: "openid",
       token_type: "Bearer",
     });
+
+    currentTime = 1_700_001_801_000;
+
+    await expect(core.exchangeRefreshToken({
+      clientId: "client-a",
+      refreshToken: refreshed.refresh_token,
+      scopes: ["openid"],
+    })).rejects.toThrow("Refresh token has expired.");
   });
 
   it("rejects a scope expansion on refresh", async () => {

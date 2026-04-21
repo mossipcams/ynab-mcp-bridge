@@ -130,6 +130,10 @@ describe("auth2 logging", () => {
       redirectUri: "https://claude.ai/oauth/callback",
     });
 
+    if (typeof exchanged.refresh_token !== "string") {
+      throw new Error("Expected refresh_token from the authorization-code exchange.");
+    }
+
     await core.exchangeRefreshToken({
       clientId: "client-a",
       refreshToken: exchanged.refresh_token,
