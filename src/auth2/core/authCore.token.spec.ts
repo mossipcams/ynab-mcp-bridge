@@ -102,7 +102,7 @@ describe("auth core token exchange", () => {
     });
   });
 
-  it("omits a downstream refresh token when the upstream exchange did not return one", async () => {
+  it("always issues a downstream refresh token even when the upstream exchange did not return one", async () => {
     let nextId = 0;
     const core = createAuthCore({
       config: createConfig(),
@@ -144,6 +144,7 @@ describe("auth core token exchange", () => {
     expect(tokens).toEqual({
       access_token: "generated-4",
       expires_in: 1800,
+      refresh_token: "generated-6",
       scope: "openid profile",
       token_type: "Bearer",
     });

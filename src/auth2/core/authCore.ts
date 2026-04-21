@@ -111,6 +111,22 @@ function getUpstreamAccessTokenTtlSec(upstreamTokens: Record<string, unknown>) {
   return Math.floor(expiresIn);
 }
 
+function getUpstreamAccessTokenExpiresAt(now: number, upstreamTokens: Record<string, unknown>) {
+  const upstreamAccessTokenTtlSec = getUpstreamAccessTokenTtlSec(upstreamTokens);
+
+  return upstreamAccessTokenTtlSec === undefined
+    ? undefined
+    : now + upstreamAccessTokenTtlSec * 1000;
+}
+
+function getRemainingUpstreamAccessTokenTtlSec(now: number, upstreamAccessExpiresAt: number | undefined) {
+  if (upstreamAccessExpiresAt === undefined) {
+    return undefined;
+  }
+
+  return Math.floor((upstreamAccessExpiresAt - now) / 1000);
+}
+
 async function resolveTokenExchangeOutcome(
   options: CreateAuthCoreOptions,
   input: {
@@ -122,6 +138,7 @@ async function resolveTokenExchangeOutcome(
     scope: string[];
     subject: string;
     transactionId: string;
+    upstreamAccessExpiresAt?: number;
     upstreamTokens: Record<string, unknown>;
   },
 ) {
@@ -138,16 +155,31 @@ async function resolveTokenExchangeOutcome(
       })
     : undefined;
   const grantProps = callbackResult?.newProps ?? currentProps;
-  const upstreamAccessTokenTtlSec = getUpstreamAccessTokenTtlSec(input.upstreamTokens);
+  const upstreamAccessTokenTtlSec = input.upstreamAccessExpiresAt === undefined
+    ? getUpstreamAccessTokenTtlSec(input.upstreamTokens)
+    : getRemainingUpstreamAccessTokenTtlSec(options.now(), input.upstreamAccessExpiresAt);
   const defaultAccessTokenTtlSec = upstreamAccessTokenTtlSec === undefined
     ? input.defaultAccessTokenTtlSec
     : Math.min(input.defaultAccessTokenTtlSec, upstreamAccessTokenTtlSec);
+  const defaultRefreshTokenTtlSec = upstreamAccessTokenTtlSec === undefined
+    ? input.defaultRefreshTokenTtlSec
+    : Math.min(input.defaultRefreshTokenTtlSec, upstreamAccessTokenTtlSec);
+  const accessTokenTtlSec = callbackResult?.accessTokenTtlSec === undefined
+    ? defaultAccessTokenTtlSec
+    : upstreamAccessTokenTtlSec === undefined
+      ? callbackResult.accessTokenTtlSec
+      : Math.min(callbackResult.accessTokenTtlSec, upstreamAccessTokenTtlSec);
+  const refreshTokenTtlSec = callbackResult?.refreshTokenTtlSec === undefined
+    ? defaultRefreshTokenTtlSec
+    : upstreamAccessTokenTtlSec === undefined
+      ? callbackResult.refreshTokenTtlSec
+      : Math.min(callbackResult.refreshTokenTtlSec, upstreamAccessTokenTtlSec);
 
   return {
     accessTokenProps: callbackResult?.accessTokenProps ?? grantProps,
-    accessTokenTtlSec: callbackResult?.accessTokenTtlSec ?? defaultAccessTokenTtlSec,
+    accessTokenTtlSec,
     grantProps,
-    refreshTokenTtlSec: callbackResult?.refreshTokenTtlSec ?? input.defaultRefreshTokenTtlSec,
+    refreshTokenTtlSec,
   };
 }
 
@@ -352,10 +384,11 @@ export function createAuthCore(options: CreateAuthCoreOptions) {
 
     const accessToken = options.createId();
     const grantId = options.createId();
-    const upstreamRefreshToken = typeof authorizationCode.upstreamTokens["refresh_token"] === "string"
-      ? authorizationCode.upstreamTokens["refresh_token"]
-      : undefined;
-    const refreshToken = upstreamRefreshToken ? options.createId() : undefined;
+    const refreshToken = options.createId();
+    const upstreamAccessExpiresAt = getUpstreamAccessTokenExpiresAt(
+      options.now(),
+      authorizationCode.upstreamTokens,
+    );
     const tokenExchangeOutcome = await resolveTokenExchangeOutcome(options, {
       clientId: authorizationCode.clientId,
       ...(authorizationCode.props === undefined ? {} : { currentProps: authorizationCode.props }),
@@ -365,6 +398,7 @@ export function createAuthCore(options: CreateAuthCoreOptions) {
       scope: authorizationCode.scopes,
       subject: authorizationCode.subject,
       transactionId: authorizationCode.transactionId,
+      ...(upstreamAccessExpiresAt === undefined ? {} : { upstreamAccessExpiresAt }),
       upstreamTokens: authorizationCode.upstreamTokens,
     });
 
@@ -375,6 +409,7 @@ export function createAuthCore(options: CreateAuthCoreOptions) {
       scopes: authorizationCode.scopes,
       subject: authorizationCode.subject,
       transactionId: authorizationCode.transactionId,
+      ...(upstreamAccessExpiresAt === undefined ? {} : { upstreamAccessExpiresAt }),
       upstreamTokens: authorizationCode.upstreamTokens,
     });
 
@@ -461,27 +496,37 @@ export function createAuthCore(options: CreateAuthCoreOptions) {
         ? grant.upstreamTokens["refresh_token"]
         : undefined;
 
-      if (!upstreamRefreshToken) {
-        throw new Error("Refresh token is missing upstream credentials.");
+      if (
+        !upstreamRefreshToken &&
+        typeof grant.upstreamAccessExpiresAt === "number" &&
+        grant.upstreamAccessExpiresAt <= options.now()
+      ) {
+        throw new Error("Refresh token has expired.");
       }
-
-      if (!options.provider.exchangeRefreshToken) {
-        throw new Error("Provider refresh-token exchange is not configured.");
-      }
-
-      const refreshedUpstreamTokens = await options.provider.exchangeRefreshToken({
-        refreshToken: upstreamRefreshToken,
-      });
 
       const accessToken = options.createId();
       const nextRefreshToken = options.createId();
-      const mergedUpstreamTokens = {
-        ...grant.upstreamTokens,
-        ...refreshedUpstreamTokens,
-        refresh_token: typeof refreshedUpstreamTokens["refresh_token"] === "string"
-          ? refreshedUpstreamTokens["refresh_token"]
-          : upstreamRefreshToken,
-      };
+      let mergedUpstreamTokens = grant.upstreamTokens;
+      let upstreamAccessExpiresAt = grant.upstreamAccessExpiresAt;
+
+      if (upstreamRefreshToken) {
+        if (!options.provider.exchangeRefreshToken) {
+          throw new Error("Provider refresh-token exchange is not configured.");
+        }
+
+        const refreshedUpstreamTokens = await options.provider.exchangeRefreshToken({
+          refreshToken: upstreamRefreshToken,
+        });
+
+        mergedUpstreamTokens = {
+          ...grant.upstreamTokens,
+          ...refreshedUpstreamTokens,
+          refresh_token: typeof refreshedUpstreamTokens["refresh_token"] === "string"
+            ? refreshedUpstreamTokens["refresh_token"]
+            : upstreamRefreshToken,
+        };
+        upstreamAccessExpiresAt = getUpstreamAccessTokenExpiresAt(options.now(), mergedUpstreamTokens);
+      }
       const tokenExchangeOutcome = await resolveTokenExchangeOutcome(options, {
         clientId: grant.clientId,
         ...(grant.props === undefined ? {} : { currentProps: grant.props }),
@@ -491,17 +536,20 @@ export function createAuthCore(options: CreateAuthCoreOptions) {
         scope: requestedScopes,
         subject: grant.subject,
         transactionId: grant.transactionId,
+        ...(upstreamAccessExpiresAt === undefined ? {} : { upstreamAccessExpiresAt }),
         upstreamTokens: mergedUpstreamTokens,
       });
 
       options.store.updateGrant(grant.grantId, Object.keys(tokenExchangeOutcome.grantProps).length === 0
         ? {
             scopes: requestedScopes,
+            ...(upstreamAccessExpiresAt === undefined ? {} : { upstreamAccessExpiresAt }),
             upstreamTokens: mergedUpstreamTokens,
           }
         : {
             props: tokenExchangeOutcome.grantProps,
             scopes: requestedScopes,
+            ...(upstreamAccessExpiresAt === undefined ? {} : { upstreamAccessExpiresAt }),
             upstreamTokens: mergedUpstreamTokens,
           });
 
