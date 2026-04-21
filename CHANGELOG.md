@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.18.0...ynab-mcp-bridge-v0.18.1) (2026-04-21)
+
+
+### Bug Fixes
+
+* always issue downstream refresh token regardless of upstream ([7482537](https://github.com/mossipcams/ynab-mcp-bridge/commit/7482537feeca0d16d5b20fa1e40abfe971e71055))
+* cap local refresh lifetime to upstream expiry ([cb41f83](https://github.com/mossipcams/ynab-mcp-bridge/commit/cb41f83cc4c1072b2200ac0adefff8016f3dea3f))
+
 ## [0.18.0](https://github.com/mossipcams/ynab-mcp-bridge/compare/ynab-mcp-bridge-v0.17.3...ynab-mcp-bridge-v0.18.0) (2026-04-20)
 
 
