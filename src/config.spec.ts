@@ -427,10 +427,9 @@ describe("config", () => {
     };
     const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 
-    expect(packageJson.scripts?.preflight).toBe(
-      "npm run test:ci && npm run test:coverage && npm run lint:deps && npm run lint && npm run typecheck && npm run lint:unused && npm run build",
-    );
-    expect(readme).toContain("npm run preflight");
+    expect(packageJson.scripts?.["pr:ci"]).toBe("node ./scripts/local-ci.mjs");
+    expect(packageJson.scripts?.preflight).toBe("npm run pr:ci");
+    expect(readme).toContain("npm run pr:ci");
     expect(readme).toContain("auth2.config.example.json");
     expect(readme).toContain("MCP_AUTH2_CONFIG_PATH");
     expect(readme).toContain("With an auth2 config file in place, the minimal remote OAuth env surface is:");

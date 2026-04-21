@@ -34,7 +34,7 @@ It gives MCP clients a shared YNAB backend over either:
 ```bash
 npm install
 npm run build
-npm run preflight
+npm run pr:ci
 ```
 
 Build artifact policy:
@@ -66,13 +66,15 @@ npm run start:stdio
 
 ### Local CI Preflight
 
-Run this before pushing when you want one command that mirrors the required CI gates:
+Run this before creating a PR when you want one command that mirrors the required CI gates instead of running individual test commands:
 
 ```bash
-npm run preflight
+npm run pr:ci
 ```
 
-`preflight` runs the required local checks from CI: `test:ci`, `test:coverage`, `lint:deps`, `lint`, `typecheck`, `lint:unused`, and `build`. It intentionally does not include the advisory-only `lint:oxlint` step because that CI job is non-blocking.
+`pr:ci` runs the required local checks from CI: `test:ci`, `test:coverage`, `lint:deps`, `lint`, `typecheck`, `lint:unused`, and `build`. It intentionally does not include the advisory-only `lint:oxlint` step because that CI job is non-blocking.
+
+`preflight` remains available as a backward-compatible alias, but the default pre-PR workflow should be `npm run pr:ci`.
 
 For advisory quality reporting outside the blocking preflight gate, you can also run:
 
